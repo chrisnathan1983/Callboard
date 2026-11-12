@@ -97,12 +97,6 @@ func rule(id: StringName, trigger: StringName) -> Rule:
 	engine.rules.append(r)
 	return r
 
-func _step(verb: StringName, args: Array, fn: Callable) -> Step:
-	var s := Step.new(fn)
-	s.verb = verb
-	s.args = args
-	return s
-
 func _legacy_verb(verb: StringName, args: Array) -> Step:
 	var step: Step = verbs.callv(verb, args)
 	step.verb = verb
