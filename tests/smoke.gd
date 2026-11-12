@@ -17,6 +17,7 @@ func _initialize() -> void:
 	# --- A. Runtime validator ------------------------------------------------------
 	ok = _check("zone validates clean", zone.validate().is_empty()) and ok
 	var bad := Zone.new()
+	bad.build()
 	var br := bad.rule(&"typo", &"relay:ghost")
 	br.forbids = [&"nope"]
 	var problems := bad.validate()
@@ -25,9 +26,38 @@ func _initialize() -> void:
 	ok = _check("validator: empty rule", problems.any(func(p): return "does nothing" in p)) and ok
 	bad.free()
 
+	var validator_bb := Blackboard.new()
+	validator_bb.define(&"lamp_on", &"local", false)
+	var cycle_a := Rule.new(&"loop_a", &"relay:a")
+	var cycle_step := Step.new()
+	cycle_step.emits = &"b"
+	cycle_a.steps.append(cycle_step)
+	var cycle_b := Rule.new(&"loop_b", &"relay:b")
+	cycle_b.emits = &"a"
+	var cycle_problems := RuleValidator.validate(
+		[cycle_a, cycle_b], validator_bb, [&"relay:a", &"relay:b"], [])
+	ok = _check("validator: detects relay cycle",
+		cycle_problems.any(func(p): return "relay cycle" in p and "'loop_a'" in p and "'loop_b'" in p)) and ok
+
+	var shared_a := Rule.new(&"shared_a", &"alarm")
+	var shared_b := Rule.new(&"shared_b", &"alarm")
+	var shared_problems := RuleValidator.validate(
+		[shared_a, shared_b], validator_bb, [&"alarm"], [])
+	ok = _check("validator: flags overlapping shared trigger",
+		shared_problems.any(func(p): return "share trigger 'alarm'" in p and "'shared_a'" in p and "'shared_b'" in p)) and ok
+
+	var exclusive_a := Rule.new(&"exclusive_a", &"alarm")
+	exclusive_a.requires = [&"lamp_on"]
+	var exclusive_b := Rule.new(&"exclusive_b", &"alarm")
+	exclusive_b.forbids = [&"lamp_on"]
+	var exclusive_problems := RuleValidator.validate(
+		[exclusive_a, exclusive_b], validator_bb, [&"alarm"], [&"lamp_on"])
+	ok = _check("validator: accepts mutually exclusive shared trigger",
+		not exclusive_problems.any(func(p): return "share trigger 'alarm'" in p)) and ok
+
 	# --- B. Blackboard schema --------------------------------------------------------
-	ok = _check("saved key routes to saved_vars", zone.saved_vars.has(&"guard_calmed") and not zone.local_vars.has(&"guard_calmed")) and ok
-	ok = _check("local key routes to local_vars", zone.local_vars.has(&"lamp_on") and not zone.saved_vars.has(&"lamp_on")) and ok
+	ok = _check("saved key routes to saved_vars", zone.saved_vars.has(&"guard_calmed") and not zone.bb.local.has(&"guard_calmed")) and ok
+	ok = _check("local key routes to local_vars", zone.bb.local.has(&"lamp_on") and not zone.saved_vars.has(&"lamp_on")) and ok
 
 	# --- C. Authored resource -------------------------------------------------------
 	var src := FileAccess.get_file_as_string(ZONE_PATH)
@@ -64,6 +94,7 @@ func _initialize() -> void:
 	var nr: Dictionary = board.add_rule()
 	ok = _check("add rule: 10 rules, id unique, flagged as doing nothing", d["rules"].size() == 10 and d["problems"].any(func(p): return "'new_rule' does nothing" in p)) and ok
 	ok = _check("card move synced into model", d["rules"][1]["pos"] == Vector2(555, 77)) and ok
+	nr["requires"] = ["guard_calmed"]
 	nr["steps"].append(VerbCatalog.new_step(d, "score"))
 	nr["steps"].append(VerbCatalog.new_step(d, "show_node"))
 	ok = _check("new_step fills required args with a compatible prop", nr["steps"][1]["args"] == ["guard"]) and ok
@@ -222,7 +253,7 @@ func _initialize() -> void:
 	zone.rule_fired.connect(func(id, _e): fired_after.append(id))
 	await create_timer(4.5).timeout
 	ok = _check("saved var persists", zone.saved_vars.get(&"guard_calmed", false)) and ok
-	ok = _check("local vars reset", not zone.local_vars.get(&"treat_out", false)) and ok
+	ok = _check("local vars reset", not zone.bb.local.get(&"treat_out", false)) and ok
 	ok = _check("no rules fire after reload", fired_after.is_empty()) and ok
 	ok = _check("reward prop restored", (zone.get_node("RewardProp") as Node3D).visible) and ok
 	ok = _check("live board bound (9 rules)", main.hud.board._data["rules"].size() == 9) and ok

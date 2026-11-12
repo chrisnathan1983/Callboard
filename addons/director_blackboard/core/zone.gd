@@ -18,6 +18,7 @@ var saved_vars := {}    # injected by the manager; survives unloads
 var fired := {}         # injected by the manager; latches `once` rules
 #var _saved_keys := {}
 var bb: Blackboard
+var engine: RuleEngine
 
 ## Events that come from outside the rules (props, input, the manager). Zones list theirs.
 var external_events: Array[StringName] = [&"arrive"]
@@ -37,6 +38,8 @@ func _ready() -> void:
 ## instance to inspect a zone without running it.
 func build() -> void:
 	bb = Blackboard.new(saved_vars)
+	engine = RuleEngine.new(bb, fired, func(s): return get_tree().create_timer(s).timeout)
+	
 	_build_props()
 	if definition:
 		definition.apply_blackboard(self)
@@ -138,44 +141,45 @@ func alive(r: Rule, gen: int) -> bool:
 ## Returns human-readable problems; empty means the wiring is consistent.
 ## Messages quote rule ids as 'id' so the Rule Board can badge the right card.
 func validate() -> Array[String]:
-	var problems: Array[String] = []
-	var emitted := {}
-	var settable := {}
-	var seen := {}
-	for k in external_vars:
-		settable[k] = true
-	for r in rules:
-		if seen.has(r.id):
-			problems.append("duplicate rule id '%s'" % r.id)
-		seen[r.id] = true
-		if r.emits != &"":
-			emitted["relay:" + r.emits] = true
-		for s in r.steps:
-			if s.emits != &"":
-				emitted["relay:" + s.emits] = true
-			for k in s.sets:
-				settable[k] = true
-				if not bb.has(k):
-					problems.append("rule '%s' writes '%s' which is not declared on the Blackboard" % [r.id, k])
-	for r in rules:
-		if r.trigger == &"":
-			problems.append("rule '%s' has no trigger" % r.id)
-		elif not emitted.has(r.trigger) and not external_events.has(r.trigger):
-			problems.append("rule '%s' listens to '%s' but nothing emits it and it is not a declared external event" % [r.id, r.trigger])
-		for k in r.requires + r.forbids + r.cancel_if:
-			if not bb.has(k):
-				problems.append("rule '%s' checks key '%s' which is not declared on the Blackboard" % [r.id, k])
-			elif not settable.has(k):
-				problems.append("rule '%s' checks key '%s' but nothing sets it" % [r.id, k])
-		for s in r.steps:
-			if s.args.has(null):
-				problems.append("rule '%s' has a '%s' step with an unset prop" % [r.id, s.verb])
-		if r.steps.is_empty() and r.emits == &"":
-			problems.append("rule '%s' does nothing (no steps, no emit)" % r.id)
-	for event in emitted:
-		if not rules.any(func(x: Rule) -> bool: return x.trigger == event):
-			problems.append("'%s' is emitted but no rule listens to it" % event)
-	return problems
+	return RuleValidator.validate(rules, bb, external_events, external_vars)
+	# var problems: Array[String] = []
+	# var emitted := {}
+	# var settable := {}
+	# var seen := {}
+	# for k in external_vars:
+	# 	settable[k] = true
+	# for r in rules:
+	# 	if seen.has(r.id):
+	# 		problems.append("duplicate rule id '%s'" % r.id)
+	# 	seen[r.id] = true
+	# 	if r.emits != &"":
+	# 		emitted["relay:" + r.emits] = true
+	# 	for s in r.steps:
+	# 		if s.emits != &"":
+	# 			emitted["relay:" + s.emits] = true
+	# 		for k in s.sets:
+	# 			settable[k] = true
+	# 			if not bb.has(k):
+	# 				problems.append("rule '%s' writes '%s' which is not declared on the Blackboard" % [r.id, k])
+	# for r in rules:
+	# 	if r.trigger == &"":
+	# 		problems.append("rule '%s' has no trigger" % r.id)
+	# 	elif not emitted.has(r.trigger) and not external_events.has(r.trigger):
+	# 		problems.append("rule '%s' listens to '%s' but nothing emits it and it is not a declared external event" % [r.id, r.trigger])
+	# 	for k in r.requires + r.forbids + r.cancel_if:
+	# 		if not bb.has(k):
+	# 			problems.append("rule '%s' checks key '%s' which is not declared on the Blackboard" % [r.id, k])
+	# 		elif not settable.has(k):
+	# 			problems.append("rule '%s' checks key '%s' but nothing sets it" % [r.id, k])
+	# 	for s in r.steps:
+	# 		if s.args.has(null):
+	# 			problems.append("rule '%s' has a '%s' step with an unset prop" % [r.id, s.verb])
+	# 	if r.steps.is_empty() and r.emits == &"":
+	# 		problems.append("rule '%s' does nothing (no steps, no emit)" % r.id)
+	# for event in emitted:
+	# 	if not rules.any(func(x: Rule) -> bool: return x.trigger == event):
+	# 		problems.append("'%s' is emitted but no rule listens to it" % event)
+	# return problems
 
 # --- Verbs: each returns a Step ---------------------------------------------------
 
