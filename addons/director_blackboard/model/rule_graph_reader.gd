@@ -2,79 +2,33 @@
 class_name RuleGraphReader extends RefCounted
 ## Assembles the editable data the Rule Board works on.
 ##
-## data = ZoneSource model (vars, rules, groups) plus:
-##   path, definition    the authored resource (legacy scripts supply source instead)
-##   catalog, props      verbs and props discovered from a built zone instance
-##   external_events     events the zone declares as coming from outside its rules
-##   parse_error         non-empty if the owned functions use syntax the board cannot edit
-##   compiles, problems  result of building and validating the draft
-## Steps carry `emits` / `sets` copied from the runtime Step objects, so the graph knows
-## which relays a verb fires without hard-coding any verb.
+## Steps carry relay and Blackboard metadata copied from built Step objects.
 
-## Inspect a zone script without running it: build it on an unparented instance, read it, free it.
-static func inspect_script(path: String) -> Dictionary:
-	var script := load(path) as GDScript
-	if script == null or not script.can_instantiate():
-		return {"error": "Cannot load %s" % path}
-	var zone = script.new()
-	if not zone is Zone:
-		if zone is Node:
-			zone.free()
-		return {"error": "%s is not a Zone" % path}
-	zone.build()
-	var data := read(zone, path)
-	zone.engine.rules.clear()
-	zone.free()
-	return data
-
-static func read(zone: Zone, path: String) -> Dictionary:
-	if zone.definition:
-		var definition := zone.definition
-		var resource_data := {
-			"path": definition.resource_path, "definition": definition,
-			"vars": definition.variables.duplicate(true),
-			"rules": definition.rules.duplicate(true), "groups": definition.groups.duplicate(true),
-			"catalog": VerbCatalog.from_factory(zone.verbs), "props": VerbCatalog.props_of(zone),
-			"external_events": Array(zone.external_events).map(func(e): return String(e)),
-			"parse_error": "",
-		}
-		_read_results(resource_data, zone, zone.graph_errors.is_empty(), zone.graph_errors + zone.validate())
-		return resource_data
-	var source := FileAccess.get_file_as_string(path)
-	var parsed := ZoneSource.parse(source)
-	var events: Array = []
-	for e in zone.external_events:
-		events.append(String(e))
+static func read(zone: Zone) -> Dictionary:
+	var definition := zone.definition
+	if definition == null:
+		return {"error": "This zone has no ZoneDefinition assigned."}
 	var data := {
-		"path": path, "source": source,
-		"vars": parsed["vars"], "rules": parsed["rules"], "groups": parsed["groups"],
-		"catalog": VerbCatalog.from_zone(zone), "props": VerbCatalog.props_of(zone),
-		"external_events": events, "parse_error": parsed["error"],
-		"compiles": parsed["ok"], "problems": [],
+		"path": definition.resource_path, "definition": definition,
+		"vars": definition.variables.duplicate(true),
+		"rules": definition.rules.duplicate(true), "groups": definition.groups.duplicate(true),
+		"catalog": VerbCatalog.from_factory(zone.verbs), "props": VerbCatalog.props_of(zone),
+		"external_events": Array(zone.external_events).map(func(e): return String(e)),
 	}
-	if parsed["ok"]:
-		analyze(data)
-	else:
-		data["problems"] = ["This zone cannot be edited on the board: %s" % parsed["error"]]
+	_read_results(data, zone, zone.graph_errors.is_empty(), zone.graph_errors + zone.validate())
 	return data
 
-## Builds and validates a draft zone, then copies each step's
-## runtime `emits` / `sets` back onto the model. Call after every edit.
+## Builds and validates a draft zone, then copies step metadata back onto the model.
 static func analyze(data: Dictionary) -> void:
-	if data.has("definition"):
-		var draft := make_definition(data)
-		var instance := draft.instantiate()
-		if instance == null:
-			_read_results(data, null, false, ["Zone Script must extend Zone."])
-			return
-		instance.build()
-		_read_results(data, instance, instance.graph_errors.is_empty(), instance.graph_errors + instance.validate())
-		instance.engine.rules.clear()
-		instance.free()
+	var draft := make_definition(data)
+	var instance := draft.instantiate()
+	if instance == null:
+		_read_results(data, null, false, ["Zone Script must extend Zone."])
 		return
-	var res := ZonePreview.run(ZoneSource.generate(data["source"], data))
-	_read_results(data, res["zone"], res["ok"], res["problems"])
-	ZonePreview.dispose(res)
+	instance.build()
+	_read_results(data, instance, instance.graph_errors.is_empty(), instance.graph_errors + instance.validate())
+	instance.engine.rules.clear()
+	instance.free()
 
 static func make_definition(data: Dictionary) -> ZoneDefinition:
 	var original: ZoneDefinition = data["definition"]
@@ -85,9 +39,6 @@ static func make_definition(data: Dictionary) -> ZoneDefinition:
 	draft.variables = data["vars"].duplicate(true)
 	draft.rules = data["rules"].duplicate(true)
 	draft.groups = data["groups"].duplicate(true)
-	for variable in draft.variables:
-		variable.erase("default_expr")
-		variable.erase("note_pad")
 	for rule in draft.rules:
 		for step in rule["steps"]:
 			step.erase("emits")
@@ -103,7 +54,7 @@ static func inspect_definition(path: String) -> Dictionary:
 	if instance == null:
 		return {"error": "Assign a Zone script to %s" % path.get_file()}
 	instance.build()
-	var data := read(instance, path)
+	var data := read(instance)
 	instance.engine.rules.clear()
 	instance.free()
 	return data

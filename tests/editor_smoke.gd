@@ -17,9 +17,9 @@ func _initialize() -> void:
 		definition.external_events.size() == 4 and definition.variables.size() == 3
 		and not definition.rules.is_empty() and definition.rules.size() == data["rules"].size()
 		and definition.groups.size() == 3) and ok
-	ok = _check("reader: no parse error, compiles, no problems", data["parse_error"] == "" and data["compiles"] and data["problems"].is_empty()) and ok
+	ok = _check("reader: compiles with no problems", data["compiles"] and data["problems"].is_empty()) and ok
 	ok = _check("reader: every rule has a saved position", data["rules"].all(func(r): return r["has_pos"])) and ok
-	ok = _check("reader: step text keeps source expressions", ZoneSource.step_text(data["rules"][1]["steps"][1]) == "light(lamp, true, 3.0).after(0.25)") and ok
+	ok = _check("reader: step text keeps source expressions", ExprText.step_text(data["rules"][1]["steps"][1]) == "light(lamp, true, 3.0).after(0.25)") and ok
 	ok = _check("reader: step emits come from runtime Steps", data["rules"][0]["steps"][0]["emits"] == "standoff_tick") and ok
 	ok = _check("catalog: 12 verbs incl. typed params", data["catalog"].size() == 12 and VerbCatalog.find(data["catalog"], "move_to")["args"][2]["type"] == TYPE_VECTOR3) and ok
 	ok = _check("props discovered", data["props"].any(func(p): return p["name"] == "guard")) and ok
@@ -62,7 +62,7 @@ func _initialize() -> void:
 	ok = _check("disconnect: trigger cleared and flagged", nr["trigger"] == "" and d["problems"].any(func(p): return "'new_rule' has no trigger" in p)) and ok
 
 	board.duplicate_rule("new_rule")
-	ok = _check("duplicate: unique id", ZoneSource.rule_ids(d).has("new_rule_copy")) and ok
+	ok = _check("duplicate: unique id", AuthoredData.rule_ids(d).has("new_rule_copy")) and ok
 	board.delete_rule("new_rule_copy")
 	board.delete_rule("new_rule")
 	ok = _check("delete: original count restored; unheard relay is flagged",
@@ -75,7 +75,7 @@ func _initialize() -> void:
 	board.blackboard._on_add(0)
 	ok = _check("add variable (bool, local)", d["vars"].size() == 4 and d["vars"][3]["key"] == "new_var" and d["vars"][3]["scope"] == "local") and ok
 	ok = _check("added variable is generated", RuleGraphReader.make_definition(d).variables[3]["default"] == false) and ok
-	ZoneSource.rename_key(d, "lamp_on", "alarm_on")
+	AuthoredData.rename_key(d, "lamp_on", "alarm_on")
 	board._changed("")
 	ok = _check("rename key updates guards", _rule(d, "z1_caught")["requires"] == ["alarm_on"]) and ok
 	ok = _check("rename key makes implicit `light` key explicit", _rule(d, "z1_bark")["steps"][1]["args"] == ["lamp", "true", "3.0", '&"alarm_on"']) and ok
@@ -509,17 +509,6 @@ func _build_blackboard() -> void:
 	zone.engine.rules.clear()
 	zone.free()
 
-	var legacy := ZonePreview.run("""@tool
-extends Zone
-func _build_blackboard() -> void:
-	define_local(&"ready", false)
-func _build_rules() -> void:
-	var r := rule(&"legacy", &"arrive")
-	r.steps = [set_var(&"ready")]
-""")
-	ok = _check("script-authored rules still build through Zone's legacy verbs",
-		legacy["ok"] and legacy["problems"].is_empty()) and ok
-	ZonePreview.dispose(legacy)
 	return ok
 
 func _rule(d: Dictionary, id: String) -> Dictionary:

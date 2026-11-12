@@ -112,7 +112,7 @@ func _build_rule() -> void:
 	trig.add_child(pick)
 	_box.add_child(trig)
 
-	for g in ZoneSource.GUARDS:
+	for g in AuthoredData.GUARDS:
 		_box.add_child(_guard_menu(g))
 
 	var once := CheckBox.new()
@@ -233,7 +233,7 @@ func _line(label: String, value: String, on_commit: Callable) -> void:
 func _set_id(t: String) -> void:
 	if t == _rule["id"]:
 		return
-	if t == "" or ZoneSource.rule_ids(_data).has(t) or not t.is_valid_identifier():
+	if t == "" or AuthoredData.rule_ids(_data).has(t) or not t.is_valid_identifier():
 		_rebuild_later()   # reject: restore the old text
 		return
 	_rule["state_key"] = _rule.get("state_key", _rule["id"])
@@ -371,7 +371,7 @@ func _set_arg(step: Dictionary, i: int, expr: String, spin: SpinBox = null) -> v
 
 func _arg_widget(step: Dictionary, i: int, param: Dictionary) -> Control:
 	var cur := _current(step, i, param)
-	var lit := ZoneSource.parse_literal(cur)
+	var lit := ExprText.parse_literal(cur)
 	match param["type"]:
 		TYPE_OBJECT:
 			var ob := OptionButton.new()
@@ -401,11 +401,11 @@ func _arg_widget(step: Dictionary, i: int, param: Dictionary) -> Control:
 				s.value = float(lit["value"])
 				var is_int: bool = param["type"] == TYPE_INT
 				s.value_changed.connect(func(v: float) -> void:
-					_set_arg(step, i, str(int(v)) if is_int else ZoneSource.format_literal(snappedf(v, 0.001)), s))
+					_set_arg(step, i, str(int(v)) if is_int else ExprText.format_literal(snappedf(v, 0.001)), s))
 				return s
 		TYPE_STRING:
 			if lit["ok"] and typeof(lit["value"]) == TYPE_STRING:
-				return _text_arg(step, i, String(lit["value"]), func(t: String) -> String: return ZoneSource.format_literal(t))
+				return _text_arg(step, i, String(lit["value"]), func(t: String) -> String: return ExprText.format_literal(t))
 		TYPE_STRING_NAME:
 			if param["name"] == "key":
 				var ob := OptionButton.new()

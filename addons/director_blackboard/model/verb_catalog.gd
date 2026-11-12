@@ -4,15 +4,8 @@ class_name VerbCatalog extends RefCounted
 
 ## [{name, args: [{name, type, class, default: expr text or ""}]}], sorted by name.
 static func from_factory(factory: CoreVerbs) -> Array:
-	return _from_object(factory)
-
-## Script-authored rules still call methods on the Zone.
-static func from_zone(zone: Zone) -> Array:
-	return _from_object(zone)
-
-static func _from_object(source: Object) -> Array:
 	var out: Array = []
-	for m in source.get_method_list():
+	for m in factory.get_method_list():
 		var verb: String = m["name"]
 		if verb.begins_with("_"):
 			continue
@@ -26,7 +19,7 @@ static func _from_object(source: Object) -> Array:
 		for i in margs.size():
 			var a: Dictionary = margs[i]
 			args.append({"name": String(a["name"]), "type": a["type"], "class": String(a.get("class_name", "")),
-				"default": ZoneSource.format_literal(defs[i - first_def]) if i >= first_def else ""})
+				"default": ExprText.format_literal(defs[i - first_def]) if i >= first_def else ""})
 		out.append({"name": verb, "args": args})
 	out.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a["name"] < b["name"])
 	return out

@@ -66,8 +66,9 @@ func _test_player_and_bump(zone: Zone, fired: Array[StringName]) -> bool:
 	enter_only.mode = TriggerArea.Mode.ENTER
 	var interactions: Array[StringName] = []
 	for event in [&"near", &"far"]:
-		var rule := zone.rule(event, event)
+		var rule := Rule.new(event, event)
 		rule.steps.append(Step.new(func(_ctx: Dictionary) -> void: interactions.append(event)))
+		zone.engine.rules.append(rule)
 	for frame in range(3):
 		await physics_frame
 	ok = _check("all test areas overlap the player",

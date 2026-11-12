@@ -1,45 +1,10 @@
 extends SceneTree
-## Deterministic parser, validator, router and clock-injection tests.
+## Deterministic validator, router and clock-injection tests.
 
 signal clock_tick
 
 func _initialize() -> void:
 	var ok := true
-
-	var source := """extends Zone
-func _build_blackboard() -> void:
-	define_local(&"armed", false)   # local note
-	define_saved(&"new_count", 3, &"old_count")   # saved value
-
-func _build_rules() -> void:
-	# @group: "Flow" rect=Rect2(10, 20, 600, 300)
-	var r: Rule
-	# @node: pos=Vector2(80, 90) group="Flow"
-	r = rule(&"first", &"arrive")
-	r.requires = [&"armed"]
-	r.once = true
-	r.reentry = Rule.ReentryPolicy.QUEUE
-	r.state_key = &"old_id"
-	r.emits = &"done"
-	r.steps = [
-		say(guard, "hello, world", 1.0).after(0.25),
-	]
-"""
-	var parsed := ZoneSource.parse(source)
-	var generated := ZoneSource.generate(source, parsed)
-	var reparsed := ZoneSource.parse(generated)
-	ok = _check("ZoneSource parses round-trip fixture", parsed["ok"] and reparsed["ok"]) and ok
-	ok = _check("ZoneSource round-trips vars, groups and rules",
-		reparsed["vars"] == parsed["vars"]
-		and reparsed["groups"] == parsed["groups"]
-		and reparsed["rules"] == parsed["rules"]) and ok
-	ok = _check("ZoneSource generation is stable",
-		ZoneSource.generate(generated, reparsed) == generated) and ok
-	ok = _check("script-authored save keys survive a round trip",
-		reparsed["vars"][1]["state_key"] == "old_count"
-		and reparsed["rules"][0]["state_key"] == "old_id") and ok
-	ok = _check("script-authored re-entry survives a round trip",
-		reparsed["rules"][0]["reentry"] == Rule.ReentryPolicy.QUEUE) and ok
 
 	var bb := Blackboard.new()
 	bb.define(&"lamp_on", &"local", false)

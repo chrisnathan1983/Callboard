@@ -38,7 +38,7 @@ The editor plugin is enabled in `project.godot`. Open the **Rule Board** tab in 
 - `scripts/` — demo harness, HUD, world setup, player, and reusable prop scripts.
 - `zones/zone_01/` — sample zone script, scene, and authored zone definition (`zone_01.tres`).
 - `game.tscn` — main scene; `project.godot` — project and plugin configuration.
-- `tests/unit.gd` — deterministic parser, validator, rule-engine guard, and injected-clock tests for delays and repeating relays.
+- `tests/unit.gd` — deterministic validator, rule-engine guard, and injected-clock tests for delays and repeating relays.
 - `tests/editor_smoke.gd` — Rule Board authoring and save integration tests.
 - `tests/smoke.gd` - runtime smoke test for the demo scene, player interactions, and the bump relay.
 
@@ -68,7 +68,7 @@ Resource step arguments use Godot Expression syntax. Typed zone props and script
 
 ### Rule re-entry
 
-Set **While running** in the rule inspector, or assign `r.reentry = Rule.ReentryPolicy.QUEUE` in a script-authored rule. The policy applies when an eligible trigger reaches a rule that is already running.
+Set **While running** in the rule inspector. The policy applies when an eligible trigger reaches a rule that is already running.
 
 | Policy | Behavior |
 | --- | --- |
@@ -82,11 +82,9 @@ Pending triggers recheck the rule's guards before they start. A once rule latche
 
 Resource-backed zones use `StagingVerbs` by default. Extend it to add to the standard verbs, or extend `CoreVerbs` for a factory with Blackboard writes, scoring, and repeating relays. Override `_make_verbs(context: StepContext) -> CoreVerbs` in the zone script to return your factory. Give each public verb typed parameters and a `Step` return type so it appears in the Rule Board. Return a `Step` with a callable that runs the behavior. Declare any keys the step writes in `sets` and any relay it emits in `emits`. The resource compiler fills in the verb name, arguments, and any authored delay.
 
-If a step emits a relay named by one of its arguments, set `Step.emit_arg` to that argument's zero-based index to support renaming in the Rule Board. Edit fixed relay names in the verb code. For script-authored zones, edit external event declarations in the zone script.
+If a step emits a relay named by one of its arguments, set `Step.emit_arg` to that argument's zero-based index to support renaming in the Rule Board. Edit fixed relay names in the verb code.
 
 For a step that waits internally, capture `engine.token()` on entry and check `engine.alive(payload["_rule"], token)` after each await before applying more effects. See `repeat_emit` for an example.
-
-Existing script-authored `_build_rules()` methods can still call the standard verbs on `Zone`. Move custom verbs used by a `.tres` definition into its factory.
 
 ### Runtime components
 

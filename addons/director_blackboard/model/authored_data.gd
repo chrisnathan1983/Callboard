@@ -1,6 +1,8 @@
 @tool
 class_name AuthoredData extends RefCounted
-## Dictionary defaults shared by the Rule Board and the script parser.
+## Creates and edits authored graph data.
+
+const GUARDS := ["requires", "forbids", "cancel_if"]
 
 static func new_rule(id: String, trigger: String) -> Dictionary:
 	return {
@@ -12,8 +14,49 @@ static func new_rule(id: String, trigger: String) -> Dictionary:
 static func new_step(verb: String, args: Array, delay := "") -> Dictionary:
 	return {"verb": verb, "args": args, "delay": delay, "emits": "", "sets": []}
 
-static func new_variable(key: String, scope: String, value: Variant, expression: String) -> Dictionary:
+static func new_variable(key: String, scope: String, value: Variant) -> Dictionary:
 	return {
-		"key": key, "scope": scope, "default": value, "default_expr": expression,
-		"note": "", "note_pad": "   ",
+		"key": key, "scope": scope, "default": value,
+		"note": "",
 	}
+
+static func unique_name(existing: Array, base: String) -> String:
+	if not existing.has(base):
+		return base
+	var n := 2
+	while existing.has("%s_%d" % [base, n]):
+		n += 1
+	return "%s_%d" % [base, n]
+
+static func rule_ids(data: Dictionary) -> Array:
+	return data["rules"].map(func(r: Dictionary) -> String: return r["id"])
+
+static func new_state_key() -> String:
+	return "@" + Crypto.new().generate_random_bytes(16).hex_encode()
+
+## Renames a Blackboard key everywhere the model references it: guard lists and any
+## step argument bound to a `key` parameter.
+static func rename_key(data: Dictionary, old: String, new_key: String) -> void:
+	for v in data["vars"]:
+		if v["key"] == old:
+			v["state_key"] = v.get("state_key", old)
+			v["key"] = new_key
+	for rd in data["rules"]:
+		for g in GUARDS:
+			rd[g] = rd[g].map(func(k: String) -> String: return new_key if k == old else k)
+		for s in rd["steps"]:
+			var verb := VerbCatalog.find(data["catalog"], s["verb"])
+			var params: Array = verb.get("args", [])
+			for i in params.size():
+				if params[i]["name"] != "key":
+					continue
+				var old_expr := '&"%s"' % old
+				if i < s["args"].size():
+					if s["args"][i] == old_expr:
+						s["args"][i] = '&"%s"' % new_key
+				elif params[i]["default"] == old_expr:
+					# The key was implicit (a parameter default): make it explicit so it follows the rename.
+					while s["args"].size() < i:
+						var p: Dictionary = params[s["args"].size()]
+						s["args"].append(p["default"] if p["default"] != "" else VerbCatalog.fallback(p, data))
+					s["args"].append('&"%s"' % new_key)

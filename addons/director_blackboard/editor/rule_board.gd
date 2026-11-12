@@ -304,7 +304,7 @@ func open_script(path: String) -> void:
 	_picker.tooltip_text = path
 	_dirty = false
 	_selected = ""
-	_show(RuleGraphReader.inspect_definition(path) if path.ends_with(".tres") else RuleGraphReader.inspect_script(path), true)
+	_show(RuleGraphReader.inspect_definition(path), true)
 
 func _on_picker(i: int) -> void:
 	if _dirty:
@@ -319,14 +319,14 @@ func bind_live(zone: Zone) -> void:
 	if _live and is_instance_valid(_live) and _live.rule_fired.is_connected(_on_live_rule_fired):
 		_live.rule_fired.disconnect(_on_live_rule_fired)
 	_live = zone
-	_path = zone.definition.resource_path if zone.definition else (zone.get_script() as Script).resource_path
+	_path = zone.definition.resource_path if zone.definition else ""
 	_picker.visible = false
 	_save_button.hide()
 	_reload_button.hide()
 	zone.rule_fired.connect(_on_live_rule_fired)
 	_selected = ""
 	_dirty = false
-	_show(RuleGraphReader.read(zone, _path), false)
+	_show(RuleGraphReader.read(zone), false)
 
 func _on_live_rule_fired(rule_id: StringName, event: StringName) -> void:
 	view.pulse(String(rule_id))
@@ -342,13 +342,13 @@ func _process(delta: float) -> void:
 
 func _show(data: Dictionary, editable: bool) -> void:
 	if data.has("error"):
-		_show({"rules": [], "groups": [], "vars": [], "external_events": [], "problems": [data["error"]], "parse_error": data["error"]}, false)
+		_show({"rules": [], "groups": [], "vars": [], "external_events": [], "problems": [data["error"]]}, false)
 		_status.text = data["error"]
 		return
 	_data = data
 	_expanded_connections.clear()
 	_clear_selection()
-	_editable = editable and data["parse_error"] == ""
+	_editable = editable
 	for b in _edit_buttons:
 		b.visible = editable
 	_create_tools.visible = editable
@@ -367,7 +367,7 @@ func _update_status() -> void:
 	_save_button.disabled = not _editable or _path.is_empty()
 	_undo_button.disabled = not _editable or _undo_stack.is_empty()
 	_redo_button.disabled = not _editable or _redo_stack.is_empty()
-	_event_button.disabled = not _editable or not _data.has("definition")
+	_event_button.disabled = not _editable
 	_connections_button.disabled = not _editable
 	var variable_count: int = _data["vars"].size()
 	var connection_count := RuleConnections.ids(_data).size()
@@ -590,7 +590,7 @@ func _confirm_event() -> void:
 
 func add_event(event_id: String) -> bool:
 	event_id = event_id.strip_edges()
-	if not _editable or not _data.has("definition") or event_id.is_empty() or _data["external_events"].has(event_id):
+	if not _editable or event_id.is_empty() or _data["external_events"].has(event_id):
 		return false
 	_data["external_events"].append(event_id)
 	_changed(_selected)
@@ -812,10 +812,10 @@ func add_rule(at := Vector2.INF) -> Dictionary:
 	if not _editable:
 		return {}
 	_sync_layout()
-	var id := ZoneSource.unique_name(ZoneSource.rule_ids(_data), "new_rule")
+	var id := AuthoredData.unique_name(AuthoredData.rule_ids(_data), "new_rule")
 	var trigger: String = _data["external_events"][0] if not _data["external_events"].is_empty() else "arrive"
 	var rd := AuthoredData.new_rule(id, trigger)
-	rd["state_key"] = ZoneSource.new_state_key()
+	rd["state_key"] = AuthoredData.new_state_key()
 	rd["pos"] = (view.view_center() - Vector2(125, 60) if at == Vector2.INF else at).round()
 	rd["has_pos"] = true
 	_data["rules"].append(rd)
@@ -831,8 +831,8 @@ func duplicate_rule(id: String) -> void:
 	if src.is_empty():
 		return
 	var rd: Dictionary = src.duplicate(true)
-	rd["id"] = ZoneSource.unique_name(ZoneSource.rule_ids(_data), id + "_copy")
-	rd["state_key"] = ZoneSource.new_state_key()
+	rd["id"] = AuthoredData.unique_name(AuthoredData.rule_ids(_data), id + "_copy")
+	rd["state_key"] = AuthoredData.new_state_key()
 	rd["pos"] = src["pos"] + Vector2(30, 30)
 	rd["has_pos"] = true
 	_data["rules"].append(rd)
@@ -858,7 +858,7 @@ func add_group(at := Vector2.INF) -> void:
 	_sync_layout()
 	var names: Array = _data["groups"].map(func(g: Dictionary) -> String: return g["name"])
 	var origin := view.view_center() - Vector2(150, 100) if at == Vector2.INF else at
-	_data["groups"].append({"name": ZoneSource.unique_name(names, "Group"), "rect": Rect2(origin.round(), Vector2(300, 200))})
+	_data["groups"].append({"name": AuthoredData.unique_name(names, "Group"), "rect": Rect2(origin.round(), Vector2(300, 200))})
 	_changed(_selected)
 
 func delete_group(group_name: String) -> void:
@@ -892,7 +892,7 @@ func connect_wire(source: Dictionary, to_id: String) -> void:
 		var relay: String = relays[clampi(source["port"], 0, relays.size() - 1)]
 		if relay == "":
 			# The unnamed rule-level port: name it after the rule.
-			relay = ZoneSource.unique_name(_all_relays(), from["id"] + "_done")
+			relay = AuthoredData.unique_name(_all_relays(), from["id"] + "_done")
 			from["emit"] = relay
 		target["trigger"] = "relay:" + relay
 	_changed(to_id)
@@ -924,24 +924,13 @@ func save() -> void:
 		_status.text = "Not saved: check invalid steps or script errors."
 		Style.tint(_status, Style.WARNING)
 		return
-	if _data.has("definition"):
-		var draft := RuleGraphReader.make_definition(_data)
-		var error := ResourceSaver.save(draft, _path)
-		if error != OK:
-			_status.text = "Save failed (error %d)" % error
-			Style.tint(_status, Style.WARNING)
-			return
-		_data["definition"] = draft
-	else:
-		var updated := ZoneSource.generate(_data["source"], _data)
-		var f := FileAccess.open(_path, FileAccess.WRITE)
-		if f == null:
-			_status.text = "Save failed (error %d)" % FileAccess.get_open_error()
-			Style.tint(_status, Style.WARNING)
-			return
-		f.store_string(updated)
-		f.close()
-		_data["source"] = updated
+	var draft := RuleGraphReader.make_definition(_data)
+	var error := ResourceSaver.save(draft, _path)
+	if error != OK:
+		_status.text = "Save failed (error %d)" % error
+		Style.tint(_status, Style.WARNING)
+		return
+	_data["definition"] = draft
 	_record_edit()
 	_saved_edit = _current_edit
 	_dirty = false

@@ -58,7 +58,7 @@ func apply_graph(zone: Zone) -> Array[String]:
 		for spec in entry["steps"]:
 			var step := _build_step(zone.verbs, spec, catalog, inputs)
 			if step == null:
-				problems.append("rule '%s' has an invalid step: %s" % [rule.id, ZoneSource.step_text(spec)])
+				problems.append("rule '%s' has an invalid step: %s" % [rule.id, ExprText.step_text(spec)])
 			else:
 				rule.steps.append(step)
 		built.append(rule)

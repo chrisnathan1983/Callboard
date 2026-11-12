@@ -37,8 +37,6 @@ func build() -> void:
 	_build_blackboard()
 	if definition:
 		graph_errors = definition.apply_graph(self)
-	else:
-		_build_rules()
 
 func _make_verbs(context: StepContext) -> CoreVerbs:
 	return StagingVerbs.new(context)
@@ -46,7 +44,6 @@ func _make_verbs(context: StepContext) -> CoreVerbs:
 func _build_props() -> void: pass
 ## Initialize values after authored defaults and props are available.
 func _build_blackboard() -> void: pass
-func _build_rules() -> void: pass
 ## Restore the resolved look of props from saved state without animation.
 func _restore_state() -> void: pass
 
@@ -99,51 +96,3 @@ func fire_relay_once(relay: StringName, latch: StringName, source_id: StringName
 
 func validate() -> Array[String]:
 	return RuleValidator.validate(engine.rules, bb, external_events, external_vars)
-
-# Script-authored rules call these methods directly. Resource rules use the factory.
-func rule(id: StringName, trigger: StringName) -> Rule:
-	var r := Rule.new(id, trigger)
-	engine.rules.append(r)
-	return r
-
-func _legacy_verb(verb: StringName, args: Array) -> Step:
-	var step: Step = verbs.callv(verb, args)
-	step.verb = verb
-	step.args = args
-	return step
-
-func show_node(n: Node3D, should_be_visible := true) -> Step:
-	return _legacy_verb(&"show_node", [n, should_be_visible])
-
-func pop(n: Node3D) -> Step:
-	return _legacy_verb(&"pop", [n])
-
-func bounce(n: Node3D) -> Step:
-	return _legacy_verb(&"bounce", [n])
-
-func light(n: Node3D, on: bool, duration := 0.0, key: StringName = &"lamp_on") -> Step:
-	return _legacy_verb(&"light", [n, on, duration, key])
-
-func say(n: Node3D, text: String, seconds := 1.0) -> Step:
-	return _legacy_verb(&"say", [n, text, seconds])
-
-func move_to(n: Node3D, dest: Node3D, offset := Vector3.ZERO, duration := 0.7) -> Step:
-	return _legacy_verb(&"move_to", [n, dest, offset, duration])
-
-func flash(m: MeshInstance3D) -> Step:
-	return _legacy_verb(&"flash", [m])
-
-func jump(m: MeshInstance3D) -> Step:
-	return _legacy_verb(&"jump", [m])
-
-func set_var(key: StringName, value: Variant = true) -> Step:
-	return _legacy_verb(&"set_var", [key, value])
-
-func score(points: int) -> Step:
-	return _legacy_verb(&"score", [points])
-
-func stun_player(seconds: float) -> Step:
-	return _legacy_verb(&"stun_player", [seconds])
-
-func repeat_emit(interval: float, tick: StringName) -> Step:
-	return _legacy_verb(&"repeat_emit", [interval, tick])

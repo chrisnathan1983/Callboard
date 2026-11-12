@@ -126,7 +126,6 @@ func _make_row(v: Dictionary) -> Control:
 func _default_editor(v: Dictionary) -> Control:
 	var set_default := func(value: Variant, spin: SpinBox = null) -> void:
 		v["default"] = value
-		v["default_expr"] = ZoneSource.format_literal(value)
 		if spin:
 			numeric_changed.emit(spin)
 		else:
@@ -167,7 +166,7 @@ func _rename(v: Dictionary, edit: LineEdit) -> void:
 	if not new_key.is_valid_identifier() or taken:
 		edit.text = v["key"]
 		return
-	ZoneSource.rename_key(_data, v["key"], new_key)
+	AuthoredData.rename_key(_data, v["key"], new_key)
 	edit.tooltip_text = new_key
 	changed.emit()
 
@@ -175,8 +174,8 @@ func _on_add(index: int) -> void:
 	var type_name: String = _add.get_popup().get_item_text(index)
 	var keys: Array = _data["vars"].map(func(x: Dictionary) -> String: return x["key"])
 	var value: Variant = TYPES[type_name]
-	var variable := AuthoredData.new_variable(ZoneSource.unique_name(keys, "new_var"), "local", value, ZoneSource.format_literal(value))
-	variable["state_key"] = ZoneSource.new_state_key()
+	var variable := AuthoredData.new_variable(AuthoredData.unique_name(keys, "new_var"), "local", value)
+	variable["state_key"] = AuthoredData.new_state_key()
 	_data["vars"].append(variable)
 	_rebuild()
 	changed.emit()

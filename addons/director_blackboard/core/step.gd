@@ -1,6 +1,6 @@
 @tool
 class_name Step extends RefCounted
-## One verb call inside a rule. Built by a verb factory or a script-authored rule.
+## One verb call inside a rule. Usually built by a verb factory.
 ## `verb` and `args` are display/serialization metadata for the Rule Board.
 
 var fn: Callable                       # func(ctx: Dictionary), may await or return a Signal

@@ -1,0 +1,39 @@
+@tool
+class_name ExprText extends RefCounted
+## Formats authored step expressions and recognizes literals for inspector controls.
+
+static func parse_literal(expr: String) -> Dictionary:
+	if expr == "true" or expr == "false":
+		return {"ok": true, "value": expr == "true"}
+	if RegEx.create_from_string('^-?[0-9]+$').search(expr):
+		return {"ok": true, "value": expr.to_int()}
+	if RegEx.create_from_string('^-?([0-9]+\\.[0-9]*|[0-9]*\\.[0-9]+)$').search(expr):
+		return {"ok": true, "value": expr.to_float()}
+	if expr.length() >= 2 and expr.begins_with('"') and expr.ends_with('"'):
+		return {"ok": true, "value": expr.substr(1, expr.length() - 2).replace('\\"', '"')}
+	if expr.length() >= 3 and expr.begins_with('&"') and expr.ends_with('"'):
+		return {"ok": true, "value": StringName(expr.substr(2, expr.length() - 3))}
+	return {"ok": false, "value": null}
+
+static func format_literal(v: Variant) -> String:
+	match typeof(v):
+		TYPE_BOOL:
+			return "true" if v else "false"
+		TYPE_INT:
+			return str(v)
+		TYPE_FLOAT:
+			var s := str(v)
+			if not "." in s and not "e" in s:
+				s += ".0"
+			return s
+		TYPE_STRING:
+			return '"%s"' % String(v).replace('"', '\\"')
+		TYPE_STRING_NAME:
+			return '&"%s"' % String(v)
+	return var_to_str(v)
+
+static func step_text(step: Dictionary) -> String:
+	var t := "%s(%s)" % [step["verb"], ", ".join(PackedStringArray(step["args"]))]
+	if step.get("delay", "") != "":
+		t += ".after(%s)" % step["delay"]
+	return t

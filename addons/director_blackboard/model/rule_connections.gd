@@ -39,8 +39,6 @@ static func impact(data: Dictionary, id: String) -> PackedStringArray:
 static func edit_error(data: Dictionary, id: String) -> String:
 	if id == RELAY_PREFIX or not ids(data).has(id):
 		return "This event or relay no longer exists."
-	if data["external_events"].has(id) and not data.has("definition"):
-		return "Edit this external declaration in the zone script."
 	if id.begins_with(RELAY_PREFIX) and not data["compiles"]:
 		return "Fix invalid steps before editing relay connections."
 	return ""
@@ -79,7 +77,7 @@ static func rename(data: Dictionary, id: String, new_name: String) -> String:
 			if arg < 0 or arg >= params.size():
 				return "Rename the relay in the %s verb used by %s." % [step["verb"], rule["id"]]
 			var value: Variant = new_name if params[arg]["type"] == TYPE_STRING else StringName(new_name)
-			VerbCatalog.set_arg(draft, step, arg, ZoneSource.format_literal(value))
+			VerbCatalog.set_arg(draft, step, arg, ExprText.format_literal(value))
 			renamed_steps.append(step)
 	_replace_references(draft, id, new_id)
 	RuleGraphReader.analyze(draft)
