@@ -4,6 +4,7 @@ class_name Player extends CharacterBody3D
 const SPEED := 6.0
 
 var stunned := false
+var _stun_timer: SceneTreeTimer
 var _reach: Area3D
 var _mat := StandardMaterial3D.new()
 
@@ -34,25 +35,42 @@ func _ready() -> void:
 func _physics_process(_delta: float) -> void:
 	var dir := Vector3.ZERO
 	if not stunned:
-		if Input.is_physical_key_pressed(KEY_W) or Input.is_physical_key_pressed(KEY_UP): dir.z -= 1
-		if Input.is_physical_key_pressed(KEY_S) or Input.is_physical_key_pressed(KEY_DOWN): dir.z += 1
-		if Input.is_physical_key_pressed(KEY_A) or Input.is_physical_key_pressed(KEY_LEFT): dir.x -= 1
-		if Input.is_physical_key_pressed(KEY_D) or Input.is_physical_key_pressed(KEY_RIGHT): dir.x += 1
-	velocity = dir.normalized() * SPEED
+		var input := Input.get_vector(&"move_left", &"move_right", &"move_forward", &"move_back")
+		dir = Vector3(input.x, 0.0, input.y)
+	velocity = dir * SPEED
 	move_and_slide()
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_E and not stunned:
+	if event.is_action_pressed(&"interact"):
 		interact()
 
 func interact() -> void:
+	if stunned or _reach == null:
+		return
+	var nearest: Area3D
+	var nearest_distance := INF
 	for area in _reach.get_overlapping_areas():
-		if area.has_method(&"interact"):
-			area.interact()
+		if not area.has_method(&"interact"):
+			continue
+		if area is TriggerArea and area.mode != TriggerArea.Mode.INTERACT:
+			continue
+		var distance := global_position.distance_squared_to(area.global_position)
+		if distance < nearest_distance:
+			nearest = area
+			nearest_distance = distance
+	if nearest:
+		nearest.interact()
 
 func stun(seconds: float) -> void:
+	if _stun_timer:
+		_stun_timer.time_left = maxf(_stun_timer.time_left, seconds)
+		return
 	stunned = true
 	_mat.albedo_color = Color(0.5, 0.5, 0.9)
-	await get_tree().create_timer(seconds).timeout
+	_stun_timer = get_tree().create_timer(seconds)
+	_stun_timer.timeout.connect(_end_stun)
+
+func _end_stun() -> void:
+	_stun_timer = null
 	stunned = false
 	_mat.albedo_color = Color(0.85, 0.1, 0.1)

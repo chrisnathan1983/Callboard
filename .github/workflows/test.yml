@@ -1,0 +1,50 @@
+name: Godot tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  headless:
+    name: Headless suites
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GODOT_VERSION: 4.7.2-stable
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Install Godot
+        run: |
+          binary="Godot_v${GODOT_VERSION}_linux.x86_64"
+          curl --fail --silent --show-error --location --retry 3 \
+            "https://github.com/godotengine/godot-builds/releases/download/${GODOT_VERSION}/${binary}.zip" \
+            --output "$RUNNER_TEMP/godot.zip"
+          unzip -q "$RUNNER_TEMP/godot.zip" -d "$RUNNER_TEMP/godot"
+          mv "$RUNNER_TEMP/godot/$binary" "$RUNNER_TEMP/godot/godot"
+          chmod +x "$RUNNER_TEMP/godot/godot"
+          echo "$RUNNER_TEMP/godot" >> "$GITHUB_PATH"
+
+      - name: Import project
+        run: |
+          godot --headless --path . --import 2>&1 | tee "$RUNNER_TEMP/godot-import.log"
+          if grep -E '^(SCRIPT )?ERROR:' "$RUNNER_TEMP/godot-import.log"; then
+            exit 1
+          fi
+
+      - name: Unit tests
+        run: godot --headless --path . --script res://tests/unit.gd
+
+      - name: Rule Board smoke test
+        run: godot --headless --path . --script res://tests/editor_smoke.gd
+
+      - name: Runtime smoke test
+        run: godot --headless --path . --script res://tests/smoke.gd

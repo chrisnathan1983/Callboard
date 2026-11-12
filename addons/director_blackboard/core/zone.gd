@@ -88,6 +88,15 @@ func is_set(key: StringName) -> bool:
 func fire(event: StringName, ctx := {}) -> void:
 	engine.fire(event, ctx)
 
+## Use a declared Blackboard key to latch a relay fired by gameplay code.
+func fire_relay_once(relay: StringName, latch: StringName, source_id: StringName, source_event: StringName) -> bool:
+	if bb == null or relay.is_empty() or not bb.has(latch) or is_set(latch):
+		return false
+	write_var(latch, true)
+	rule_fired.emit(source_id, source_event)
+	fire(StringName("relay:" + relay))
+	return true
+
 func validate() -> Array[String]:
 	return RuleValidator.validate(engine.rules, bb, external_events, external_vars)
 

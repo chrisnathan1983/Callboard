@@ -39,16 +39,18 @@ The editor plugin is enabled in `project.godot`. Open the **Rule Board** tab in 
 - `game.tscn` — main scene; `project.godot` — project and plugin configuration.
 - `tests/unit.gd` — deterministic parser, validator, rule-engine guard, and injected-clock tests for delays and repeating relays.
 - `tests/editor_smoke.gd` — Rule Board authoring and save integration tests.
-- `tests/smoke.gd` — short runtime smoke test.
+- `tests/smoke.gd` - runtime smoke test for the demo scene, player interactions, and the bump relay.
 
 Run the test scripts from the project directory:
 
 ```sh
-godot --headless --path . --editor --import --quit
+godot --headless --path . --import
 godot --headless --path . --script res://tests/unit.gd
 godot --headless --path . --script res://tests/editor_smoke.gd
 godot --headless --path . --script res://tests/smoke.gd
 ```
+
+The **Godot tests** GitHub Actions workflow imports the project and runs these suites on Ubuntu with Godot 4.7.2 for each push and pull request.
 
 ## Author a zone
 

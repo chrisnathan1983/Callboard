@@ -9,10 +9,9 @@ var fired_rules := {}    # persists across reloads (for `once` rules)
 var zone: Zone
 var score := 0
 var log_lines: Array[String] = []
-var hud
+@onready var hud: GameHud = $HUD
 
 func _ready() -> void:
-	hud = get_node("HUD")
 	hud.manager = self
 	load_zone()
 
@@ -24,7 +23,7 @@ func load_zone_scene(scene: PackedScene) -> void:
 	zone.saved_vars = saved_vars      # by reference, as a manager would inject them
 	zone.fired = fired_rules
 	add_child(zone)                   # _ready() builds props, Blackboard, rules
-	zone.scored.connect(func(p: int) -> void: score += p)
+	zone.scored.connect(_on_scored)
 	zone.rule_fired.connect(_on_rule_fired)
 	hud.bind_zone(zone)
 	zone.activate()
@@ -42,6 +41,9 @@ func clear_zone(reset: bool) -> void:
 		fired_rules.clear()
 		score = 0
 	load_zone()
+
+func _on_scored(points: int) -> void:
+	score += points
 
 func _on_rule_fired(rule_id: StringName, event: StringName) -> void:
 	_log("%s  <-  %s" % [rule_id, event])

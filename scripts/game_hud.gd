@@ -1,4 +1,4 @@
-extends CanvasLayer
+class_name GameHud extends CanvasLayer
 ## Runtime HUD and keyboard controls for the demo harness.
 
 var manager

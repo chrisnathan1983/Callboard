@@ -31,7 +31,7 @@ func _build_props() -> void:
 	lamp.visible = false
 	add_child(lamp)
 	Props.box(self, "LampBulb", Vector3(0.25, 0.25, 0.25), Vector3(0, 2.6, -4.3), Color(1, 0.95, 0.6))
-	Props.trigger_box(self, Vector3(3.2, 2, 2.4), Vector3(0, 1, -3.6), &"deliver", {"item_id": &"parcel"})
+	Props.trigger_box(self, Vector3(3.2, 2, 2.4), Vector3(0, 1, -3.6), &"deliver")
 
 	shelter = Props.box(self, "Shelter", Vector3(1.6, 1.0, 1.6), SHELTER_POS, Color(0.7, 0.2, 0.15))
 	Props.trigger_box(self, Vector3(3.5, 2, 3.5), SHELTER_POS + Vector3(0, 0.5, 0), &"offer:decoy")
@@ -59,6 +59,7 @@ func _build_props() -> void:
 	cs.shape = shape
 	bump.add_child(cs)
 	pad.add_child(bump)
+	pad.bump_area = bump
 	add_child(pad)
 
 	treat = Props.box(self, "TreatProp", Vector3(0.7, 0.2, 0.2), Vector3(5.9, 0.3, -1), Color(0.98, 0.96, 0.85))
