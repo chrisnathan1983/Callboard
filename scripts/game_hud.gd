@@ -46,4 +46,4 @@ func _process(_delta: float) -> void:
 		+ "saved vars (persist): %s\n"
 		+ "local vars (reset on reload): %s\n\n"
 		+ "rules fired:\n%s"
-	) % [manager.score, manager.zone.saved_vars, manager.zone.local_vars, "\n".join(manager.log_lines)]
+	) % [manager.score, manager.zone.saved_vars, manager.zone.bb.local, "\n".join(manager.log_lines)]

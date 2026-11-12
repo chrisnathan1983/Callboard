@@ -12,11 +12,12 @@ var rules: Array[Rule] = []
 var graph_errors: Array[String] = []
 
 # --- Blackboard -------------------------------------------------------------------
-var schema := {}        # key -> {"scope": &"saved"|&"local", "default": Variant}
-var local_vars := {}    # ephemeral: reset when the zone unloads
+#var schema := {}        # key -> {"scope": &"saved"|&"local", "default": Variant}
+#var local_vars := {}    # ephemeral: reset when the zone unloads
 var saved_vars := {}    # injected by the manager; survives unloads
 var fired := {}         # injected by the manager; latches `once` rules
-var _saved_keys := {}
+#var _saved_keys := {}
+var bb: Blackboard
 
 ## Events that come from outside the rules (props, input, the manager). Zones list theirs.
 var external_events: Array[StringName] = [&"arrive"]
@@ -35,13 +36,14 @@ func _ready() -> void:
 ## Props, then Blackboard, then rules. The Rule Board calls this on an unparented
 ## instance to inspect a zone without running it.
 func build() -> void:
+	bb = Blackboard.new(saved_vars)
 	_build_props()
 	if definition:
 		definition.apply_blackboard(self)
-		_build_blackboard()
+		#_build_blackboard()
 		graph_errors = definition.apply_graph(self)
 	else:
-		_build_blackboard()
+		#_build_blackboard()
 		_build_rules()
 
 func _build_props() -> void: pass
@@ -67,27 +69,32 @@ func deactivate() -> void:
 # --- Blackboard API ---------------------------------------------------------------
 
 func define_saved(key: StringName, default_val: Variant = false) -> void:
-	_saved_keys[key] = true
-	schema[key] = {"scope": &"saved", "default": default_val}
-	if not saved_vars.has(key):
-		saved_vars[key] = default_val
+	bb.define(key, &"saved", default_val)
+	# _saved_keys[key] = true
+	# schema[key] = {"scope": &"saved", "default": default_val}
+	# if not saved_vars.has(key):
+	# 	saved_vars[key] = default_val
 
 func define_local(key: StringName, default_val: Variant = false) -> void:
-	schema[key] = {"scope": &"local", "default": default_val}
-	local_vars[key] = default_val
+	bb.define(key, &"local", default_val)
+	# schema[key] = {"scope": &"local", "default": default_val}
+	# local_vars[key] = default_val
 
 func get_var(key: StringName) -> Variant:
-	return saved_vars.get(key) if _saved_keys.has(key) else local_vars.get(key)
+	return bb.get_var(key)
+	#return saved_vars.get(key) if _saved_keys.has(key) else local_vars.get(key)
 
 func write_var(key: StringName, value: Variant) -> void:
-	if _saved_keys.has(key):
-		saved_vars[key] = value
-	else:
-		local_vars[key] = value
-	var_changed.emit(key, value)
+	bb.write(key, value)
+	# if _saved_keys.has(key):
+	# 	saved_vars[key] = value
+	# else:
+	# 	local_vars[key] = value
+	# var_changed.emit(key, value)
 
 func is_set(key: StringName) -> bool:
-	return bool(get_var(key))
+	return bb.is_set(key)
+	# return bool(get_var(key))
 
 # --- Router -----------------------------------------------------------------------
 
@@ -148,7 +155,7 @@ func validate() -> Array[String]:
 				emitted["relay:" + s.emits] = true
 			for k in s.sets:
 				settable[k] = true
-				if not schema.has(k):
+				if not bb.has(k):
 					problems.append("rule '%s' writes '%s' which is not declared on the Blackboard" % [r.id, k])
 	for r in rules:
 		if r.trigger == &"":
@@ -156,7 +163,7 @@ func validate() -> Array[String]:
 		elif not emitted.has(r.trigger) and not external_events.has(r.trigger):
 			problems.append("rule '%s' listens to '%s' but nothing emits it and it is not a declared external event" % [r.id, r.trigger])
 		for k in r.requires + r.forbids + r.cancel_if:
-			if not schema.has(k):
+			if not bb.has(k):
 				problems.append("rule '%s' checks key '%s' which is not declared on the Blackboard" % [r.id, k])
 			elif not settable.has(k):
 				problems.append("rule '%s' checks key '%s' but nothing sets it" % [r.id, k])
