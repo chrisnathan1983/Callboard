@@ -1,83 +1,56 @@
-# Director Blackboard Demo (Godot 4.3+)
+# Director Blackboard Demo
 
-Event-driven choreography with a typed Blackboard and an editable Rule Graph.
+A small Godot project demonstrating event-driven gameplay choreography with a typed Blackboard and a visual Rule Board. Gameplay events and relays activate authored rules, while Blackboard conditions control which steps run.
 
-## Run it
-1. Open `project.godot` in Godot 4.3+ (let it import once so the class cache builds).
-2. **Game:** F5. WASD move, E interact, bump the blue pad. **F1** toggles the live Rule Board
-   (read-only; cards pulse as rules fire, Blackboard shows live values). R reloads the zone,
-   X wipes saved state.
-3. **Editor:** the plugin is pre-enabled. Open the **Rule Board** tab next to 2D / 3D / Script.
-4. **Tests:** `godot --headless --path . --script res://tests/smoke.gd` (ignore the
-   headless renderer diagnostics, if any).
+## Requirements
 
-## Layout
-- `addons/director_blackboard/` everything reusable
-  - `core/` `Zone`, `ZoneDefinition`, `Rule`, `Step`, `TriggerArea`
-  - `model/` `ZoneSource` (parse/generate), `VerbCatalog`, `ZonePreview`, `RuleGraphReader`
-  - `editor/` `RuleBoard`, `RuleGraphView`, `BlackboardPanel`, `RuleInspector`
-  - `plugin.gd`
-- `scripts/` demo only: `main.gd`, `actors/player.gd`, `props/` (placeholder props, `BumpProp`),
-  `zones/zone_01.gd` (scene behavior), `zones/zone_01.tres` (authored zone data)
-- `tests/smoke.gd`
+- Godot **4.7** (the project declares the `4.7` feature version in `project.godot`).
 
-## Using the Rule Board
-- **Blackboard (left):** `+ Variable` (bool/int/float/String), rename (guards and `key`
-  arguments follow, including implicit defaults like `light`'s), saved/local scope, typed
-  default editors, delete (rules that still use it get a warning).
-- **+ Event:** enter an event ID to add a graph card and a trigger option. Gameplay code
-  can fire the event with `fire(&"event_id")`.
-- **Graph (centre):** `+ Rule`, `+ Group`. Drag an output port onto a rule's input to make it
-  listen to that relay or event; dragging from a rule's unnamed `emits` port names the relay
-  `<rule>_done`. Drag a wire off an input to unwire. Delete key removes selected rules.
-  Wires are derived from triggers and emits; they are never stored separately.
-- **Inspector (right):** id, trigger (with picker), requires/forbids/cancel_if (checkable
-  Blackboard keys), once, emits, group, and steps. Each step has a verb dropdown, typed argument
-  widgets built from the verb's signature (prop dropdowns filtered by class, key dropdowns,
-  spin boxes, check boxes, raw expression for anything else), `after`, reorder and delete.
-  Duplicate / Delete rule. Selecting a group lets you rename or delete it.
-- **Undo / Redo:** use the toolbar or Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z (Ctrl/Cmd+Y also
-  redoes). History survives Save and switching editor tabs. Reload or opening a different
-  zone starts a fresh history.
-- **Save:** validates step expressions and writes the selected `.tres` resource. The zone
-  picker searches `res://zones/` and all of its subfolders.
+## Run the demo
 
-## Authoring a zone
+1. Open `project.godot` in Godot and let the project finish importing.
+2. Press **F6** to run the current scene or **F5** to run the project.
+3. Use **WASD** or the arrow keys to move, and **E** to interact near an interaction area.
 
-1. Write a normal `@tool` GDScript that extends `Zone`. Use `_build_props()` for setup,
-   typed fields for props, and methods returning `Step` for custom graph verbs. Keep
-   build hooks safe to call on an unparented instance so the Rule Board can preview them.
-2. Create a `ZoneDefinition` resource in `res://scripts/zones/` and assign the script to
-   **Zone Script**. In the resource Inspector, list Blackboard keys written by gameplay
-   code under **External Vars**. Save the
-   resource and press **Reload** on the Rule Board to pick up Inspector edits.
-3. Select the resource in the Rule Board, add events and Blackboard variables with their starting
-   values, then wire rules. Events, variable definitions, rules, and graph layout all
-   live in that one resource.
-4. Use `definition.instantiate()` to create a fresh zone. Inject any existing
-   `saved_vars` and `fired` dictionaries before adding it to the tree. Call
-   `activate()` when the zone is ready to receive events.
+In the sample zone, interact at the shelter to offer a decoy, deliver at the doorway, and bump the blue pad to release a treat. The guard, warning lamp, and delivery outcome are driven by rules in the zone definition.
 
-The zone builds its props, applies resource defaults, calls the optional
-`_build_blackboard()` hook, then builds graph rules. Override the hook when a value
-depends on code. For example, if the resource declares a local bool named
-`lamp_on`, initialize it from a prop you built earlier:
+| Key | Action |
+| --- | --- |
+| **F1** | Toggle the live Rule Board overlay. It shows rule activity and Blackboard values; it is read-only during gameplay. |
+| **R** | Reload the zone. Saved Blackboard values and once-rule state persist; local values reset. |
+| **X** | Clear saved values and once-rule state, reset the score, and reload the zone. |
 
-```gdscript
-func _build_blackboard() -> void:
-	write_var(&"lamp_on", lamp.visible)
+## Rule Board
+
+The editor plugin is enabled in `project.godot`. Open the **Rule Board** tab in the Godot editor to inspect and edit a zone definition.
+
+- **Blackboard:** add typed variables, choose saved or local scope, set defaults, and inspect variable usage.
+- **Events and graph:** add event cards, rules, and groups. Connect rule outputs to triggers; wires are derived from rule triggers and emitted relays.
+- **Rule inspector:** edit triggers, requirements, forbidden/cancellation conditions, once behavior, emitted relays, groups, and ordered steps. Step arguments use verb-specific controls where available.
+- **Save:** validates step expressions and saves the selected `.tres` zone definition. Use **Reload** to pick up zone edits made outside the Rule Board.
+- **Undo/redo:** use the toolbar or **Ctrl/Cmd+Z** and **Ctrl/Cmd+Shift+Z** (**Ctrl/Cmd+Y** also redoes).
+
+## Project layout
+
+- `addons/director_blackboard/` — reusable runtime, zone/definition models, editor UI, and plugin entry point.
+- `scripts/` — demo harness, HUD, world setup, player, and reusable prop scripts.
+- `zones/zone_01/` — sample zone script, scene, and authored zone definitions (`zone_01.tres` and `zone_02.tres`).
+- `game.tscn` — main scene; `project.godot` — project and plugin configuration.
+- `tests/smoke.gd` — headless smoke test.
+
+Run the smoke test from the project directory with:
+
+```sh
+godot --headless --path . --script res://tests/smoke.gd
 ```
 
-Use `get_var()`, `write_var()`, and `fire()` in ordinary gameplay code. Saved keys
-keep their injected values when applying defaults. Keep unconditional initializers
-for local keys when a saved value should survive a reload.
+## Author a zone
 
-Graph arguments accept Godot Expression syntax with the zone as the base instance.
-Typed prop fields, script constants, and StringName literals such as `&"lamp_on"`
-are supported. Put more involved GDScript logic in a custom verb.
+1. Create a `@tool` GDScript extending `Zone`. Use `_build_props()` for scene setup, typed fields for props, and methods returning `Step` for custom rule verbs. Keep build hooks safe to run on an unparented instance so the editor can preview the zone.
+2. Create a `ZoneDefinition` resource, assign the zone script, and list Blackboard keys written by gameplay code under **External Vars**.
+3. Add events, Blackboard variables, rules, and graph layout to the definition in the Rule Board. These are stored together in the `.tres` resource.
+4. Instantiate the definition, inject any existing `saved_vars` and `fired` dictionaries before adding the zone to the scene tree, then call `activate()` when it is ready to receive events.
 
-## Known limits
-- Reload discards unsaved edits. Save or reload before switching zones.
-- Moving a card between frames by dragging is handled, but there is no drag-out gesture;
-  use the inspector's group dropdown to ungroup.
-- This revision was tested headlessly with Godot 4.6.3.
+The zone builds props, applies resource defaults, calls the optional `_build_blackboard()` hook, and then builds its rules. Override the hook for values that depend on built props. Use `get_var()`, `write_var()`, and `fire()` in gameplay code. Saved keys retain injected values when defaults are applied; initialize local keys consistently when they should reset on reload.
+
+Rule arguments use Godot Expression syntax with the zone as the base instance. Typed prop fields, script constants, and `StringName` literals such as `&"lamp_on"` are supported; put more complex logic in a custom verb.
