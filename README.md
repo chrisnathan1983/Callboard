@@ -50,7 +50,7 @@ godot --headless --path . --script res://tests/editor_smoke.gd
 godot --headless --path . --script res://tests/smoke.gd
 ```
 
-The **Godot tests** GitHub Actions workflow imports the project and runs these suites on Ubuntu with Godot 4.7.2 for each push and pull request.
+The **Godot tests** GitHub Actions workflow runs each suite as a separate check on every push and pull request. Each job imports the project on Ubuntu with Godot 4.7.2 and reports its own result.
 
 ## Author a zone
 

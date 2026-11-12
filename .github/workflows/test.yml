@@ -9,9 +9,19 @@ permissions:
 
 jobs:
   headless:
-    name: Headless suites
+    name: ${{ matrix.suite.name }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        suite:
+          - name: Unit tests
+            script: unit.gd
+          - name: Rule Board smoke test
+            script: editor_smoke.gd
+          - name: Runtime smoke test
+            script: smoke.gd
     env:
       GODOT_VERSION: 4.7.2-stable
     defaults:
@@ -40,11 +50,7 @@ jobs:
             exit 1
           fi
 
-      - name: Unit tests
-        run: godot --headless --path . --script res://tests/unit.gd
-
-      - name: Rule Board smoke test
-        run: godot --headless --path . --script res://tests/editor_smoke.gd
-
-      - name: Runtime smoke test
-        run: godot --headless --path . --script res://tests/smoke.gd
+      - name: Run suite
+        env:
+          TEST_SCRIPT: ${{ matrix.suite.script }}
+        run: godot --headless --path . --script "res://tests/$TEST_SCRIPT"
