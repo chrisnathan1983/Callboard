@@ -29,6 +29,7 @@ The editor plugin is enabled in `project.godot`. Open the **Rule Board** tab in 
 - **Rule inspector:** edit triggers, requirements, forbidden/cancellation conditions, once behavior, emitted relays, groups, and ordered steps. Step arguments use verb-specific controls where available.
 - **Save:** validates step expressions and saves the selected `.tres` zone definition. Use **Reload** to pick up zone edits made outside the Rule Board.
 - **Undo/redo:** use the toolbar or **Ctrl/Cmd+Z** and **Ctrl/Cmd+Shift+Z** (**Ctrl/Cmd+Y** also redoes).
+- **Create a zone:** in the Godot editor, use **Project > Tools > Create New Zone...** to generate a zone setup more quickly.
 
 ## Project layout
 
@@ -46,8 +47,8 @@ godot --headless --path . --script res://tests/smoke.gd
 
 ## Author a zone
 
-1. Create a `@tool` GDScript extending `Zone`. Use `_build_props()` for scene setup, typed fields for props, and methods returning `Step` for custom rule verbs. Keep build hooks safe to run on an unparented instance so the editor can preview the zone.
-2. Create a `ZoneDefinition` resource, assign the zone script, and list Blackboard keys written by gameplay code under **External Vars**.
+1. Use **Project > Tools > Create New Zone...** to generate a starting zone, or create a `@tool` GDScript extending `Zone` yourself. Use `_build_props()` for scene setup, typed fields for props, and methods returning `Step` for custom rule verbs. Keep build hooks safe to run on an unparented instance so the editor can preview the zone.
+2. Create or edit a `ZoneDefinition` resource, assign the zone script, and list Blackboard keys written by gameplay code under **External Vars**.
 3. Add events, Blackboard variables, rules, and graph layout to the definition in the Rule Board. These are stored together in the `.tres` resource.
 4. Instantiate the definition, inject any existing `saved_vars` and `fired` dictionaries before adding the zone to the scene tree, then call `activate()` when it is ready to receive events.
 
