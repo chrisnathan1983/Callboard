@@ -37,12 +37,16 @@ The editor plugin is enabled in `project.godot`. Open the **Rule Board** tab in 
 - `scripts/` — demo harness, HUD, world setup, player, and reusable prop scripts.
 - `zones/zone_01/` — sample zone script, scene, and authored zone definitions (`zone_01.tres` and `zone_02.tres`).
 - `game.tscn` — main scene; `project.godot` — project and plugin configuration.
-- `tests/smoke.gd` — headless smoke test.
+- `tests/unit.gd` — deterministic parser, validator, router-guard, and injected-clock tests.
+- `tests/editor_smoke.gd` — Rule Board authoring and save integration tests.
+- `tests/smoke.gd` — short runtime smoke test.
 
-Run the smoke test from the project directory with:
+Run the test scripts from the project directory:
 
 ```sh
-godot --headless --max-fps 60 --fixed-fps 60 --quit-after 2000 --path . --script res://tests/smoke.gd
+godot --headless --path . --script res://tests/unit.gd
+godot --headless --path . --script res://tests/editor_smoke.gd
+godot --headless --path . --script res://tests/smoke.gd
 ```
 
 ## Author a zone
