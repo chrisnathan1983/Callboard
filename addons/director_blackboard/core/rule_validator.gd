@@ -1,3 +1,4 @@
+@tool
 class_name RuleValidator extends RefCounted
 
 static func validate(rules: Array[Rule], bb: Blackboard,

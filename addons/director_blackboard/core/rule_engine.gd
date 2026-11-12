@@ -1,3 +1,4 @@
+@tool
 class_name RuleEngine extends RefCounted
 
 signal rule_fired(rule_id: StringName, event: StringName)
@@ -9,21 +10,29 @@ var wait: Callable                    # func(seconds: float) -> Signal; tests sw
 var _gen := 0
 
 func _init(p_bb: Blackboard, p_fired: Dictionary, p_wait: Callable) -> void:
-	bb = p_bb; fired = p_fired; wait = p_wait
+	bb = p_bb
+	fired = p_fired
+	wait = p_wait
 
 func token() -> int: return _gen
 func cancel_all() -> void: _gen += 1
 
 func fire(event: StringName, ctx := {}) -> void:
+	var gen := _gen
 	for r in rules:
+		if gen != _gen:
+			return
 		if r.trigger == event and passes(r):
 			_run(r, event, ctx)
 
 func _run(r: Rule, event: StringName, ctx: Dictionary) -> void:
-	if r.once: fired[r.id] = true
-	rule_fired.emit(r.id, event)
 	var gen := _gen
-	var c := ctx.merged({"_rule": r})
+	if r.once:
+		fired[r.id] = true
+	rule_fired.emit(r.id, event)
+	if gen != _gen:
+		return
+	var c := ctx.merged({"_rule": r}, true)
 	for s in r.steps:
 		if s.delay > 0.0:
 			await wait.call(s.delay)

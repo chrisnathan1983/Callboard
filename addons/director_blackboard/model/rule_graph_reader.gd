@@ -23,6 +23,7 @@ static func inspect_script(path: String) -> Dictionary:
 		return {"error": "%s is not a Zone" % path}
 	zone.build()
 	var data := read(zone, path)
+	zone.engine.rules.clear()
 	zone.free()
 	return data
 
@@ -33,7 +34,7 @@ static func read(zone: Zone, path: String) -> Dictionary:
 			"path": definition.resource_path, "definition": definition,
 			"vars": definition.variables.duplicate(true),
 			"rules": definition.rules.duplicate(true), "groups": definition.groups.duplicate(true),
-			"catalog": VerbCatalog.from_zone(zone), "props": VerbCatalog.props_of(zone),
+			"catalog": VerbCatalog.from_factory(zone.verbs), "props": VerbCatalog.props_of(zone),
 			"external_events": Array(zone.external_events).map(func(e): return String(e)),
 			"parse_error": "",
 		}
@@ -68,7 +69,7 @@ static func analyze(data: Dictionary) -> void:
 			return
 		instance.build()
 		_read_results(data, instance, instance.graph_errors.is_empty(), instance.graph_errors + instance.validate())
-		instance.rules.clear()
+		instance.engine.rules.clear()
 		instance.free()
 		return
 	var res := ZonePreview.run(ZoneSource.generate(data["source"], data))
@@ -102,7 +103,7 @@ static func inspect_definition(path: String) -> Dictionary:
 		return {"error": "Assign a Zone script to %s" % path.get_file()}
 	instance.build()
 	var data := read(instance, path)
-	instance.rules.clear()
+	instance.engine.rules.clear()
 	instance.free()
 	return data
 
@@ -115,7 +116,7 @@ static func _read_results(data: Dictionary, zone: Zone, ok: bool, problems: Arra
 			s["sets"] = []
 	if zone == null:
 		return
-	for pr in zone.rules:
+	for pr in zone.engine.rules:
 		for rd in data["rules"]:
 			if rd["id"] == String(pr.id) and rd["steps"].size() == pr.steps.size():
 				for i in pr.steps.size():

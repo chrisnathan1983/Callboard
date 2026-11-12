@@ -27,7 +27,7 @@ static func run(source: String) -> Dictionary:
 static func dispose(result: Dictionary) -> void:
 	var zone: Zone = result.get("zone")
 	if zone:
-		zone.rules.clear()   # drops every Step and its lambda first
+		zone.engine.rules.clear()   # drops every Step and its lambda first
 		zone.free()
 	result.erase("zone")
 	result.erase("script")

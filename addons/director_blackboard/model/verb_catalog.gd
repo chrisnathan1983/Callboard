@@ -1,12 +1,18 @@
 @tool
 class_name VerbCatalog extends RefCounted
-## Introspects a Zone instance for the Rule Board: which verbs exist (methods returning Step),
-## their typed parameters and defaults, and which props the zone declares.
+## Discovers verb signatures and zone props for the Rule Board.
 
 ## [{name, args: [{name, type, class, default: expr text or ""}]}], sorted by name.
+static func from_factory(factory: CoreVerbs) -> Array:
+	return _from_object(factory)
+
+## Script-authored rules still call methods on the Zone.
 static func from_zone(zone: Zone) -> Array:
+	return _from_object(zone)
+
+static func _from_object(source: Object) -> Array:
 	var out: Array = []
-	for m in zone.get_method_list():
+	for m in source.get_method_list():
 		var verb: String = m["name"]
 		if verb.begins_with("_"):
 			continue
@@ -29,7 +35,7 @@ static func from_zone(zone: Zone) -> Array:
 static func props_of(zone: Zone) -> Array:
 	var out: Array = []
 	for p in zone.get_property_list():
-		if p["name"] == &"definition":
+		if p["name"] in [&"definition", &"bb", &"engine", &"verbs"]:
 			continue
 		if (p["usage"] & PROPERTY_USAGE_SCRIPT_VARIABLE) and p["type"] == TYPE_OBJECT and String(p.get("class_name", "")) != "":
 			out.append({"name": String(p["name"]), "class": String(p["class_name"])})

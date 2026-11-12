@@ -331,12 +331,13 @@ func _sync_layout() -> void:
 	var pos := view.get_positions()
 	for rd in _data["rules"]:
 		if pos.has(rd["id"]):
-			rd["pos"] = pos[rd["id"]]
+			rd["pos"] = pos[rd["id"]].round()
 			rd["has_pos"] = true
 	var rects := view.get_group_rects()
 	for g in _data["groups"]:
 		if rects.has(g["name"]):
-			g["rect"] = rects[g["name"]]
+			var rect: Rect2 = rects[g["name"]]
+			g["rect"] = Rect2(rect.position.round(), rect.size.round())
 
 func _changed(select_id: String) -> void:
 	if not _editable or _restoring:

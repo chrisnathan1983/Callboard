@@ -1,3 +1,4 @@
+@tool
 class_name Blackboard extends RefCounted
 
 signal changed(key: StringName, value: Variant)

@@ -1,3 +1,12 @@
+## Migration status
+
+- [x] Delegate Blackboard storage and validation from `Zone`.
+- [x] Route live rules and editor previews through `RuleEngine`.
+- [x] Extract `CoreVerbs` and `StagingVerbs` with a per-zone factory hook. Compile resource step metadata from authored arguments.
+- [x] Preserve script-authored rules through the `Zone` facade and cover both authoring paths in tests.
+
+The proposal below records the original design. The sample zone uses the default staging factory. Registered verb resources remain a possible follow-up.
+
 I'd split it along its dependency lines. Right now `Zone` is five things at once:
 
 | Concern | Currently in `Zone` | Needs |

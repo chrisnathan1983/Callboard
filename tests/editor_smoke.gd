@@ -6,7 +6,7 @@ const DEFINITION_PATH := "res://zones/zone_01/zone_01.tres"
 const TMP_PATH := "user://zone_tmp.tres"
 
 func _initialize() -> void:
-	var ok := true
+	var ok := _test_factory()
 
 	# --- Authored resource ----------------------------------------------------------
 	var src := FileAccess.get_file_as_string(ZONE_PATH)
@@ -36,8 +36,7 @@ func _initialize() -> void:
 	root.add_child(board)
 	var zone_paths := board._collect_zone_definition_paths()
 	ok = _check("board: discovers nested zone resources",
-		zone_paths.has("res://zones/zone_01/zone_01.tres")
-		and zone_paths.has("res://zones/zone_01/zone_01.tres")) and ok
+		zone_paths.has(DEFINITION_PATH)) and ok
 	board.open_script(DEFINITION_PATH)
 	var d: Dictionary = board._data
 	board.view._rule_nodes["z1_bark"].position_offset = Vector2(555, 77)
@@ -118,12 +117,12 @@ func _initialize() -> void:
 	b2.undo()
 	var frame: GraphFrame = b2.view._frames["Delivery"]
 	var frame_size := frame.size
-	frame.resize_request.emit(frame_size + Vector2(30, 30))
+	frame.resize_request.emit(frame_size.round() + Vector2(30.0002, 29.9998))
 	b2.undo()
 	ok = _check("undo restores frame size", b2.view.get_group_rects()["Delivery"].size == frame_size) and ok
 	b2.redo()
 	ok = _check("redo restores frame resize",
-		(b2.view.get_group_rects()["Delivery"].size - (frame_size + Vector2(30, 30))).length() < 0.01) and ok
+		b2.view.get_group_rects()["Delivery"].size == frame_size.round() + Vector2(30, 30)) and ok
 	b2.undo()
 	b2.blackboard._on_add(0)
 	ok = _check("new edit clears redo", b2._redo_button.disabled and d2["vars"].size() == 4) and ok
@@ -145,12 +144,17 @@ func _initialize() -> void:
 	var added: Dictionary = b2.add_rule()
 	added["steps"].append(VerbCatalog.new_step(d2, "score"))
 	b2.connect_wire({"rule": "z1_calm", "port": 0}, added["id"])
+	var saved_frame: GraphFrame = b2.view._frames["Delivery"]
+	saved_frame.size += Vector2(10.0002, 0)
+	var expected_size := saved_frame.size.round()
 	b2.save()
 	var re := RuleGraphReader.inspect_definition(TMP_PATH)
 	ok = _check("save: script unchanged", FileAccess.get_file_as_string(ZONE_PATH) == src) and ok
 	ok = _check("save: rule, relay and interval persisted",
 		_rule(re, "new_rule")["trigger"] == "relay:z1_calm_done"
 		and _rule(re, "z1_standoff")["steps"][0]["args"][0] == "4.0") and ok
+	ok = _check("save: frame size is rounded on disk",
+		re["groups"].any(func(g): return g["name"] == "Delivery" and g["rect"].size == expected_size)) and ok
 	ok = _check("save: position preserved", _rule(re, "new_rule")["has_pos"]) and ok
 	ok = _check("save: reloaded zone builds with no problems", re["compiles"] and re["problems"].is_empty()) and ok
 	ok = _check("new event and wire persist",
@@ -166,6 +170,78 @@ func _initialize() -> void:
 
 	print("EDITOR: ", "PASS" if ok else "FAIL")
 	quit(0 if ok else 1)
+
+func _test_factory() -> bool:
+	# Build an unparented resource-backed zone with its own verb factory.
+	var script := GDScript.new()
+	script.source_code = """@tool
+extends Zone
+
+const MESSAGE := 'A, "B"'
+var target: Node3D
+
+class CustomVerbs extends StagingVerbs:
+	func stamp(prop: Node3D, label: String) -> Step:
+		return Step.new(func(_c: Dictionary) -> void: prop.set_meta(&"label", label))
+
+func _make_verbs(ctx: StepContext) -> CoreVerbs:
+	return CustomVerbs.new(ctx)
+
+func _build_props() -> void:
+	target = Node3D.new()
+	add_child(target)
+
+func _build_blackboard() -> void:
+	write_var(&"ready", true)
+"""
+	if not _check("custom factory fixture compiles", script.reload() == OK):
+		return false
+	var definition := ZoneDefinition.new()
+	definition.zone_script = script
+	definition.variables = [{"key": "ready", "scope": "local", "default": false}]
+	var spec := {"verb": "stamp", "args": ["target", "MESSAGE"], "delay": "0.25"}
+	definition.rules = [{
+		"id": "custom", "trigger": "arrive", "requires": [], "forbids": [],
+		"cancel_if": [], "once": false, "emit": "", "steps": [spec],
+	}]
+	var zone := definition.instantiate()
+	zone.build()
+	var ok := _check("factory discovers its custom verb and the inherited verbs",
+		VerbCatalog.from_factory(zone.verbs).size() == 13)
+	ok = _check("zone runs the blackboard hook after resource defaults", zone.is_set(&"ready")) and ok
+	if _check("custom resource compiles", zone.graph_errors.is_empty()):
+		var step := zone.engine.rules[0].steps[0]
+		ok = _check("resource compiler supplies verb, prop, constant and delay metadata",
+			step.verb == &"stamp" and step.args == [zone.get("target"), 'A, "B"']
+			and step.delay == 0.25) and ok
+		step.fn.call({})
+		ok = _check("compiled custom step runs with the supplied arguments",
+			zone.get("target").get_meta(&"label") == 'A, "B"') and ok
+	else:
+		ok = false
+	zone.engine.rules.clear()
+	zone.free()
+
+	spec["args"] = ["null", "MESSAGE"]
+	zone = definition.instantiate()
+	zone.build()
+	ok = _check("validator still reports null props with compiler-generated metadata",
+		zone.validate().any(func(problem): return "'stamp' step with an unset prop" in problem)) and ok
+	zone.engine.rules.clear()
+	zone.free()
+
+	var legacy := ZonePreview.run("""@tool
+extends Zone
+func _build_blackboard() -> void:
+	define_local(&"ready", false)
+func _build_rules() -> void:
+	var r := rule(&"legacy", &"arrive")
+	r.steps = [set_var(&"ready")]
+""")
+	ok = _check("script-authored rules still build through Zone's legacy verbs",
+		legacy["ok"] and legacy["problems"].is_empty()) and ok
+	ZonePreview.dispose(legacy)
+	return ok
 
 func _rule(d: Dictionary, id: String) -> Dictionary:
 	for r in d["rules"]:

@@ -1,6 +1,8 @@
 extends SceneTree
 ## Deterministic parser, validator, router and clock-injection tests.
 
+signal clock_tick
+
 func _initialize() -> void:
 	var ok := true
 
@@ -67,34 +69,33 @@ func _build_rules() -> void:
 	route_bb.define(&"armed", &"local", false)
 	route_bb.define(&"blocked", &"local", false)
 	route_bb.define(&"cancelled", &"local", false)
-	var zone := Zone.new()
-	zone.bb = route_bb
-	var guarded := zone.rule(&"guarded", &"attempt")
+	var router := RuleEngine.new(route_bb, {}, Callable())
+	var guarded := Rule.new(&"guarded", &"attempt")
+	router.rules.append(guarded)
 	guarded.requires = [&"armed"]
 	guarded.forbids = [&"blocked"]
 	guarded.cancel_if = [&"cancelled"]
 	guarded.once = true
 	var fired: Array[StringName] = []
-	zone.rule_fired.connect(func(id: StringName, _event: StringName) -> void: fired.append(id))
+	router.rule_fired.connect(func(id: StringName, _event: StringName) -> void: fired.append(id))
 
-	zone.fire(&"attempt")
+	router.fire(&"attempt")
 	route_bb.write(&"armed", true)
 	route_bb.write(&"blocked", true)
-	zone.fire(&"attempt")
+	router.fire(&"attempt")
 	route_bb.write(&"blocked", false)
-	zone.fire(&"attempt")
-	zone.fire(&"attempt")
+	router.fire(&"attempt")
+	router.fire(&"attempt")
 	ok = _check("router applies requires, forbids and once guards",
-		fired == [&"guarded"] and zone.fired.has(&"guarded")) and ok
-	ok = _check("router honors cancel_if while a rule is alive", zone.alive(guarded, 0)) and ok
+		fired == [&"guarded"] and router.fired.has(&"guarded")) and ok
+	ok = _check("router honors cancel_if while a rule is alive", router.alive(guarded, 0)) and ok
 	route_bb.write(&"cancelled", true)
-	ok = _check("router cancels a rule after cancel_if is set", not zone.alive(guarded, 0)) and ok
-	zone.free()
+	ok = _check("router cancels a rule after cancel_if is set", not router.alive(guarded, 0)) and ok
 
 	var wait_requests: Array[float] = []
 	var fake_wait := func(seconds: float) -> Signal:
 		wait_requests.append(seconds)
-		return process_frame
+		return clock_tick
 	var engine_bb := Blackboard.new()
 	var state := {"step_ran": false}
 	var engine := RuleEngine.new(engine_bb, {}, fake_wait)
@@ -105,10 +106,39 @@ func _build_rules() -> void:
 	engine.rules.append(delayed)
 	engine.fire(&"go")
 	var delay_was_injected: bool = wait_requests == [12.5] and not state["step_ran"]
-	for _frame in 3:
-		await process_frame
+	clock_tick.emit()
 	ok = _check("RuleEngine delay uses injected, non-realtime wait",
 		delay_was_injected and state["step_ran"]) and ok
+
+	# A relay step receives its own rule and the original event payload.
+	var repeated := Rule.new(&"repeated", &"start")
+	repeated.cancel_if = [&"stop"]
+	engine_bb.define(&"stop", &"local", false)
+	var factory := CoreVerbs.new(StepContext.new(engine_bb, engine, null, Callable()))
+	repeated.steps.append(factory.repeat_emit(2.0, &"tick"))
+	var listener := Rule.new(&"listener", &"relay:tick")
+	var received: Array[StringName] = []
+	listener.steps.append(Step.new(func(c: Dictionary) -> void:
+		received.append(c["_rule"].id)
+		received.append(c["item"])
+	))
+	engine.rules.append_array([repeated, listener])
+	engine.fire(&"start", {"item": &"parcel"})
+	ok = _check("repeat waits on the same injected clock as delays",
+		wait_requests == [12.5, 2.0] and received.is_empty()) and ok
+	clock_tick.emit()
+	ok = _check("repeat relays supply the listener's rule and preserve event payload",
+		received == [&"listener", &"parcel"]) and ok
+	engine_bb.write(&"stop", true)
+	clock_tick.emit()
+	ok = _check("repeat stops at the next tick when cancel_if becomes true",
+		received.size() == 2) and ok
+
+	state["step_ran"] = false
+	engine.fire(&"go")
+	engine.cancel_all()
+	clock_tick.emit()
+	ok = _check("deactivation cancels an outstanding delay", not state["step_ran"]) and ok
 
 	print("UNIT: ", "PASS" if ok else "FAIL")
 	quit(0 if ok else 1)

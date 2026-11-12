@@ -33,12 +33,14 @@ func apply_blackboard(zone: Zone) -> void:
 func apply_graph(zone: Zone) -> Array[String]:
 	var problems: Array[String] = []
 	var built: Array[Rule] = []
-	var catalog := VerbCatalog.from_zone(zone)
-	var constants := {}
+	var catalog := VerbCatalog.from_factory(zone.verbs)
+	var inputs := {}
 	var script: Script = zone.get_script()
 	while script:
-		constants.merge(script.get_script_constant_map())
+		inputs.merge(script.get_script_constant_map())
 		script = script.get_base_script()
+	for prop in VerbCatalog.props_of(zone):
+		inputs[prop["name"]] = zone.get(prop["name"])
 	for entry in rules:
 		var rule := Rule.new(StringName(entry["id"]), StringName(entry["trigger"]))
 		rule.requires.assign(entry["requires"])
@@ -47,31 +49,52 @@ func apply_graph(zone: Zone) -> Array[String]:
 		rule.once = entry["once"]
 		rule.emits = StringName(entry["emit"])
 		for spec in entry["steps"]:
-			var step := _build_step(zone, spec, catalog, constants)
+			var step := _build_step(zone.verbs, spec, catalog, inputs)
 			if step == null:
 				problems.append("rule '%s' has an invalid step: %s" % [rule.id, ZoneSource.step_text(spec)])
 			else:
 				rule.steps.append(step)
 		built.append(rule)
 	if problems.is_empty():
-		zone.rules.append_array(built)
+		zone.engine.rules.append_array(built)
 	return problems
 
-func _build_step(zone: Zone, spec: Dictionary, catalog: Array, constants: Dictionary) -> Step:
+func _build_step(factory: CoreVerbs, spec: Dictionary, catalog: Array, inputs: Dictionary) -> Step:
 	var verb: String = spec["verb"]
 	if VerbCatalog.find(catalog, verb).is_empty():
 		return null
-	# One evaluation preserves prop references, literal arguments and script constants.
-	var expression := Expression.new()
-	# Expression accepts the StringName constructor, while GDScript also has &"..." literals.
+	var delay: String = spec.get("delay", "")
+	var source := "[[%s], %s]" % [", ".join(spec["args"]), delay if not delay.is_empty() else "0.0"]
+	# Expression accepts the StringName constructor in place of GDScript's &"..." literals.
 	var tokens := RegEx.create_from_string('(&?)("(?:[^"\\\\]|\\\\.)*")')
-	var source := ZoneSource.step_text(spec)
 	var matches := tokens.search_all(source)
 	matches.reverse()
 	for token in matches:
 		if token.get_string(1) != "":
 			source = source.left(token.get_start()) + "StringName(%s)" % token.get_string(2) + source.substr(token.get_end())
-	if expression.parse(source, PackedStringArray(constants.keys())) != OK:
+	var expression := Expression.new()
+	if expression.parse(source, PackedStringArray(inputs.keys())) != OK:
 		return null
-	var result: Variant = expression.execute(constants.values(), zone, false)
-	return result as Step if not expression.has_execute_failed() and result is Step else null
+	var values: Variant = expression.execute(inputs.values(), factory, false)
+	if expression.has_execute_failed() or not values is Array or values.size() != 2:
+		return null
+	if not (values[1] is float or values[1] is int):
+		return null
+
+	# Invoke the factory with the evaluated arguments. Expression reports argument
+	# and type errors without invoking the verb twice or logging a script error.
+	var args: Array = values[0]
+	var names := PackedStringArray()
+	for i in args.size():
+		names.append("arg_%d" % i)
+	if expression.parse("%s(%s)" % [verb, ", ".join(names)], names) != OK:
+		return null
+	var result: Variant = expression.execute(args, factory, false)
+	if expression.has_execute_failed() or not result is Step:
+		return null
+	var step := result as Step
+	step.verb = StringName(verb)
+	step.args = args
+	if not delay.is_empty():
+		step.after(float(values[1]))
+	return step

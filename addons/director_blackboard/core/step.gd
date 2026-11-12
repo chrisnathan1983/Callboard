@@ -1,9 +1,9 @@
 @tool
 class_name Step extends RefCounted
-## One verb call inside a rule. Built by the verb functions on Zone.
+## One verb call inside a rule. Built by a verb factory or a script-authored rule.
 ## `verb` and `args` are display/serialization metadata for the Rule Board.
 
-var fn: Callable                       # func(ctx: Dictionary) -> void, may await
+var fn: Callable                       # func(ctx: Dictionary), may await or return a Signal
 var delay := 0.0                       # deliberate beat before this step runs
 var emits: StringName = &""            # relay this step fires itself (validator bookkeeping)
 var sets: Array[StringName] = []       # blackboard keys this step writes (validator bookkeeping)
