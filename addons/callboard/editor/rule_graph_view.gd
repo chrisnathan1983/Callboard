@@ -19,7 +19,7 @@ signal rules_delete_requested(ids: Array)
 signal rules_linked_to_group(ids: Array, group_name: String)
 signal layout_changed
 
-const Style := preload("res://addons/director_blackboard/editor/board_style.gd")
+const Style := preload("res://addons/callboard/editor/board_style.gd")
 const CARD_WIDTH := 264.0
 const COL_EVENT := Style.EVENT
 const COL_RELAY := Style.RELAY
@@ -55,7 +55,7 @@ func _init() -> void:
 		add_theme_color_override("activity", LIVE_ACTIVITY)
 	var fit := Button.new()
 	fit.text = "Fit all"
-	fit.tooltip_text = "Frame every event, rule and group"
+	fit.tooltip_text = "Frame every Call, rule and group"
 	fit.pressed.connect(request_fit)
 	get_menu_hbox().add_child(fit)
 	var menu := get_menu_hbox().get_parent() as Control
@@ -143,7 +143,7 @@ func clear_view() -> void:
 func show_data(data: Dictionary) -> void:
 	clear_view()
 	var rules: Array = data["rules"]
-	var problems: Array = data["problems"]
+	var problems: Array = data["notes"]
 	_auto_layout(rules)
 
 	for g in data["groups"]:
@@ -178,7 +178,7 @@ func show_data(data: Dictionary) -> void:
 		if rd["group"] != "" and _frames.has(rd["group"]):
 			attach_graph_element_to_frame(n.name, _frames[rd["group"]].name)
 
-	_make_event_nodes(data["external_events"], rules)
+	_make_event_nodes(data["external_calls"], rules)
 	_connect_all(rules)
 
 ## Current card positions and frame rects, to be written back into the model.
@@ -543,8 +543,8 @@ func _make_rule_node(rd: Dictionary, problems: Array) -> GraphNode:
 		rows.append([_row("forbids: " + ", ".join(rd["forbids"]), COL_FORBID, &"GuiClose"), false, false, COL_DIM])
 	if not rd["cancel_if"].is_empty():
 		rows.append([_row("cancel_if: " + ", ".join(rd["cancel_if"]), COL_CANCEL, &"Stop"), false, false, COL_DIM])
-	if rd["once"]:
-		rows.append([_row("Run once", COL_DIM, &"Lock"), false, false, COL_DIM])
+	if rd["one_shot"]:
+		rows.append([_row("One-shot", COL_DIM, &"Lock"), false, false, COL_DIM])
 	var i := 1
 	for s in rd["steps"]:
 		var prefix := "%d. " % i
@@ -604,7 +604,7 @@ func _make_event_nodes(events: Array, rules: Array) -> void:
 		var n := GraphNode.new()
 		n.name = "ev_" + _safe(en["event"])
 		n.set_meta("event", en["event"])
-		n.title = "External event"
+		n.title = "External Call"
 		n.tooltip_text = en["event"]
 		n.position_offset = Vector2(min_x - 230.0, y)
 		_style_card(n, 174.0, COL_EVENT, Color("#1e3947"), &"Signal")

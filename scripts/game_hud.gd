@@ -3,7 +3,7 @@ class_name GameHud extends CanvasLayer
 
 var manager
 var hud: Label
-var board: RuleBoard
+var board: Callboard
 var board_panel: PanelContainer
 
 func _ready() -> void:
@@ -18,12 +18,12 @@ func _ready() -> void:
 	board_panel.anchor_top = 0.42
 	board_panel.anchor_bottom = 1.0
 	board_panel.visible = false
-	board = RuleBoard.new()
+	board = Callboard.new()
 	board_panel.add_child(board)
 	add_child(board_panel)
 
-func bind_zone(zone: Zone) -> void:
-	board.bind_live(zone)
+func bind_stage(stage: Stage) -> void:
+	board.bind_live(stage)
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
@@ -31,19 +31,19 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_F1:
 				board_panel.visible = not board_panel.visible
 			KEY_R:
-				manager.clear_zone(false)
+				manager.clear_stage(false)
 			KEY_X:
-				manager.clear_zone(true)
+				manager.clear_stage(true)
 
 func _process(_delta: float) -> void:
 	if board_panel.visible:
-		hud.text = "F1: hide Rule Board"
+		hud.text = "F1: hide Callboard"
 		return
 	hud.text = (
 		"Score: %d\n\n"
 		+ "WASD / arrows: move    E: interact (shelter = offer decoy, doorway = deliver)\n"
-		+ "Bump the blue pad for the treat.    R: reload zone    X: wipe saved state    F1: Rule Board\n\n"
+		+ "Bump the blue pad for the treat.    R: reset the stage    X: strike the show    F1: Callboard\n\n"
 		+ "saved vars (persist): %s\n"
 		+ "local vars (reset on reload): %s\n\n"
 		+ "rules fired:\n%s"
-	) % [manager.score, manager.zone.saved_vars, manager.zone.bb.local, "\n".join(manager.log_lines)]
+	) % [manager.score, manager.stage.saved_vars, manager.stage.bb.local, "\n".join(manager.log_lines)]

@@ -18,7 +18,7 @@ jobs:
         suite:
           - name: Unit tests
             script: unit.gd
-          - name: Rule Board smoke test
+          - name: Callboard smoke test
             script: editor_smoke.gd
           - name: Runtime smoke test
             script: smoke.gd

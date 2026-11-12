@@ -8,7 +8,7 @@ signal changed
 signal numeric_changed(spin: SpinBox)
 signal content_size_changed
 
-const Style := preload("res://addons/director_blackboard/editor/board_style.gd")
+const Style := preload("res://addons/callboard/editor/board_style.gd")
 const COL_SAVED := Style.RELAY
 const COL_LOCAL := Style.EVENT
 const TYPES := {"bool": false, "int": 0, "float": 0.0, "String": ""}
@@ -180,15 +180,15 @@ func _on_add(index: int) -> void:
 	_rebuild()
 	changed.emit()
 
-func refresh_live(zone: Zone) -> void:
+func refresh_live(stage: Stage) -> void:
 	for key in _live_labels:
-		var value: Variant = zone.get_var(StringName(key))
+		var value: Variant = stage.get_var(StringName(key))
 		var l: Label = _live_labels[key]
 		l.text = "Live: " + str(value)
 		l.tooltip_text = l.text
 		l.add_theme_color_override("font_color", Color(0.4, 1.0, 0.5) if bool(value) else Color(0.75, 0.75, 0.75))
 	var latched: PackedStringArray = []
-	for rule in zone.engine.rules:
-		if rule.once and zone.fired.has(rule.latch_key()):
+	for rule in stage.engine.rules:
+		if rule.one_shot and stage.fired.has(rule.latch_key()):
 			latched.append(String(rule.id))
-	_latched.text = "Latched once-rules: " + (", ".join(latched) if not latched.is_empty() else "none")
+	_latched.text = "Latched one-shot rules: " + (", ".join(latched) if not latched.is_empty() else "none")

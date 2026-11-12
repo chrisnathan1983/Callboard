@@ -1,7 +1,7 @@
 @tool
-class_name Zone01 extends Zone
-## Zone 1: a guard patrols a doorway and trips a warning lamp until it is calmed.
-## Events, Blackboard defaults and graph are authored in zone_01.tres.
+class_name Stage01 extends Stage
+## Stage 1: a guard patrols a doorway and trips a warning lamp until it is calmed.
+## Events, Blackboard defaults and graph are authored in stage_01.tres.
 
 const SHELTER_POS := Vector3(-6, 0.5, -3)
 const GUARD_REST_OFFSET := Vector3(0, -0.1, 1.5)
@@ -15,7 +15,7 @@ var decoy: MeshInstance3D
 var reward: MeshInstance3D
 
 func _init() -> void:
-	name = "Zone01"
+	name = "Stage01"
 
 func _build_props() -> void:
 	Props.box(self, "Ground", Vector3(24, 0.1, 18), Vector3(0, -0.05, 0), Color(0.92, 0.95, 1.0))

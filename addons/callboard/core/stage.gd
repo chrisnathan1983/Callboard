@@ -1,21 +1,21 @@
 @tool
-class_name Zone extends Node3D
+class_name Stage extends Node3D
 ## Scene host for the Blackboard, rule engine and verb factory.
 
 signal rule_fired(rule_id: StringName, event: StringName)
 signal scored(points: int)
 signal var_changed(key: StringName, value: Variant)
 
-@export var definition: ZoneDefinition
+@export var definition: StageDefinition
 var saved_vars := {}    # injected by the manager; survives unloads
-var fired := {}         # injected by the manager; latches once rules
+var fired := {}         # injected by the manager; stores one-shot latches
 var bb: Blackboard
 var engine: RuleEngine
 var verbs: CoreVerbs
 var graph_errors: Array[String] = []
 
 ## Events and keys supplied by gameplay code outside the rules.
-var external_events: Array[StringName] = [&"arrive"]
+var external_calls: Array[StringName] = [&"arrive"]
 var external_vars: Array[StringName] = []
 
 func _ready() -> void:
@@ -24,7 +24,7 @@ func _ready() -> void:
 	build()
 	_restore_state()
 
-## Also used on an unparented instance by the Rule Board.
+## Also used on an unparented instance by the Callboard.
 func build() -> void:
 	bb = Blackboard.new(saved_vars)
 	bb.changed.connect(var_changed.emit)
@@ -53,7 +53,7 @@ func activate() -> void:
 			push_error("[%s] %s" % [name, problem])
 		return
 	if OS.is_debug_build():
-		for problem in validate():
+		for problem in check():
 			push_error("[%s] %s" % [name, problem])
 	fire(&"arrive")
 
@@ -94,5 +94,5 @@ func fire_relay_once(relay: StringName, latch: StringName, source_id: StringName
 	fire(StringName("relay:" + relay))
 	return true
 
-func validate() -> Array[String]:
-	return RuleValidator.validate(engine.rules, bb, external_events, external_vars)
+func check() -> Array[String]:
+	return RuleValidator.check(engine.rules, bb, external_calls, external_vars)

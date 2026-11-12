@@ -1,6 +1,6 @@
 @tool
 class_name TriggerArea extends Area3D
-## Fires a named event on the owning Zone.
+## Fires a named event on the owning Stage.
 ## ENTER: the player or a companion walks in. INTERACT: the player presses E nearby.
 
 enum Mode { ENTER, INTERACT }
@@ -25,7 +25,7 @@ func interact() -> void:
 
 func _fire() -> void:
 	var node := get_parent()
-	while node and not node is Zone:
+	while node and not node is Stage:
 		node = node.get_parent()
 	if node:
-		(node as Zone).fire(event, ctx.duplicate())
+		(node as Stage).fire(event, ctx.duplicate())

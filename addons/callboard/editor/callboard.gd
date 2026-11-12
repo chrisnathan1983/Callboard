@@ -1,16 +1,16 @@
 @tool
-class_name RuleBoard extends Control
+class_name Callboard extends Control
 ## Full-viewport rule graph with floating authoring controls.
 ##
-## Editor mode edits a ZoneDefinition and saves its resource after validation.
-## Live mode shows a running zone's values and rule pulses.
+## Editor mode edits a StageDefinition and saves its resource after validation.
+## Live mode shows a running stage's values and rule pulses.
 
 signal layout_saved(path: String)
 
-const ZONES_DIR := "res://zones"
+const STAGES_DIR := "res://stages"
 const HISTORY_LIMIT := 100
-const EDIT_FIELDS := ["external_events", "vars", "rules", "groups"]
-const Style := preload("res://addons/director_blackboard/editor/board_style.gd")
+const EDIT_FIELDS := ["external_calls", "vars", "rules", "groups"]
+const Style := preload("res://addons/callboard/editor/board_style.gd")
 const GUTTER := 12.0
 enum CreateAction { EVENT, RULE, GROUP }
 enum ContextAction { EDIT = 10, DUPLICATE, DELETE }
@@ -27,7 +27,7 @@ var _selected := ""
 var _selected_group := ""
 var _dirty := false
 var _editable := true
-var _live: Zone
+var _live: Stage
 var _accum := 0.0
 var _save_button: Button
 var _reload_button: Button
@@ -67,7 +67,7 @@ var _context_target: Dictionary
 func _init() -> void:
 	add_child(view)
 	view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	var zone_tools := HBoxContainer.new()
+	var stage_tools := HBoxContainer.new()
 	_picker.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	_picker.fit_to_longest_item = false
 	_picker.custom_minimum_size.x = 212
@@ -75,21 +75,21 @@ func _init() -> void:
 		if Engine.is_editor_hint():
 			_picker.custom_minimum_size.x *= _picker.get_theme_default_base_scale())
 	_picker.item_selected.connect(_on_picker)
-	zone_tools.add_child(_picker)
-	_save_button = _file_button(&"Save", "💾", "Save zone", save)
-	_reload_button = _file_button(&"Reload", "↻", "Reload zone from disk", refresh)
-	zone_tools.add_child(_save_button)
-	zone_tools.add_child(_reload_button)
+	stage_tools.add_child(_picker)
+	_save_button = _file_button(&"Save", "💾", "Save stage", save)
+	_reload_button = _file_button(&"Reload", "↻", "Reload stage from disk", refresh)
+	stage_tools.add_child(_save_button)
+	stage_tools.add_child(_reload_button)
 	_undo_button = _button("↶", undo)
 	_undo_button.accessibility_name = "Undo"
 	_undo_button.tooltip_text = "Undo (Ctrl/Cmd+Z)"
 	_redo_button = _button("↷", redo)
 	_redo_button.accessibility_name = "Redo"
 	_redo_button.tooltip_text = "Redo (Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y)"
-	zone_tools.add_child(_undo_button)
-	zone_tools.add_child(_redo_button)
+	stage_tools.add_child(_undo_button)
+	stage_tools.add_child(_redo_button)
 	var file_tools := VBoxContainer.new()
-	file_tools.add_child(zone_tools)
+	file_tools.add_child(stage_tools)
 	_status.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	Style.fallback_font_size(_status, 13)
 	_status.custom_minimum_size.x = 320
@@ -98,7 +98,7 @@ func _init() -> void:
 	_file_tools = _floating_toolbar(file_tools)
 
 	var create_tools := HBoxContainer.new()
-	_event_button = _button("+ Event", _open_event_dialog)
+	_event_button = _button("+ Call", _open_event_dialog)
 	create_tools.add_child(_event_button)
 	create_tools.add_child(_button("+ Rule", add_rule))
 	create_tools.add_child(_button("+ Group", add_group))
@@ -163,7 +163,7 @@ func _make_left_tools() -> void:
 	_blackboard_panel = Style.panel(blackboard, Style.SURFACE, Vector2(12, 10), true)
 	_setup_connections_panel()
 	_blackboard_button = _panel_launcher("Blackboard", "▤", _blackboard_panel, buttons)
-	_connections_button = _panel_launcher("Events & relays", "⇄", _connections_panel, buttons)
+	_connections_button = _panel_launcher("Calls & relays", "⇄", _connections_panel, buttons)
 	_connections_button.toggled.connect(func(open: bool) -> void:
 		if open:
 			_refresh_connections())
@@ -261,13 +261,13 @@ func refresh() -> void:
 		return
 	var keep := _path
 	_picker.clear()
-	for path in _collect_zone_definition_paths():
-		_picker.add_item(path.trim_prefix(ZONES_DIR + "/"))
+	for path in _collect_stage_definition_paths():
+		_picker.add_item(path.trim_prefix(STAGES_DIR + "/"))
 		_picker.set_item_metadata(_picker.item_count - 1, path)
 		_picker.get_popup().set_item_tooltip(_picker.item_count - 1, path)
 	if _picker.item_count == 0:
 		_path = ""
-		_show({"error": "No zone definitions in " + ZONES_DIR}, false)
+		_show({"error": "No stage definitions in " + STAGES_DIR}, false)
 		return
 	var idx := 0
 	for i in _picker.item_count:
@@ -276,22 +276,22 @@ func refresh() -> void:
 	_picker.select(idx)
 	open_script(_picker.get_item_metadata(idx))
 
-func _collect_zone_definition_paths(dir_path := ZONES_DIR) -> Array[String]:
+func _collect_stage_definition_paths(dir_path := STAGES_DIR) -> Array[String]:
 	var paths: Array[String] = []
 	var dir := DirAccess.open(dir_path)
 	if dir == null:
-		push_error("Could not open zone directory '%s': %s" % [dir_path, error_string(DirAccess.get_open_error())])
+		push_error("Could not open stage directory '%s': %s" % [dir_path, error_string(DirAccess.get_open_error())])
 		return paths
 	var err := dir.list_dir_begin()
 	if err != OK:
-		push_error("Could not list zone directory '%s': %s" % [dir_path, error_string(err)])
+		push_error("Could not list stage directory '%s': %s" % [dir_path, error_string(err)])
 		return paths
 	var entry := dir.get_next()
 	while entry != "":
 		var path := dir_path.path_join(entry)
 		if dir.current_is_dir():
 			if entry != "." and entry != "..":
-				paths.append_array(_collect_zone_definition_paths(path))
+				paths.append_array(_collect_stage_definition_paths(path))
 		elif entry.ends_with(".tres"):
 			paths.append(path)
 		entry = dir.get_next()
@@ -315,18 +315,18 @@ func _on_picker(i: int) -> void:
 		return
 	open_script(_picker.get_item_metadata(i))
 
-func bind_live(zone: Zone) -> void:
+func bind_live(stage: Stage) -> void:
 	if _live and is_instance_valid(_live) and _live.rule_fired.is_connected(_on_live_rule_fired):
 		_live.rule_fired.disconnect(_on_live_rule_fired)
-	_live = zone
-	_path = zone.definition.resource_path if zone.definition else ""
+	_live = stage
+	_path = stage.definition.resource_path if stage.definition else ""
 	_picker.visible = false
 	_save_button.hide()
 	_reload_button.hide()
-	zone.rule_fired.connect(_on_live_rule_fired)
+	stage.rule_fired.connect(_on_live_rule_fired)
 	_selected = ""
 	_dirty = false
-	_show(RuleGraphReader.read(zone), false)
+	_show(RuleGraphReader.read(stage), false)
 
 func _on_live_rule_fired(rule_id: StringName, event: StringName) -> void:
 	view.pulse(String(rule_id))
@@ -342,7 +342,7 @@ func _process(delta: float) -> void:
 
 func _show(data: Dictionary, editable: bool) -> void:
 	if data.has("error"):
-		_show({"rules": [], "groups": [], "vars": [], "external_events": [], "problems": [data["error"]]}, false)
+		_show({"rules": [], "groups": [], "vars": [], "external_calls": [], "notes": [data["error"]]}, false)
 		_status.text = data["error"]
 		return
 	_data = data
@@ -374,18 +374,18 @@ func _update_status() -> void:
 	_blackboard_button.text = "▤ %d" % variable_count
 	_blackboard_button.tooltip_text = "Blackboard (%d)" % variable_count
 	_connections_button.text = "⇄ %d" % connection_count
-	_connections_button.tooltip_text = "Events & relays (%d)" % connection_count
+	_connections_button.tooltip_text = "Calls & relays (%d)" % connection_count
 	if _connections_panel.visible:
 		_refresh_connections()
-	var n: int = _data["problems"].size()
+	var n: int = _data["notes"].size()
 	var t := "%d rules · %d variables · " % [_data["rules"].size(), _data["vars"].size()]
-	t += "Validation clear" if n == 0 else "%d validation %s" % [n, "issue" if n == 1 else "issues"]
+	t += "No notes" if n == 0 else "%d %s" % [n, "note" if n == 1 else "notes"]
 	if _dirty:
 		t = "Unsaved · " + t
 	if is_instance_valid(_live):
 		t = "Live · " + t
 	_status.text = t
-	_status.tooltip_text = t + ("\n" + "\n".join(_data["problems"]) if n > 0 else "")
+	_status.tooltip_text = t + ("\n" + "\n".join(_data["notes"]) if n > 0 else "")
 	Style.tint(_status, Style.WARNING if n > 0 or _dirty else Style.SUCCESS)
 
 # --- History ----------------------------------------------------------------------
@@ -501,13 +501,13 @@ func _open_create_menu(pointer: Vector2) -> void:
 	_context_target = view.context_target_at(pointer)
 	_create_menu.clear()
 	if _context_target.is_empty():
-		_create_menu.add_item("New event", CreateAction.EVENT)
+		_create_menu.add_item("New Call", CreateAction.EVENT)
 		_create_menu.set_item_disabled(0, _event_button.disabled)
 		_create_menu.add_item("New rule", CreateAction.RULE)
 		_create_menu.add_item("New group", CreateAction.GROUP)
 	else:
 		var kind: String = _context_target["kind"]
-		_create_menu.add_item("Manage event" if kind == "event" else "Edit " + kind, ContextAction.EDIT)
+		_create_menu.add_item("Manage Call" if kind == "event" else "Edit " + kind, ContextAction.EDIT)
 		if kind == "rule":
 			_create_menu.add_item("Duplicate rule", ContextAction.DUPLICATE)
 		_create_menu.add_separator()
@@ -560,11 +560,11 @@ func _create_at_pointer(id: int) -> void:
 			add_group(_create_position)
 
 func _setup_event_dialog() -> void:
-	_event_dialog.title = "New event"
+	_event_dialog.title = "New Call"
 	_event_dialog.ok_button_text = "Create"
 	_event_dialog.dialog_hide_on_ok = false
 	var fields := VBoxContainer.new()
-	_event_name.placeholder_text = "Event ID"
+	_event_name.placeholder_text = "Call ID"
 	fields.add_child(_event_name)
 	fields.add_child(_event_error)
 	_event_dialog.add_child(fields)
@@ -583,16 +583,16 @@ func _open_event_dialog() -> void:
 
 func _confirm_event() -> void:
 	var event_id := _event_name.text.strip_edges()
-	if add_event(event_id):
+	if add_call_name(event_id):
 		_event_dialog.hide()
 	else:
-		_event_error.text = "Enter an event ID." if event_id.is_empty() else "That event already exists."
+		_event_error.text = "Enter a Call ID." if event_id.is_empty() else "That Call already exists."
 
-func add_event(event_id: String) -> bool:
+func add_call_name(event_id: String) -> bool:
 	event_id = event_id.strip_edges()
-	if not _editable or event_id.is_empty() or _data["external_events"].has(event_id):
+	if not _editable or event_id.is_empty() or _data["external_calls"].has(event_id):
 		return false
-	_data["external_events"].append(event_id)
+	_data["external_calls"].append(event_id)
 	_changed(_selected)
 	_on_rule_selected(_selected)
 	return true
@@ -602,10 +602,10 @@ func _setup_connections_panel() -> void:
 	fields.custom_minimum_size.x = Style.LIST_WIDTH
 	fields.add_theme_constant_override("separation", Style.ENTRY_GAP)
 	var header := HBoxContainer.new()
-	var title := Style.label("Events & relays", Style.TEXT, 16)
+	var title := Style.label("Calls & relays", Style.TEXT, 16)
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(title)
-	header.add_child(_button("+ Event", _open_event_dialog))
+	header.add_child(_button("+ Call", _open_event_dialog))
 	fields.add_child(header)
 	_connection_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	_connection_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -616,7 +616,7 @@ func _setup_connections_panel() -> void:
 	fields.add_child(_connection_scroll)
 	_connections_panel = Style.panel(fields, Style.SURFACE, Vector2(12, 10), true)
 
-	_delete_connection_dialog.title = "Delete event or relay"
+	_delete_connection_dialog.title = "Delete Call or relay"
 	_delete_connection_dialog.ok_button_text = "Delete"
 	_delete_connection_dialog.confirmed.connect(_delete_selected_connection)
 	add_child(_delete_connection_dialog)
@@ -637,7 +637,7 @@ func _refresh_connections(preferred := "") -> void:
 		_connection_cards[id] = card
 		_connection_rows.add_child(card)
 	if ids.is_empty():
-		_connection_rows.add_child(Style.label("No events or relays.", Style.MUTED, 13))
+		_connection_rows.add_child(Style.label("No Calls or relays.", Style.MUTED, 13))
 	if _connection_cards.has(preferred):
 		_reveal_connection.call_deferred(preferred)
 
@@ -667,7 +667,7 @@ func _make_connection_card(id: String) -> PanelContainer:
 	card.add_child(header)
 
 	var actions := HBoxContainer.new()
-	var kind := Style.label("Relay" if is_relay else "Event", Style.RELAY if is_relay else Style.EVENT, 13)
+	var kind := Style.label("Relay" if is_relay else "Call", Style.RELAY if is_relay else Style.EVENT, 13)
 	kind.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	actions.add_child(kind)
 	var affected := RuleConnections.impact(_data, id)
@@ -686,8 +686,8 @@ func _make_connection_card(id: String) -> PanelContainer:
 
 	var details_text := "\n".join(affected) if not affected.is_empty() else "No rule connections."
 	if id == "arrive":
-		details_text += "\n\nThe zone lifecycle fires this built-in event."
-	elif _data["external_events"].has(id):
+		details_text += "\n\nThe Stage lifecycle fires this built-in Call."
+	elif _data["external_calls"].has(id):
 		details_text += "\n\nUpdate any gameplay code or scene triggers that fire this ID."
 	var details := Style.label(details_text, Style.TEXT, 13)
 	details.name = "ConnectionDetails"
@@ -733,7 +733,7 @@ func _confirm_connection_delete(id: String) -> void:
 		prompt += "\n\nThese connections will be removed. Listed steps will be deleted.\n"
 		prompt += "\n".join(affected.slice(0, 6))
 		if affected.size() > 6:
-			prompt += "\n…and %d more. See the full list in Events and Relays." % (affected.size() - 6)
+			prompt += "\n…and %d more. See the full list in Calls and Relays." % (affected.size() - 6)
 	_delete_connection_dialog.dialog_text = prompt
 	_delete_connection_dialog.popup_centered()
 
@@ -813,7 +813,7 @@ func add_rule(at := Vector2.INF) -> Dictionary:
 		return {}
 	_sync_layout()
 	var id := AuthoredData.unique_name(AuthoredData.rule_ids(_data), "new_rule")
-	var trigger: String = _data["external_events"][0] if not _data["external_events"].is_empty() else "arrive"
+	var trigger: String = _data["external_calls"][0] if not _data["external_calls"].is_empty() else "arrive"
 	var rd := AuthoredData.new_rule(id, trigger)
 	rd["state_key"] = AuthoredData.new_state_key()
 	rd["pos"] = (view.view_center() - Vector2(125, 60) if at == Vector2.INF else at).round()
@@ -925,6 +925,7 @@ func save() -> void:
 		Style.tint(_status, Style.WARNING)
 		return
 	var draft := RuleGraphReader.make_definition(_data)
+	draft._migrate()
 	var error := ResourceSaver.save(draft, _path)
 	if error != OK:
 		_status.text = "Save failed (error %d)" % error

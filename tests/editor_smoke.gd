@@ -1,25 +1,25 @@
 extends SceneTree
 ## Headless authoring integration test: godot --headless --path . --script res://tests/editor_smoke.gd
 
-const ZONE_PATH := "res://zones/zone_01/zone_01.gd"
-const DEFINITION_PATH := "res://zones/zone_01/zone_01.tres"
-const TMP_PATH := "user://zone_tmp.tres"
+const STAGE_PATH := "res://stages/stage_01/stage_01.gd"
+const DEFINITION_PATH := "res://stages/stage_01/stage_01.tres"
+const TMP_PATH := "user://stage_tmp.tres"
 
 func _initialize() -> void:
 	var ok := _test_factory()
 	ok = _test_rename_saved_state() and ok
 
 	# --- Authored resource ----------------------------------------------------------
-	var src := FileAccess.get_file_as_string(ZONE_PATH)
-	var definition := load(DEFINITION_PATH) as ZoneDefinition
+	var src := FileAccess.get_file_as_string(STAGE_PATH)
+	var definition := load(DEFINITION_PATH) as StageDefinition
 	var data := RuleGraphReader.inspect_definition(DEFINITION_PATH)
 	ok = _check("resource stores events, variables, rules and groups",
-		definition.external_events.size() == 4 and definition.variables.size() == 3
+		definition.external_calls.size() == 4 and definition.variables.size() == 3
 		and not definition.rules.is_empty() and definition.rules.size() == data["rules"].size()
 		and definition.groups.size() == 3) and ok
-	ok = _check("reader: compiles with no problems", data["compiles"] and data["problems"].is_empty()) and ok
+	ok = _check("reader: compiles with no problems", data["compiles"] and data["notes"].is_empty()) and ok
 	ok = _check("reader: every rule has a saved position", data["rules"].all(func(r): return r["has_pos"])) and ok
-	ok = _check("reader: step text keeps source expressions", ExprText.step_text(data["rules"][1]["steps"][1]) == "light(lamp, true, 3.0).after(0.25)") and ok
+	ok = _check("reader: step text keeps source expressions", ExprText.step_text(data["rules"][1]["steps"][1]) == "light(lamp, true, 3.5).after(0.25)") and ok
 	ok = _check("reader: step emits come from runtime Steps", data["rules"][0]["steps"][0]["emits"] == "standoff_tick") and ok
 	ok = _check("catalog: 12 verbs incl. typed params", data["catalog"].size() == 12 and VerbCatalog.find(data["catalog"], "move_to")["args"][2]["type"] == TYPE_VECTOR3) and ok
 	ok = _check("props discovered", data["props"].any(func(p): return p["name"] == "guard")) and ok
@@ -33,43 +33,43 @@ func _initialize() -> void:
 	gv.queue_free()
 
 	# --- D. Editing through the board ------------------------------------------------
-	var board := RuleBoard.new()
+	var board := Callboard.new()
 	root.add_child(board)
-	var zone_paths := board._collect_zone_definition_paths()
-	ok = _check("board: discovers nested zone resources",
-		zone_paths.has(DEFINITION_PATH)) and ok
+	var stage_paths := board._collect_stage_definition_paths()
+	ok = _check("board: discovers nested stage resources",
+		stage_paths.has(DEFINITION_PATH)) and ok
 	board.open_script(DEFINITION_PATH)
 	var d: Dictionary = board._data
 	board.view._rule_nodes["z1_bark"].position_offset = Vector2(555, 77)
 
 	var nr: Dictionary = board.add_rule()
 	ok = _check("add rule: count increments, id unique, flagged as doing nothing",
-		d["rules"].size() == definition.rules.size() + 1 and d["problems"].any(func(p): return "'new_rule' does nothing" in p)) and ok
+		d["rules"].size() == definition.rules.size() + 1 and d["notes"].any(func(p): return "'new_rule' does nothing" in p)) and ok
 	ok = _check("card move synced into model", d["rules"][1]["pos"] == Vector2(555, 77)) and ok
 	nr["requires"] = ["guard_calmed"]
 	nr["steps"].append(VerbCatalog.new_step(d, "score"))
 	nr["steps"].append(VerbCatalog.new_step(d, "show_node"))
 	ok = _check("new_step fills required args with a compatible prop", nr["steps"][1]["args"] == ["guard"]) and ok
 	board._changed("new_rule")
-	ok = _check("add steps: clean again", d["problems"].is_empty() and d["compiles"]) and ok
+	ok = _check("add steps: clean again", d["notes"].is_empty() and d["compiles"]) and ok
 
 	board.connect_wire({"rule": "z1_bark", "port": 0}, "new_rule")
 	ok = _check("wire: names the unnamed port and sets trigger", _rule(d, "z1_bark")["emit"] == "z1_bark_done" and nr["trigger"] == "relay:z1_bark_done") and ok
-	ok = _check("wire: no problems after wiring", d["problems"].is_empty()) and ok
+	ok = _check("wire: no problems after wiring", d["notes"].is_empty()) and ok
 	board.connect_wire({"event": "deliver"}, "new_rule")
 	ok = _check("wire from event node", nr["trigger"] == "deliver") and ok
 	board.disconnect_wire("new_rule")
-	ok = _check("disconnect: trigger cleared and flagged", nr["trigger"] == "" and d["problems"].any(func(p): return "'new_rule' has no trigger" in p)) and ok
+	ok = _check("disconnect: trigger cleared and flagged", nr["trigger"] == "" and d["notes"].any(func(p): return "'new_rule' has no trigger" in p)) and ok
 
 	board.duplicate_rule("new_rule")
 	ok = _check("duplicate: unique id", AuthoredData.rule_ids(d).has("new_rule_copy")) and ok
 	board.delete_rule("new_rule_copy")
 	board.delete_rule("new_rule")
 	ok = _check("delete: original count restored; unheard relay is flagged",
-		d["rules"].size() == definition.rules.size() and d["problems"].size() == 1 and "z1_bark_done" in d["problems"][0]) and ok
+		d["rules"].size() == definition.rules.size() and d["notes"].size() == 1 and "z1_bark_done" in d["notes"][0]) and ok
 	_rule(d, "z1_bark")["emit"] = ""
 	board._changed("")
-	ok = _check("clearing the emit makes it clean again", d["problems"].is_empty()) and ok
+	ok = _check("clearing the emit makes it clean again", d["notes"].is_empty()) and ok
 
 	# Blackboard editing
 	board.blackboard._on_add(0)
@@ -78,11 +78,11 @@ func _initialize() -> void:
 	AuthoredData.rename_key(d, "lamp_on", "alarm_on")
 	board._changed("")
 	ok = _check("rename key updates guards", _rule(d, "z1_caught")["requires"] == ["alarm_on"]) and ok
-	ok = _check("rename key makes implicit `light` key explicit", _rule(d, "z1_bark")["steps"][1]["args"] == ["lamp", "true", "3.0", '&"alarm_on"']) and ok
-	ok = _check("rename key: still compiles with no problems", d["compiles"] and d["problems"].is_empty()) and ok
+	ok = _check("rename key makes implicit `light` key explicit", _rule(d, "z1_bark")["steps"][1]["args"] == ["lamp", "true", "3.5", '&"alarm_on"']) and ok
+	ok = _check("rename key: still compiles with no problems", d["compiles"] and d["notes"].is_empty()) and ok
 	d["vars"] = d["vars"].filter(func(v): return v["key"] != "guard_calmed")
 	board._changed("")
-	ok = _check("delete variable: references are flagged", d["problems"].any(func(p): return "'guard_calmed'" in p and "not declared" in p)) and ok
+	ok = _check("delete variable: references are flagged", d["notes"].any(func(p): return "'guard_calmed'" in p and "not declared" in p)) and ok
 
 	# Groups
 	board.add_group()
@@ -96,13 +96,13 @@ func _initialize() -> void:
 	# --- E. Save: refuses broken output, writes good output ----------------------------
 	ok = _check("temporary resource saved", ResourceSaver.save(definition, TMP_PATH) == OK) and ok
 	var original := FileAccess.get_file_as_string(TMP_PATH)
-	var b2 := RuleBoard.new()
+	var b2 := Callboard.new()
 	root.add_child(b2)
 	b2.open_script(TMP_PATH)
 	var d2: Dictionary = b2._data
 	ok = _check("adding an event creates a wireable event card",
-		b2.add_event("  doorbell  ") and b2.view._event_nodes.has("doorbell")) and ok
-	ok = _check("duplicate and blank event names rejected", not b2.add_event("doorbell") and not b2.add_event(" ")) and ok
+		b2.add_call_name("  doorbell  ") and b2.view._event_nodes.has("doorbell")) and ok
+	ok = _check("duplicate and blank event names rejected", not b2.add_call_name("doorbell") and not b2.add_call_name(" ")) and ok
 	b2._undo_button.pressed.emit()
 	ok = _check("undo event returns to clean state", not b2.view._event_nodes.has("doorbell") and not b2._dirty) and ok
 	b2._redo_button.pressed.emit()
@@ -159,7 +159,7 @@ func _initialize() -> void:
 		_rule(d2, "z1_standoff").get("reentry") == Rule.ReentryPolicy.RESTART) and ok
 	b2.save()
 	var re := RuleGraphReader.inspect_definition(TMP_PATH)
-	ok = _check("save: script unchanged", FileAccess.get_file_as_string(ZONE_PATH) == src) and ok
+	ok = _check("save: script unchanged", FileAccess.get_file_as_string(STAGE_PATH) == src) and ok
 	ok = _check("save: rule, relay and interval persisted",
 		_rule(re, "new_rule")["trigger"] == "relay:z1_calm_done"
 		and _rule(re, "z1_standoff")["steps"][0]["args"][0] == "4.0") and ok
@@ -168,9 +168,9 @@ func _initialize() -> void:
 	ok = _check("save: frame size is rounded on disk",
 		re["groups"].any(func(g): return g["name"] == "Delivery" and g["rect"].size == expected_size)) and ok
 	ok = _check("save: position preserved", _rule(re, "new_rule")["has_pos"]) and ok
-	ok = _check("save: reloaded zone builds with no problems", re["compiles"] and re["problems"].is_empty()) and ok
+	ok = _check("save: reloaded stage builds with no problems", re["compiles"] and re["notes"].is_empty()) and ok
 	ok = _check("new event and wire persist",
-		re["external_events"].has("doorbell") and _rule(re, "z1_decoy")["trigger"] == "doorbell") and ok
+		re["external_calls"].has("doorbell") and _rule(re, "z1_decoy")["trigger"] == "doorbell") and ok
 	b2.undo()
 	ok = _check("undo after saving is an unsaved edit", b2._dirty) and ok
 	b2.redo()
@@ -188,7 +188,7 @@ func _initialize() -> void:
 	quit(0 if ok else 1)
 
 func _test_canvas_actions() -> bool:
-	var board := RuleBoard.new()
+	var board := Callboard.new()
 	root.add_child(board)
 	board.open_script(DEFINITION_PATH)
 	await process_frame
@@ -216,13 +216,13 @@ func _test_canvas_actions() -> bool:
 	view.popup_request.emit(pointer)
 	ok = _check("canvas popup offers all three creation actions",
 		board._create_menu.visible and board._create_menu.item_count == 3) and ok
-	board._create_menu.id_pressed.emit(RuleBoard.CreateAction.RULE)
+	board._create_menu.id_pressed.emit(Callboard.CreateAction.RULE)
 	board._create_menu.hide()
 	ok = _check("context-created rule uses the clicked graph coordinates",
 		_rule(board._data, "new_rule").get("pos") == origin) and ok
 	board.undo()
 	view.popup_request.emit(pointer)
-	board._create_menu.id_pressed.emit(RuleBoard.CreateAction.GROUP)
+	board._create_menu.id_pressed.emit(Callboard.CreateAction.GROUP)
 	board._create_menu.hide()
 	ok = _check("context-created group uses the clicked graph coordinates",
 		board._data["groups"].back()["rect"].position == origin) and ok
@@ -232,15 +232,15 @@ func _test_canvas_actions() -> bool:
 	view.popup_request.emit(rule.position + rule.size * view.zoom * 0.5)
 	ok = _check("right-click on a rule inside a frame targets the rule",
 		board._context_target.get("id") == "z1_bark"
-		and board._create_menu.get_item_index(RuleBoard.ContextAction.DELETE) >= 0) and ok
-	board._create_menu.id_pressed.emit(RuleBoard.ContextAction.DELETE)
+		and board._create_menu.get_item_index(Callboard.ContextAction.DELETE) >= 0) and ok
+	board._create_menu.id_pressed.emit(Callboard.ContextAction.DELETE)
 	board._create_menu.hide()
 	ok = _check("context delete removes the targeted rule", not view._rule_nodes.has("z1_bark")) and ok
 	board.undo()
 	await process_frame
 	var frame: GraphFrame = view._frames["Delivery"]
 	view.popup_request.emit(frame.position + Vector2(6, 6))
-	board._create_menu.id_pressed.emit(RuleBoard.ContextAction.DELETE)
+	board._create_menu.id_pressed.emit(Callboard.ContextAction.DELETE)
 	board._create_menu.hide()
 	ok = _check("context delete removes a group and keeps its rules",
 		not view._frames.has("Delivery") and view._rule_nodes.has("z1_delivered")) and ok
@@ -248,7 +248,7 @@ func _test_canvas_actions() -> bool:
 	await process_frame
 	var event: GraphNode = view._event_nodes["offer:decoy"]
 	view.popup_request.emit(event.position + event.size * view.zoom * 0.5)
-	board._create_menu.id_pressed.emit(RuleBoard.ContextAction.DELETE)
+	board._create_menu.id_pressed.emit(Callboard.ContextAction.DELETE)
 	board._create_menu.hide()
 	ok = _check("event context delete confirms the targeted event",
 		board._delete_connection_dialog.visible and "offer:decoy" in board._delete_connection_dialog.dialog_text) and ok
@@ -258,10 +258,10 @@ func _test_canvas_actions() -> bool:
 	return ok
 
 func _test_event_and_relay_edits() -> bool:
-	var definition := load(DEFINITION_PATH) as ZoneDefinition
+	var definition := load(DEFINITION_PATH) as StageDefinition
 	if not _check("connection fixture saved", ResourceSaver.save(definition, TMP_PATH) == OK):
 		return false
-	var board := RuleBoard.new()
+	var board := Callboard.new()
 	root.add_child(board)
 	board.open_script(TMP_PATH)
 	board._connections_button.button_pressed = true
@@ -308,13 +308,13 @@ func _test_event_and_relay_edits() -> bool:
 		and _rule(board._data, "z1_bark")["trigger"] == "relay:guard_tick") and ok
 	ok = _check("an external relay rename updates its declaration and listener",
 		board.rename_connection("relay:treat_out", "treat_ready").is_empty()
-		and board._data["external_events"].has("relay:treat_ready")
+		and board._data["external_calls"].has("relay:treat_ready")
 		and _rule(board._data, "z1_treat")["trigger"] == "relay:treat_ready") and ok
 
 	board.save()
 	var reloaded := RuleGraphReader.inspect_definition(TMP_PATH)
 	var tick: Dictionary = _rule(reloaded, "z1_standoff")["steps"][0]
-	var saved: ZoneDefinition = reloaded["definition"]
+	var saved: StageDefinition = reloaded["definition"]
 	ok = _check("save and reload preserve relay edits and rederive step metadata",
 		reloaded["compiles"] and tick["emits"] == "guard_tick" and tick["emit_arg"] == 1
 		and not saved.rules[0]["steps"][0].has("emit_arg")) and ok
@@ -340,10 +340,10 @@ func _test_event_and_relay_edits() -> bool:
 	return ok
 
 func _test_rename_saved_state() -> bool:
-	var definition := load(DEFINITION_PATH) as ZoneDefinition
+	var definition := load(DEFINITION_PATH) as StageDefinition
 	if not _check("rename fixture saved", ResourceSaver.save(definition, TMP_PATH) == OK):
 		return false
-	var board := RuleBoard.new()
+	var board := Callboard.new()
 	root.add_child(board)
 	board.open_script(TMP_PATH)
 	board._on_rule_selected("z1_delivered")
@@ -359,26 +359,26 @@ func _test_rename_saved_state() -> bool:
 	board.save()
 
 	var data := RuleGraphReader.inspect_definition(TMP_PATH)
-	var renamed: ZoneDefinition = data["definition"]
-	var zone := renamed.instantiate()
-	zone.fired = {&"z1_delivered": true}
-	zone.saved_vars = {&"guard_calmed": true}
-	zone.build()
+	var renamed: StageDefinition = data["definition"]
+	var stage := renamed.instantiate()
+	stage.fired = {&"z1_delivered": true}
+	stage.saved_vars = {&"guard_calmed": true}
+	stage.build()
 	var delivered: Rule
-	for rule in zone.engine.rules:
+	for rule in stage.engine.rules:
 		if rule.id == &"parcel_delivered":
 			delivered = rule
 			break
 	ok = _check("an existing latch survives repeated rule renames and reload",
 		delivered != null and delivered.latch_key() == &"z1_delivered"
-		and not zone.engine.passes(delivered)) and ok
+		and not stage.engine.passes(delivered)) and ok
 	ok = _check("the renamed Blackboard key reads an existing saved value",
-		zone.get_var(&"guard_relaxed") == true and zone.get_var(&"guard_calmed") == true
-		and not zone.saved_vars.has(&"guard_relaxed")) and ok
-	zone.write_var(&"guard_relaxed", false)
+		stage.get_var(&"guard_relaxed") == true and stage.get_var(&"guard_calmed") == true
+		and not stage.saved_vars.has(&"guard_relaxed")) and ok
+	stage.write_var(&"guard_relaxed", false)
 	ok = _check("writes still use the original saved storage key",
-		zone.saved_vars == {&"guard_calmed": false}) and ok
-	zone.free()
+		stage.saved_vars == {&"guard_calmed": false}) and ok
+	stage.free()
 
 	board.duplicate_rule("parcel_delivered")
 	board.inspector._set_id("z1_delivered")
@@ -392,18 +392,18 @@ func _test_rename_saved_state() -> bool:
 	reused_key.text = "guard_calmed"
 	reused_key.text_submitted.emit(reused_key.text)
 	board._data["vars"].back()["scope"] = "saved"
-	var reused_zone := RuleGraphReader.make_definition(board._data).instantiate()
-	reused_zone.saved_vars = {&"guard_calmed": true}
-	reused_zone.build()
+	var reused_stage := RuleGraphReader.make_definition(board._data).instantiate()
+	reused_stage.saved_vars = {&"guard_calmed": true}
+	reused_stage.build()
 	ok = _check("a new saved variable can reuse the old name with its own default",
-		reused_zone.get_var(&"guard_relaxed") == true and reused_zone.get_var(&"guard_calmed") == false) and ok
-	reused_zone.free()
+		reused_stage.get_var(&"guard_relaxed") == true and reused_stage.get_var(&"guard_calmed") == false) and ok
+	reused_stage.free()
 	board.queue_free()
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(TMP_PATH))
 	return ok
 
 func _test_numeric_undo() -> bool:
-	var board := RuleBoard.new()
+	var board := Callboard.new()
 	root.add_child(board)
 	board.open_script(DEFINITION_PATH)
 	board.blackboard._on_add(1)
@@ -451,10 +451,10 @@ func _test_numeric_undo() -> bool:
 	return ok
 
 func _test_factory() -> bool:
-	# Build an unparented resource-backed zone with its own verb factory.
+	# Build an unparented resource-backed stage with its own verb factory.
 	var script := GDScript.new()
 	script.source_code = """@tool
-extends Zone
+extends Stage
 
 const MESSAGE := 'A, "B"'
 var target: Node3D
@@ -475,39 +475,39 @@ func _build_blackboard() -> void:
 """
 	if not _check("custom factory fixture compiles", script.reload() == OK):
 		return false
-	var definition := ZoneDefinition.new()
-	definition.zone_script = script
+	var definition := StageDefinition.new()
+	definition.stage_script = script
 	definition.variables = [{"key": "ready", "scope": "local", "default": false}]
 	var spec := {"verb": "stamp", "args": ["target", "MESSAGE"], "delay": "0.25"}
 	definition.rules = [{
 		"id": "custom", "trigger": "arrive", "requires": [], "forbids": [],
-		"cancel_if": [], "once": false, "emit": "", "steps": [spec],
+		"cancel_if": [], "one_shot": false, "emit": "", "steps": [spec],
 	}]
-	var zone := definition.instantiate()
-	zone.build()
+	var stage := definition.instantiate()
+	stage.build()
 	var ok := _check("factory discovers its custom verb and the inherited verbs",
-		VerbCatalog.from_factory(zone.verbs).size() == 13)
-	ok = _check("zone runs the blackboard hook after resource defaults", zone.is_set(&"ready")) and ok
-	if _check("custom resource compiles", zone.graph_errors.is_empty()):
-		var step := zone.engine.rules[0].steps[0]
+		VerbCatalog.from_factory(stage.verbs).size() == 13)
+	ok = _check("stage runs the blackboard hook after resource defaults", stage.is_set(&"ready")) and ok
+	if _check("custom resource compiles", stage.graph_errors.is_empty()):
+		var step := stage.engine.rules[0].steps[0]
 		ok = _check("resource compiler supplies verb, prop, constant and delay metadata",
-			step.verb == &"stamp" and step.args == [zone.get("target"), 'A, "B"']
+			step.verb == &"stamp" and step.args == [stage.get("target"), 'A, "B"']
 			and step.delay == 0.25) and ok
 		step.fn.call({})
 		ok = _check("compiled custom step runs with the supplied arguments",
-			zone.get("target").get_meta(&"label") == 'A, "B"') and ok
+			stage.get("target").get_meta(&"label") == 'A, "B"') and ok
 	else:
 		ok = false
-	zone.engine.rules.clear()
-	zone.free()
+	stage.engine.rules.clear()
+	stage.free()
 
 	spec["args"] = ["null", "MESSAGE"]
-	zone = definition.instantiate()
-	zone.build()
+	stage = definition.instantiate()
+	stage.build()
 	ok = _check("validator still reports null props with compiler-generated metadata",
-		zone.validate().any(func(problem): return "'stamp' step with an unset prop" in problem)) and ok
-	zone.engine.rules.clear()
-	zone.free()
+		stage.check().any(func(problem): return "'stamp' step with an unset prop" in problem)) and ok
+	stage.engine.rules.clear()
+	stage.free()
 
 	return ok
 

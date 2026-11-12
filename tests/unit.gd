@@ -5,6 +5,23 @@ signal clock_tick
 
 func _initialize() -> void:
 	var ok := true
+	var legacy_definition := load("res://tests/fixtures/legacy_stage_definition.tres") as StageDefinition
+	if legacy_definition:
+		legacy_definition._migrate()
+		var legacy_stage := legacy_definition.instantiate()
+		if legacy_stage:
+			legacy_stage.build()
+			ok = _check("legacy resource fields and rule keys migrate cleanly",
+				legacy_definition.external_calls == PackedStringArray(["arrive", "deliver"])
+				and legacy_definition.rules[0]["one_shot"]
+				and not legacy_definition.rules[0].has("once")
+				and legacy_definition.rules[0].has_all(["emit", "state_key", "requires", "forbids", "cancel_if"])
+				and legacy_definition.format_version == StageDefinition.CURRENT_FORMAT_VERSION
+				and legacy_stage.graph_errors.is_empty() and legacy_stage.check().is_empty()) and ok
+			legacy_stage.engine.rules.clear()
+			legacy_stage.free()
+	else:
+		ok = _check("legacy resource fixture loads and migrates", false) and ok
 
 	var bb := Blackboard.new()
 	bb.define(&"lamp_on", &"local", false)
@@ -16,7 +33,7 @@ func _initialize() -> void:
 	var cycle_b := Rule.new(&"loop_b", &"relay:b")
 	cycle_b.emits = &"a"
 	var cycle_rules: Array[Rule] = [cycle_a, cycle_b]
-	var cycle_problems := RuleValidator.validate(
+	var cycle_problems := RuleValidator.check(
 		cycle_rules, bb, [&"relay:a", &"relay:b"], [])
 	ok = _check("validator detects relay cycles",
 		cycle_problems.any(func(p): return "relay cycle" in p and "'loop_a'" in p and "'loop_b'" in p)) and ok
@@ -24,7 +41,7 @@ func _initialize() -> void:
 	var shared_a := Rule.new(&"shared_a", &"alarm")
 	var shared_b := Rule.new(&"shared_b", &"alarm")
 	var shared_rules: Array[Rule] = [shared_a, shared_b]
-	var shared_problems := RuleValidator.validate(shared_rules, bb, [&"alarm"], [])
+	var shared_problems := RuleValidator.check(shared_rules, bb, [&"alarm"], [])
 	ok = _check("validator flags potentially overlapping shared triggers",
 		shared_problems.any(func(p): return "share trigger 'alarm'" in p)) and ok
 
@@ -33,7 +50,7 @@ func _initialize() -> void:
 	var exclusive_b := Rule.new(&"exclusive_b", &"alarm")
 	exclusive_b.forbids = [&"lamp_on"]
 	var exclusive_rules: Array[Rule] = [exclusive_a, exclusive_b]
-	var exclusive_problems := RuleValidator.validate(
+	var exclusive_problems := RuleValidator.check(
 		exclusive_rules, bb, [&"alarm"], [&"lamp_on"])
 	ok = _check("validator accepts mutually exclusive shared triggers",
 		not exclusive_problems.any(func(p): return "share trigger 'alarm'" in p)) and ok
@@ -48,7 +65,7 @@ func _initialize() -> void:
 	guarded.requires = [&"armed"]
 	guarded.forbids = [&"blocked"]
 	guarded.cancel_if = [&"cancelled"]
-	guarded.once = true
+	guarded.one_shot = true
 	var fired: Array[StringName] = []
 	router.rule_fired.connect(func(id: StringName, _event: StringName) -> void: fired.append(id))
 
@@ -65,11 +82,29 @@ func _initialize() -> void:
 	route_bb.write(&"cancelled", true)
 	ok = _check("router cancels a rule after cancel_if is set", not router.alive(guarded, 0)) and ok
 
+	var engine_bb := Blackboard.new()
 	var wait_requests: Array[float] = []
 	var fake_wait := func(seconds: float) -> Signal:
 		wait_requests.append(seconds)
 		return clock_tick
-	var engine_bb := Blackboard.new()
+	var latch_engine := RuleEngine.new(engine_bb, {}, fake_wait)
+	engine_bb.define(&"stop_latched", &"local", false)
+	var latch_state := {"ran": false}
+	var latch_rule := Rule.new(&"latch_on_start", &"latch")
+	latch_rule.one_shot = true
+	latch_rule.cancel_if = [&"stop_latched"]
+	var latch_step := Step.new(func(_ctx: Dictionary) -> void: latch_state["ran"] = true)
+	latch_step.delay = 1.0
+	latch_rule.steps.append(latch_step)
+	latch_engine.rules.append(latch_rule)
+	latch_engine.fire(&"latch")
+	var latched_at_start := latch_engine.fired.has(&"latch_on_start")
+	engine_bb.write(&"stop_latched", true)
+	clock_tick.emit()
+	await process_frame
+	ok = _check("one-shot stays latched when cancelled mid-flight",
+		latched_at_start and not latch_state["ran"] and not latch_engine.passes(latch_rule)) and ok
+	wait_requests.clear()
 	var state := {"step_ran": false}
 	var engine := RuleEngine.new(engine_bb, {}, fake_wait)
 	var delayed := Rule.new(&"delayed", &"go")

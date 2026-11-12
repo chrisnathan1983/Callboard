@@ -4,7 +4,7 @@ class_name RuleEngine extends RefCounted
 signal rule_fired(rule_id: StringName, event: StringName)
 
 var rules: Array[Rule] = []
-var fired: Dictionary                 # injected, latches `once`
+var fired: Dictionary                 # injected, latches one-shot rules
 var bb: Blackboard
 var wait: Callable                    # func(seconds: float) -> Signal; tests swap this
 var _gen := 0
@@ -54,7 +54,7 @@ func _dispatch(r: Rule, event: StringName, ctx: Dictionary, gen: int) -> void:
 		_active.erase(r)
 
 func _run(r: Rule, event: StringName, ctx: Dictionary, gen: int) -> void:
-	if r.once:
+	if r.one_shot:
 		fired[r.latch_key()] = true
 	rule_fired.emit(r.id, event)
 	if not alive(r, gen):
@@ -70,7 +70,7 @@ func _run(r: Rule, event: StringName, ctx: Dictionary, gen: int) -> void:
 		fire("relay:" + r.emits, ctx)
 
 func passes(r: Rule) -> bool:
-	if r.once and fired.has(r.latch_key()): return false
+	if r.one_shot and fired.has(r.latch_key()): return false
 	return r.requires.all(bb.is_set) and not r.forbids.any(bb.is_set)
 
 func alive(r: Rule, gen: int) -> bool:

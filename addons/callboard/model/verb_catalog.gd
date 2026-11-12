@@ -1,6 +1,6 @@
 @tool
 class_name VerbCatalog extends RefCounted
-## Discovers verb signatures and zone props for the Rule Board.
+## Discovers verb signatures and stage props for the Callboard.
 
 ## [{name, args: [{name, type, class, default: expr text or ""}]}], sorted by name.
 static func from_factory(factory: CoreVerbs) -> Array:
@@ -24,10 +24,10 @@ static func from_factory(factory: CoreVerbs) -> Array:
 	out.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a["name"] < b["name"])
 	return out
 
-## [{name, class}] for every typed object variable the zone script declares (its props).
-static func props_of(zone: Zone) -> Array:
+## [{name, class}] for every typed object variable the stage script declares (its props).
+static func props_of(stage: Stage) -> Array:
 	var out: Array = []
-	for p in zone.get_property_list():
+	for p in stage.get_property_list():
 		if p["name"] in [&"definition", &"bb", &"engine", &"verbs"]:
 			continue
 		if (p["usage"] & PROPERTY_USAGE_SCRIPT_VARIABLE) and p["type"] == TYPE_OBJECT and String(p.get("class_name", "")) != "":

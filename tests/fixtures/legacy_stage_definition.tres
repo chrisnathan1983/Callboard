@@ -1,0 +1,21 @@
+[gd_resource type="Resource" script_class="StageDefinition" format=3]
+
+[ext_resource type="Script" path="res://addons/callboard/core/stage_definition.gd" id="1"]
+[ext_resource type="Script" path="res://stages/stage_01/stage_01.gd" id="2"]
+
+[resource]
+script = ExtResource("1")
+zone_script = ExtResource("2")
+external_events = PackedStringArray("arrive", "deliver")
+variables = []
+rules = [{
+"id": "legacy_rule",
+"once": true,
+"steps": [{
+"args": ["1"],
+"delay": "",
+"verb": "score"
+}],
+"trigger": "arrive"
+}]
+groups = []

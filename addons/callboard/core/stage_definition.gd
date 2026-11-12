@@ -1,54 +1,100 @@
 @tool
-class_name ZoneDefinition extends Resource
-## Authored data shared by the runtime and the Rule Board.
+class_name StageDefinition extends Resource
+## Authored data shared by the runtime and the Callboard.
 
-@export var zone_script: GDScript
-@export var external_events := PackedStringArray(["arrive"])
+const CURRENT_FORMAT_VERSION := 2
+
+@export var stage_script: GDScript
+@export var external_calls := PackedStringArray()
 @export var external_vars := PackedStringArray()
 @export var variables: Array = []
-@export var rules: Array = []
+var _rules: Array = []
+@export var rules: Array:
+	get:
+		return _rules
+	set(value):
+		_rules = _normalize_rules(value)
 @export var groups: Array = []
+@export var format_version := 0
 
-func instantiate() -> Zone:
-	if zone_script == null or not zone_script.can_instantiate():
+func _set(property: StringName, value: Variant) -> bool:
+	match property:
+		&"zone_script":
+			if stage_script == null:
+				stage_script = value as GDScript
+			return true
+		&"external_events":
+			if external_calls.is_empty():
+				external_calls = PackedStringArray(value)
+			return true
+	return false
+
+## Normalize data at load and before any consumer can read it. Older `.tres`
+## resources used `zone_script`, `external_events`, and `once` rule keys.
+func _migrate() -> void:
+	if external_calls.is_empty():
+		external_calls = PackedStringArray(["arrive"])
+	_rules = _normalize_rules(_rules)
+	format_version = maxi(format_version, CURRENT_FORMAT_VERSION)
+
+static func _normalize_rules(source: Array) -> Array:
+	var normalized: Array = source
+	for entry in normalized:
+		if not entry is Dictionary:
+			continue
+		if not entry.has("one_shot"):
+			entry["one_shot"] = entry.get("once", false)
+		entry.erase("once")
+		entry["emit"] = entry.get("emit", "")
+		entry["state_key"] = entry.get("state_key", entry.get("id", ""))
+		entry["requires"] = entry.get("requires", [])
+		entry["forbids"] = entry.get("forbids", [])
+		entry["cancel_if"] = entry.get("cancel_if", [])
+	return normalized
+
+func instantiate() -> Stage:
+	_migrate()
+	if stage_script == null or not stage_script.can_instantiate():
 		return null
-	var instance: Variant = zone_script.new()
-	if instance is Zone:
+	var instance: Variant = stage_script.new()
+	if instance is Stage:
 		instance.definition = self
 		return instance
 	if instance is Node:
 		instance.free()
 	return null
 
-func apply_blackboard(zone: Zone) -> void:
-	zone.external_events.assign(external_events)
-	zone.external_vars.assign(external_vars)
+func apply_blackboard(stage: Stage) -> void:
+	_migrate()
+	stage.external_calls.assign(external_calls)
+	stage.external_vars.assign(external_vars)
 	for variable in variables:
 		var key := StringName(variable["key"])
 		var state_key := StringName(variable.get("state_key", ""))
 		if variable["scope"] == "saved":
-			zone.define_saved(key, variable["default"], state_key)
+			stage.define_saved(key, variable["default"], state_key)
 		else:
-			zone.define_local(key, variable["default"], state_key)
+			stage.define_local(key, variable["default"], state_key)
 
-func apply_graph(zone: Zone) -> Array[String]:
+func apply_graph(stage: Stage) -> Array[String]:
+	_migrate()
 	var problems: Array[String] = []
 	var built: Array[Rule] = []
-	var catalog := VerbCatalog.from_factory(zone.verbs)
+	var catalog := VerbCatalog.from_factory(stage.verbs)
 	var inputs := {}
-	var script: Script = zone.get_script()
+	var script: Script = stage.get_script()
 	while script:
 		inputs.merge(script.get_script_constant_map())
 		script = script.get_base_script()
-	for prop in VerbCatalog.props_of(zone):
-		inputs[prop["name"]] = zone.get(prop["name"])
+	for prop in VerbCatalog.props_of(stage):
+		inputs[prop["name"]] = stage.get(prop["name"])
 	for entry in rules:
 		var rule := Rule.new(StringName(entry["id"]), StringName(entry["trigger"]))
 		rule.state_key = StringName(entry.get("state_key", ""))
 		rule.requires.assign(entry["requires"])
 		rule.forbids.assign(entry["forbids"])
 		rule.cancel_if.assign(entry["cancel_if"])
-		rule.once = entry["once"]
+		rule.one_shot = entry["one_shot"]
 		var reentry: Variant = entry.get("reentry", Rule.ReentryPolicy.IGNORE)
 		if not (reentry is int and Rule.ReentryPolicy.values().has(reentry)):
 			problems.append("rule '%s' has an invalid re-entry policy: %s" % [rule.id, reentry])
@@ -56,14 +102,14 @@ func apply_graph(zone: Zone) -> Array[String]:
 		rule.reentry = reentry as Rule.ReentryPolicy
 		rule.emits = StringName(entry["emit"])
 		for spec in entry["steps"]:
-			var step := _build_step(zone.verbs, spec, catalog, inputs)
+			var step := _build_step(stage.verbs, spec, catalog, inputs)
 			if step == null:
 				problems.append("rule '%s' has an invalid step: %s" % [rule.id, ExprText.step_text(spec)])
 			else:
 				rule.steps.append(step)
 		built.append(rule)
 	if problems.is_empty():
-		zone.engine.rules.append_array(built)
+		stage.engine.rules.append_array(built)
 	return problems
 
 func _build_step(factory: CoreVerbs, spec: Dictionary, catalog: Array, inputs: Dictionary) -> Step:

@@ -1,23 +1,23 @@
 extends SceneTree
 ## Short runtime smoke test using the real scene and physics overlap checks.
 
-const ZONE_SCENE_PATH := "res://zones/zone_01/zone_01.tscn"
+const STAGE_SCENE_PATH := "res://stages/stage_01/stage_01.tscn"
 const GAME_SCENE_PATH := "res://game.tscn"
 
 func _initialize() -> void:
-	var packed := load(ZONE_SCENE_PATH) as PackedScene
-	var zone := packed.instantiate() as Zone
-	root.add_child(zone)
+	var packed := load(STAGE_SCENE_PATH) as PackedScene
+	var stage := packed.instantiate() as Stage
+	root.add_child(stage)
 	await process_frame
 
-	var ok := _check("zone loads and validates", zone.validate().is_empty())
+	var ok := _check("stage loads and validates", stage.check().is_empty())
 	var fired: Array[StringName] = []
-	zone.rule_fired.connect(func(id: StringName, _event: StringName) -> void: fired.append(id))
-	zone.activate()
-	zone.activate()
+	stage.rule_fired.connect(func(id: StringName, _event: StringName) -> void: fired.append(id))
+	stage.activate()
+	stage.activate()
 	ok = _check("activating twice starts only one standoff loop", fired.count(&"z1_standoff") == 1) and ok
-	zone.fire(&"deliver")
-	zone.fire(&"deliver")
+	stage.fire(&"deliver")
+	stage.fire(&"deliver")
 	await process_frame
 
 	var delivered_count := 0
@@ -25,24 +25,24 @@ func _initialize() -> void:
 		if id == &"z1_delivered":
 			delivered_count += 1
 	ok = _check("deliver fires the eligible rule once",
-		delivered_count == 1 and zone.fired.has(&"z1_delivered")) and ok
+		delivered_count == 1 and stage.fired.has(&"z1_delivered")) and ok
 	ok = _check("deliver guard prevents the caught rule", not fired.has(&"z1_caught")) and ok
 
 	var changes: Array = []
-	zone.var_changed.connect(func(key: StringName, value: Variant) -> void:
+	stage.var_changed.connect(func(key: StringName, value: Variant) -> void:
 		changes.append([key, value]))
-	zone.write_var(&"guard_calmed", true)
-	ok = _check("zone forwards Blackboard writes to gameplay listeners",
-		changes == [[&"guard_calmed", true]] and zone.saved_vars[&"guard_calmed"]) and ok
-	ok = (await _test_player_and_bump(zone, fired)) and ok
-	zone.deactivate()
-	zone.queue_free()
+	stage.write_var(&"guard_calmed", true)
+	ok = _check("stage forwards Blackboard writes to gameplay listeners",
+		changes == [[&"guard_calmed", true]] and stage.saved_vars[&"guard_calmed"]) and ok
+	ok = (await _test_player_and_bump(stage, fired)) and ok
+	stage.deactivate()
+	stage.queue_free()
 	await process_frame
 	ok = (await _test_game_scene()) and ok
 	print("SMOKE: ", "PASS" if ok else "FAIL")
 	quit(0 if ok else 1)
 
-func _test_player_and_bump(zone: Zone, fired: Array[StringName]) -> bool:
+func _test_player_and_bump(stage: Stage, fired: Array[StringName]) -> bool:
 	var ok := true
 	var movement := {
 		&"move_left": [KEY_A, KEY_LEFT],
@@ -60,15 +60,15 @@ func _test_player_and_bump(zone: Zone, fired: Array[StringName]) -> bool:
 	var player := Player.new()
 	player.position = Vector3(0, 1, 4)
 	root.add_child(player)
-	var nearest := Props.trigger_box(zone, Vector3.ONE, Vector3(0.5, 1, 4), &"near")
-	var farther := Props.trigger_box(zone, Vector3.ONE, Vector3(1, 1, 4), &"far")
-	var enter_only := Props.trigger_box(zone, Vector3.ONE, Vector3(0, 1, 4), &"enter_only")
+	var nearest := Props.trigger_box(stage, Vector3.ONE, Vector3(0.5, 1, 4), &"near")
+	var farther := Props.trigger_box(stage, Vector3.ONE, Vector3(1, 1, 4), &"far")
+	var enter_only := Props.trigger_box(stage, Vector3.ONE, Vector3(0, 1, 4), &"enter_only")
 	enter_only.mode = TriggerArea.Mode.ENTER
 	var interactions: Array[StringName] = []
 	for event in [&"near", &"far"]:
 		var rule := Rule.new(event, event)
 		rule.steps.append(Step.new(func(_ctx: Dictionary) -> void: interactions.append(event)))
-		zone.engine.rules.append(rule)
+		stage.engine.rules.append(rule)
 	for frame in range(3):
 		await physics_frame
 	ok = _check("all test areas overlap the player",
@@ -95,11 +95,11 @@ func _test_player_and_bump(zone: Zone, fired: Array[StringName]) -> bool:
 	await timer.timeout
 	ok = _check("the stun ends when its extended timer expires", not player.stunned) and ok
 
-	var pad := zone.get_node("BumpPad") as BumpProp
+	var pad := stage.get_node("BumpPad") as BumpProp
 	pad.bump_area.body_entered.emit(player)
 	pad.bump_area.body_entered.emit(player)
 	ok = _check("bumping twice latches the key and dispatches the relay once",
-		zone.is_set(&"treat_out") and fired.count(&"z1_treat") == 1
+		stage.is_set(&"treat_out") and fired.count(&"z1_treat") == 1
 		and fired.count(&"bump_prop") == 1) and ok
 	player.queue_free()
 	return ok
@@ -112,7 +112,7 @@ func _test_game_scene() -> bool:
 	root.add_child(game)
 	await process_frame
 	var hud := game.get_node("HUD") as GameHud
-	game.zone.scored.emit(25)
+	game.stage.scored.emit(25)
 	await process_frame
 	var ok := _check("the game manager updates the HUD after scoring",
 		game.score == 25 and hud.hud.text.begins_with("Score: 25"))

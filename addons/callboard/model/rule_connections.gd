@@ -1,12 +1,12 @@
 @tool
 class_name RuleConnections extends RefCounted
-## Edits references to external events and relays in an authored graph.
+## Edits references to external Calls and relays in an authored graph.
 
 const RELAY_PREFIX := "relay:"
 
 static func ids(data: Dictionary) -> Array:
 	var names := {}
-	for event in data["external_events"]:
+	for event in data["external_calls"]:
 		names[event] = true
 	for rule in data["rules"]:
 		if rule["trigger"].begins_with(RELAY_PREFIX) and rule["trigger"] != RELAY_PREFIX:
@@ -38,18 +38,18 @@ static func impact(data: Dictionary, id: String) -> PackedStringArray:
 
 static func edit_error(data: Dictionary, id: String) -> String:
 	if id == RELAY_PREFIX or not ids(data).has(id):
-		return "This event or relay no longer exists."
+		return "This Call or relay no longer exists."
 	if id.begins_with(RELAY_PREFIX) and not data["compiles"]:
 		return "Fix invalid steps before editing relay connections."
 	return ""
 
-## new_name is the bare relay name for relays, or the full event ID for events.
+## new_name is the bare relay name for relays, or the full Call ID for Calls.
 static func rename(data: Dictionary, id: String, new_name: String) -> String:
 	var error := edit_error(data, id)
 	if not error.is_empty():
 		return error
 	if id == "arrive":
-		return "The zone lifecycle fires the built-in arrive event."
+		return "The stage lifecycle fires the built-in arrive Call."
 	new_name = new_name.strip_edges()
 	if new_name.is_empty() or new_name.begins_with(RELAY_PREFIX) or RegEx.create_from_string('[\\x00-\\x1f"\\\\]').search(new_name):
 		return "Enter a name without quotes, backslashes, control characters, or the relay: prefix."
@@ -83,7 +83,7 @@ static func rename(data: Dictionary, id: String, new_name: String) -> String:
 	RuleGraphReader.analyze(draft)
 	if not draft["compiles"] or renamed_steps.any(func(step: Dictionary) -> bool: return step["emits"] != new_name):
 		return "The edited steps could not emit the new relay. Check the verb arguments."
-	data["external_events"] = draft["external_events"]
+	data["external_calls"] = draft["external_calls"]
 	data["rules"] = draft["rules"]
 	return ""
 
@@ -101,7 +101,7 @@ static func remove(data: Dictionary, id: String) -> String:
 	return ""
 
 static func _replace_references(data: Dictionary, old_id: String, new_id: String) -> void:
-	var declarations: Array = data["external_events"]
+	var declarations: Array = data["external_calls"]
 	var index := declarations.find(old_id)
 	if index >= 0:
 		if new_id.is_empty():

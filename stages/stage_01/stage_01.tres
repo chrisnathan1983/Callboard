@@ -1,12 +1,13 @@
-[gd_resource type="Resource" script_class="ZoneDefinition" format=3 uid="uid://0uk26v3bjmdh"]
+[gd_resource type="Resource" script_class="StageDefinition" format=3 uid="uid://0uk26v3bjmdh"]
 
-[ext_resource type="Script" uid="uid://2ni1lurvrvvs" path="res://addons/director_blackboard/core/zone_definition.gd" id="1_6haco"]
-[ext_resource type="Script" uid="uid://erywf5nq7fp6" path="res://zones/zone_01/zone_01.gd" id="2_nih50"]
+[ext_resource type="Script" uid="uid://2ni1lurvrvvs" path="res://addons/callboard/core/stage_definition.gd" id="1_6haco"]
+[ext_resource type="Script" uid="uid://erywf5nq7fp6" path="res://stages/stage_01/stage_01.gd" id="2_nih50"]
 
 [resource]
 script = ExtResource("1_6haco")
-zone_script = ExtResource("2_nih50")
-external_events = PackedStringArray("arrive", "deliver", "offer:decoy", "relay:treat_out")
+stage_script = ExtResource("2_nih50")
+format_version = 2
+external_calls = PackedStringArray("arrive", "deliver", "offer:decoy", "relay:treat_out")
 external_vars = PackedStringArray("treat_out")
 variables = [{
 "default": false,
@@ -31,7 +32,7 @@ rules = [{
 "group": "Guard Standoff",
 "has_pos": true,
 "id": "z1_standoff",
-"once": false,
+"one_shot": false,
 "pos": Vector2(80, 70),
 "requires": [],
 "steps": [{
@@ -47,7 +48,7 @@ rules = [{
 "group": "Guard Standoff",
 "has_pos": true,
 "id": "z1_bark",
-"once": false,
+"one_shot": false,
 "pos": Vector2(380, 80),
 "requires": [],
 "steps": [{
@@ -67,7 +68,7 @@ rules = [{
 "group": "Calming Paths",
 "has_pos": true,
 "id": "z1_treat",
-"once": false,
+"one_shot": false,
 "pos": Vector2(80, 410),
 "requires": [],
 "steps": [{
@@ -87,7 +88,7 @@ rules = [{
 "group": "Calming Paths",
 "has_pos": true,
 "id": "z1_decoy",
-"once": false,
+"one_shot": false,
 "pos": Vector2(80, 600),
 "requires": [],
 "steps": [{
@@ -107,7 +108,7 @@ rules = [{
 "group": "Calming Paths",
 "has_pos": true,
 "id": "z1_calm",
-"once": true,
+"one_shot": true,
 "pos": Vector2(380, 450),
 "requires": [],
 "steps": [{
@@ -135,7 +136,7 @@ rules = [{
 "group": "Delivery",
 "has_pos": true,
 "id": "z1_caught",
-"once": false,
+"one_shot": false,
 "pos": Vector2(1000, 80),
 "requires": ["lamp_on"],
 "steps": [{
@@ -155,7 +156,7 @@ rules = [{
 "group": "Delivery",
 "has_pos": true,
 "id": "z1_delivered",
-"once": true,
+"one_shot": true,
 "pos": Vector2(1000, 300),
 "requires": [],
 "steps": [{

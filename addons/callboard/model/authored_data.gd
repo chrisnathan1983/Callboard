@@ -7,7 +7,7 @@ const GUARDS := ["requires", "forbids", "cancel_if"]
 static func new_rule(id: String, trigger: String) -> Dictionary:
 	return {
 		"id": id, "trigger": trigger, "requires": [], "forbids": [], "cancel_if": [],
-		"once": false, "reentry": Rule.ReentryPolicy.IGNORE, "emit": "", "steps": [],
+		"one_shot": false, "reentry": Rule.ReentryPolicy.IGNORE, "emit": "", "steps": [],
 		"group": "", "pos": Vector2.ZERO, "has_pos": false,
 	}
 

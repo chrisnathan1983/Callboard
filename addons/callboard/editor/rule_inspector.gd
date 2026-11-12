@@ -14,7 +14,7 @@ signal group_edited(group_name: String)
 signal group_delete_requested(group_name: String)
 signal content_size_changed
 
-const Style := preload("res://addons/director_blackboard/editor/board_style.gd")
+const Style := preload("res://addons/callboard/editor/board_style.gd")
 
 var _data: Dictionary
 var _rule: Dictionary
@@ -84,6 +84,14 @@ func _build_rule() -> void:
 		return
 	_clear()
 	var r := _rule
+	var rule_notes: Array = _data.get("notes", []).filter(func(note: String) -> bool:
+		return ("'%s'" % r["id"]) in note)
+	if not rule_notes.is_empty():
+		_box.add_child(Style.label("Notes", Style.WARNING, 13))
+		for note in rule_notes:
+			var note_label := Style.label(note, Style.WARNING, 13)
+			note_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			_box.add_child(note_label)
 	_line("ID", r["id"], func(t: String) -> void: _set_id(t))
 
 	var trig := HBoxContainer.new()
@@ -102,7 +110,7 @@ func _build_rule() -> void:
 	var pick := MenuButton.new()
 	pick.text = "▾"
 	pick.flat = false
-	pick.tooltip_text = "Pick a declared event or an emitted relay"
+	pick.tooltip_text = "Pick a declared Call or an emitted relay"
 	var options := _trigger_options()
 	for o in options:
 		pick.get_popup().add_item(o)
@@ -115,14 +123,14 @@ func _build_rule() -> void:
 	for g in AuthoredData.GUARDS:
 		_box.add_child(_guard_menu(g))
 
-	var once := CheckBox.new()
-	once.text = "Run once"
-	once.tooltip_text = "The rule's latch persists in saved state"
-	once.button_pressed = r["once"]
-	once.toggled.connect(func(on: bool) -> void:
-		r["once"] = on
+	var one_shot := CheckBox.new()
+	one_shot.text = "One-shot"
+	one_shot.tooltip_text = "The rule's latch persists in saved state"
+	one_shot.button_pressed = r["one_shot"]
+	one_shot.toggled.connect(func(on: bool) -> void:
+		r["one_shot"] = on
 		changed.emit(r["id"]))
-	_box.add_child(once)
+	_box.add_child(one_shot)
 
 	var reentry := HBoxContainer.new()
 	reentry.add_child(_name_label("While running"))
@@ -192,7 +200,7 @@ func _build_rule() -> void:
 	buttons.add_child(del)
 	_box.add_child(buttons)
 
-	var mine: Array = _data["problems"].filter(func(p: String) -> bool: return ("'%s'" % r["id"]) in p)
+	var mine: Array = _data["notes"].filter(func(p: String) -> bool: return ("'%s'" % r["id"]) in p)
 	if not mine.is_empty():
 		_title("Problems")
 		for p in mine:
@@ -248,7 +256,7 @@ func _set_trigger(t: String) -> void:
 
 ## Declared external events plus every relay some rule emits.
 func _trigger_options() -> Array:
-	var out: Array = _data["external_events"].duplicate()
+	var out: Array = _data["external_calls"].duplicate()
 	for rd in _data["rules"]:
 		for relay in RuleGraphView.output_relays(rd):
 			if relay != "" and not out.has("relay:" + relay):

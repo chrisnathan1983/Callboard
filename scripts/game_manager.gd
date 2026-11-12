@@ -1,46 +1,46 @@
 extends Node3D
-## Demo harness. Stands in for the ZoneManager: it owns the saved Blackboard state,
-## and loads/unloads the zone.
+## Demo harness. Stands in for a StageManager: it owns the saved Blackboard state,
+## and loads/unloads the stage.
 
-@export var zone_scene: PackedScene
+@export var stage_scene: PackedScene
 
-var saved_vars := {}     # persists across reloads (ZoneManager.zone_states[zone_id])
-var fired_rules := {}    # persists across reloads (for `once` rules)
-var zone: Zone
+var saved_vars := {}     # persists across reloads (StageManager.stage_states[stage_id])
+var fired_rules := {}    # persists across reloads for one-shot rules
+var stage: Stage
 var score := 0
 var log_lines: Array[String] = []
 @onready var hud: GameHud = $HUD
 
 func _ready() -> void:
 	hud.manager = self
-	load_zone()
+	load_stage()
 
-func load_zone() -> void:
-	load_zone_scene(zone_scene)
+func load_stage() -> void:
+	load_stage_scene(stage_scene)
 
-func load_zone_scene(scene: PackedScene) -> void:
-	zone = scene.instantiate()
-	zone.saved_vars = saved_vars      # by reference, as a manager would inject them
-	zone.fired = fired_rules
-	add_child(zone)                   # _ready() builds props, Blackboard, rules
-	zone.scored.connect(_on_scored)
-	zone.rule_fired.connect(_on_rule_fired)
-	hud.bind_zone(zone)
-	zone.activate()
-	_log("zone loaded")
+func load_stage_scene(scene: PackedScene) -> void:
+	stage = scene.instantiate()
+	stage.saved_vars = saved_vars      # by reference, as a manager would inject them
+	stage.fired = fired_rules
+	add_child(stage)                   # _ready() builds props, Blackboard, rules
+	stage.scored.connect(_on_scored)
+	stage.rule_fired.connect(_on_rule_fired)
+	hud.bind_stage(stage)
+	stage.activate()
+	_log("stage loaded")
 
-func unload_zone() -> void:
-	zone.deactivate()          # cancels every pending delay and loop
-	remove_child(zone)
-	zone.queue_free()
+func unload_stage() -> void:
+	stage.deactivate()          # cancels every pending delay and loop
+	remove_child(stage)
+	stage.queue_free()
 
-func clear_zone(reset: bool) -> void:
-	unload_zone()
+func clear_stage(reset: bool) -> void:
+	unload_stage()
 	if reset:
 		saved_vars.clear()
 		fired_rules.clear()
 		score = 0
-	load_zone()
+	load_stage()
 
 func _on_scored(points: int) -> void:
 	score += points

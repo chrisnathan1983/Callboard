@@ -1,8 +1,8 @@
 @tool
 class_name RuleValidator extends RefCounted
 
-static func validate(rules: Array[Rule], bb: Blackboard,
-		external_events: Array[StringName], external_vars: Array[StringName]) -> Array[String]:
+static func check(rules: Array[Rule], bb: Blackboard,
+		external_calls: Array[StringName], external_vars: Array[StringName]) -> Array[String]:
 	var problems: Array[String] = []
 	var emitted := {}
 	var settable := {}
@@ -25,8 +25,8 @@ static func validate(rules: Array[Rule], bb: Blackboard,
 	for r in rules:
 		if r.trigger == &"":
 			problems.append("rule '%s' has no trigger" % r.id)
-		elif not emitted.has(r.trigger) and not external_events.has(r.trigger):
-			problems.append("rule '%s' listens to '%s' but nothing emits it and it is not a declared external event" % [r.id, r.trigger])
+		elif not emitted.has(r.trigger) and not external_calls.has(r.trigger):
+			problems.append("rule '%s' listens to '%s' but nothing emits it and it is not a declared external Call" % [r.id, r.trigger])
 		for k in r.requires + r.forbids + r.cancel_if:
 			if not bb.schema.has(k):
 				problems.append("rule '%s' checks key '%s' which is not declared on the Blackboard" % [r.id, k])
