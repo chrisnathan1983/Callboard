@@ -5,7 +5,8 @@ class_name AuthoredData extends RefCounted
 static func new_rule(id: String, trigger: String) -> Dictionary:
 	return {
 		"id": id, "trigger": trigger, "requires": [], "forbids": [], "cancel_if": [],
-		"once": false, "emit": "", "steps": [], "group": "", "pos": Vector2.ZERO, "has_pos": false,
+		"once": false, "reentry": Rule.ReentryPolicy.IGNORE, "emit": "", "steps": [],
+		"group": "", "pos": Vector2.ZERO, "has_pos": false,
 	}
 
 static func new_step(verb: String, args: Array, delay := "") -> Dictionary:

@@ -124,6 +124,25 @@ func _build_rule() -> void:
 		changed.emit(r["id"]))
 	_box.add_child(once)
 
+	var reentry := HBoxContainer.new()
+	reentry.add_child(_name_label("While running"))
+	var policy := OptionButton.new()
+	policy.name = "ReentryPolicy"
+	policy.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	policy.add_item("Ignore", Rule.ReentryPolicy.IGNORE)
+	policy.add_item("Restart", Rule.ReentryPolicy.RESTART)
+	policy.add_item("Queue", Rule.ReentryPolicy.QUEUE)
+	var menu := policy.get_popup()
+	menu.set_item_tooltip(0, "Drop triggers received while this rule is running.")
+	menu.set_item_tooltip(1, "Stop at the next cancellation check and use the latest trigger.")
+	menu.set_item_tooltip(2, "Run pending triggers in order once the active run ends.")
+	policy.select(policy.get_item_index(r.get("reentry", Rule.ReentryPolicy.IGNORE)))
+	policy.item_selected.connect(func(i: int) -> void:
+		r["reentry"] = policy.get_item_id(i)
+		changed.emit(r["id"]))
+	reentry.add_child(policy)
+	_box.add_child(reentry)
+
 	_line("Emits relay", r["emit"], func(t: String) -> void:
 		r["emit"] = t
 		changed.emit(r["id"]))

@@ -17,6 +17,7 @@ class_name ZoneSource extends RefCounted
 ##   r = rule(&"id", &"trigger")
 ##   r.requires = [&"a"]   r.forbids = [...]   r.cancel_if = [...]
 ##   r.once = true
+##   r.reentry = Rule.ReentryPolicy.QUEUE
 ##   r.state_key = &"original_id"   # optional once-latch key
 ##   r.emits = &"relay"
 ##   r.steps = [
@@ -109,6 +110,7 @@ static func _parse_rules(lines: PackedStringArray, r: Vector2i, out: Dictionary)
 	var re_list := RegEx.create_from_string('^r\\.(requires|forbids|cancel_if)\\s*=\\s*\\[(.*)\\]$')
 	var re_name := RegEx.create_from_string('&"([^"]*)"')
 	var re_once := RegEx.create_from_string('^r\\.once\\s*=\\s*(true|false)$')
+	var re_reentry := RegEx.create_from_string('^r\\.reentry\\s*=\\s*Rule\\.ReentryPolicy\\.(IGNORE|RESTART|QUEUE)$')
 	var re_state := RegEx.create_from_string('^r\\.state_key\\s*=\\s*&"([^"]+)"$')
 	var re_emits := RegEx.create_from_string('^r\\.emits\\s*=\\s*&"([^"]*)"$')
 	var cur := {}
@@ -159,6 +161,10 @@ static func _parse_rules(lines: PackedStringArray, r: Vector2i, out: Dictionary)
 		m = re_once.search(t)
 		if m:
 			cur["once"] = m.get_string(1) == "true"
+			continue
+		m = re_reentry.search(t)
+		if m:
+			cur["reentry"] = Rule.ReentryPolicy[m.get_string(1)]
 			continue
 		m = re_state.search(t)
 		if m:
@@ -327,6 +333,9 @@ static func _gen_rules(data: Dictionary) -> PackedStringArray:
 				out.append("\tr.%s = [%s]" % [g, names_expr(rd[g])])
 		if rd["once"]:
 			out.append("\tr.once = true")
+		var reentry: int = rd.get("reentry", Rule.ReentryPolicy.IGNORE)
+		if reentry != Rule.ReentryPolicy.IGNORE:
+			out.append("\tr.reentry = Rule.ReentryPolicy.%s" % Rule.ReentryPolicy.find_key(reentry))
 		if not rd.get("state_key", "").is_empty():
 			out.append('\tr.state_key = &"%s"' % rd["state_key"])
 		if rd["emit"] != "":

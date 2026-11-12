@@ -49,6 +49,11 @@ func apply_graph(zone: Zone) -> Array[String]:
 		rule.forbids.assign(entry["forbids"])
 		rule.cancel_if.assign(entry["cancel_if"])
 		rule.once = entry["once"]
+		var reentry: Variant = entry.get("reentry", Rule.ReentryPolicy.IGNORE)
+		if not (reentry is int and Rule.ReentryPolicy.values().has(reentry)):
+			problems.append("rule '%s' has an invalid re-entry policy: %s" % [rule.id, reentry])
+			continue
+		rule.reentry = reentry as Rule.ReentryPolicy
 		rule.emits = StringName(entry["emit"])
 		for spec in entry["steps"]:
 			var step := _build_step(zone.verbs, spec, catalog, inputs)

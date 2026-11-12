@@ -8,6 +8,7 @@ var fired: Dictionary                 # injected, latches `once`
 var bb: Blackboard
 var wait: Callable                    # func(seconds: float) -> Signal; tests swap this
 var _gen := 0
+var _active := {}                      # Rule -> pending payloads and restart request
 
 func _init(p_bb: Blackboard, p_fired: Dictionary, p_wait: Callable) -> void:
 	bb = p_bb
@@ -15,7 +16,9 @@ func _init(p_bb: Blackboard, p_fired: Dictionary, p_wait: Callable) -> void:
 	wait = p_wait
 
 func token() -> int: return _gen
-func cancel_all() -> void: _gen += 1
+func cancel_all() -> void:
+	_gen += 1
+	_active.clear()
 
 func fire(event: StringName, ctx := {}) -> void:
 	var gen := _gen
@@ -23,14 +26,38 @@ func fire(event: StringName, ctx := {}) -> void:
 		if gen != _gen:
 			return
 		if r.trigger == event and passes(r):
-			_run(r, event, ctx)
+			_dispatch(r, event, ctx, gen)
 
-func _run(r: Rule, event: StringName, ctx: Dictionary) -> void:
-	var gen := _gen
+func _dispatch(r: Rule, event: StringName, ctx: Dictionary, gen: int) -> void:
+	if _active.has(r):
+		var active: Dictionary = _active[r]
+		var pending: Array[Dictionary] = active["pending"]
+		match r.reentry:
+			Rule.ReentryPolicy.RESTART:
+				active["restart"] = true
+				pending.clear()
+				pending.append(ctx.duplicate(true))
+			Rule.ReentryPolicy.QUEUE:
+				pending.append(ctx.duplicate(true))
+		return
+
+	var pending: Array[Dictionary] = []
+	var active := {"pending": pending, "restart": false}
+	_active[r] = active
+	await _run(r, event, ctx, gen)
+	while gen == _gen and not pending.is_empty():
+		var next: Dictionary = pending.pop_front()
+		active["restart"] = false
+		if passes(r) and alive(r, gen):
+			await _run(r, event, next, gen)
+	if gen == _gen:
+		_active.erase(r)
+
+func _run(r: Rule, event: StringName, ctx: Dictionary, gen: int) -> void:
 	if r.once:
 		fired[r.latch_key()] = true
 	rule_fired.emit(r.id, event)
-	if gen != _gen:
+	if not alive(r, gen):
 		return
 	var c := ctx.merged({"_rule": r}, true)
 	for s in r.steps:
@@ -47,4 +74,4 @@ func passes(r: Rule) -> bool:
 	return r.requires.all(bb.is_set) and not r.forbids.any(bb.is_set)
 
 func alive(r: Rule, gen: int) -> bool:
-	return gen == _gen and not r.cancel_if.any(bb.is_set)
+	return gen == _gen and not _active.get(r, {}).get("restart", false) and not r.cancel_if.any(bb.is_set)

@@ -3,6 +3,8 @@ class_name Rule extends RefCounted
 ## "When <trigger> fires and the fire-time guards pass, run <steps>, then emit <emits>."
 ## Plain properties, so a graph editor and a code generator can read and write them directly.
 
+enum ReentryPolicy { IGNORE = 0, RESTART = 1, QUEUE = 2 }
+
 var id: StringName
 var state_key: StringName                 # optional stable key for the once latch
 var trigger: StringName                  # &"arrive", &"deliver", &"relay:calm_guard"
@@ -10,6 +12,7 @@ var requires: Array[StringName] = []     # fire-time guard: keys that must be tr
 var forbids: Array[StringName] = []      # fire-time guard: keys that must be falsy
 var cancel_if: Array[StringName] = []    # mid-flight guard: abort if any becomes truthy
 var once := false                        # latched in Zone.fired on first run
+var reentry := ReentryPolicy.IGNORE
 var steps: Array[Step] = []
 var emits: StringName = &""              # optional relay fired when all steps finish
 

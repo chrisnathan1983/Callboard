@@ -148,12 +148,23 @@ func _initialize() -> void:
 	var saved_frame: GraphFrame = b2.view._frames["Delivery"]
 	saved_frame.size += Vector2(10.0002, 0)
 	var expected_size := saved_frame.size.round()
+	b2.view.select_rule("z1_standoff")
+	var policy := b2.inspector.find_child("ReentryPolicy", true, false) as OptionButton
+	ok = _check("existing rules show Ignore by default",
+		policy != null and policy.get_selected_id() == Rule.ReentryPolicy.IGNORE) and ok
+	if policy:
+		policy.select(policy.get_item_index(Rule.ReentryPolicy.RESTART))
+		policy.item_selected.emit(policy.selected)
+	ok = _check("changing the dropdown updates the rule",
+		_rule(d2, "z1_standoff").get("reentry") == Rule.ReentryPolicy.RESTART) and ok
 	b2.save()
 	var re := RuleGraphReader.inspect_definition(TMP_PATH)
 	ok = _check("save: script unchanged", FileAccess.get_file_as_string(ZONE_PATH) == src) and ok
 	ok = _check("save: rule, relay and interval persisted",
 		_rule(re, "new_rule")["trigger"] == "relay:z1_calm_done"
 		and _rule(re, "z1_standoff")["steps"][0]["args"][0] == "4.0") and ok
+	ok = _check("save: the re-entry policy persists",
+		_rule(re, "z1_standoff").get("reentry") == Rule.ReentryPolicy.RESTART) and ok
 	ok = _check("save: frame size is rounded on disk",
 		re["groups"].any(func(g): return g["name"] == "Delivery" and g["rect"].size == expected_size)) and ok
 	ok = _check("save: position preserved", _rule(re, "new_rule")["has_pos"]) and ok

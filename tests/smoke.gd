@@ -11,9 +11,11 @@ func _initialize() -> void:
 	await process_frame
 
 	var ok := _check("zone loads and validates", zone.validate().is_empty())
-	zone.activate() # leaves a repeating relay pending during unload
 	var fired: Array[StringName] = []
 	zone.rule_fired.connect(func(id: StringName, _event: StringName) -> void: fired.append(id))
+	zone.activate()
+	zone.activate()
+	ok = _check("activating twice starts only one standoff loop", fired.count(&"z1_standoff") == 1) and ok
 	zone.fire(&"deliver")
 	zone.fire(&"deliver")
 	await process_frame

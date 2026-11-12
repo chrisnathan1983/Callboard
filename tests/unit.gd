@@ -18,6 +18,7 @@ func _build_rules() -> void:
 	r = rule(&"first", &"arrive")
 	r.requires = [&"armed"]
 	r.once = true
+	r.reentry = Rule.ReentryPolicy.QUEUE
 	r.state_key = &"old_id"
 	r.emits = &"done"
 	r.steps = [
@@ -37,6 +38,8 @@ func _build_rules() -> void:
 	ok = _check("script-authored save keys survive a round trip",
 		reparsed["vars"][1]["state_key"] == "old_count"
 		and reparsed["rules"][0]["state_key"] == "old_id") and ok
+	ok = _check("script-authored re-entry survives a round trip",
+		reparsed["rules"][0]["reentry"] == Rule.ReentryPolicy.QUEUE) and ok
 
 	var bb := Blackboard.new()
 	bb.define(&"lamp_on", &"local", false)
@@ -129,6 +132,7 @@ func _build_rules() -> void:
 	))
 	engine.rules.append_array([repeated, listener])
 	engine.fire(&"start", {"item": &"parcel"})
+	engine.fire(&"start", {"item": &"duplicate"})
 	ok = _check("repeat waits on the same injected clock as delays",
 		wait_requests == [12.5, 2.0] and received.is_empty()) and ok
 	clock_tick.emit()
@@ -145,8 +149,80 @@ func _build_rules() -> void:
 	clock_tick.emit()
 	ok = _check("deactivation cancels an outstanding delay", not state["step_ran"]) and ok
 
+	ok = _test_restart() and ok
+	ok = _test_queue() and ok
 	print("UNIT: ", "PASS" if ok else "FAIL")
 	quit(0 if ok else 1)
+
+func _test_restart() -> bool:
+	var bb := Blackboard.new()
+	bb.define(&"stop", &"local", false)
+	var engine := RuleEngine.new(bb, {}, func(_seconds: float) -> Signal: return clock_tick)
+	var factory := CoreVerbs.new(StepContext.new(bb, engine, null, Callable()))
+	var repeated := Rule.new(&"repeated", &"start")
+	repeated.reentry = Rule.ReentryPolicy.RESTART
+	repeated.cancel_if = [&"stop"]
+	var starts: Array[int] = []
+	repeated.steps.append(Step.new(func(c: Dictionary) -> void: starts.append(c["id"])))
+	repeated.steps.append(factory.repeat_emit(1.0, &"tick"))
+	var listener := Rule.new(&"listener", &"relay:tick")
+	var ticks: Array[int] = []
+	listener.steps.append(Step.new(func(c: Dictionary) -> void: ticks.append(c["id"])))
+	engine.rules.append_array([repeated, listener])
+
+	engine.fire(&"start", {"id": 1})
+	engine.fire(&"start", {"id": 2})
+	engine.fire(&"start", {"id": 3})
+	var ok := _check("restart waits for the running step's cancellation check", starts == [1])
+	clock_tick.emit()
+	ok = _check("restart uses the latest payload and suppresses the old tick",
+		starts == [1, 3] and ticks.is_empty()) and ok
+	clock_tick.emit()
+	ok = _check("only the replacement repeat emits", ticks == [3]) and ok
+	bb.write(&"stop", true)
+	clock_tick.emit()
+	return ok
+
+func _test_queue() -> bool:
+	var bb := Blackboard.new()
+	bb.define(&"enabled", &"local", true)
+	var engine := RuleEngine.new(bb, {}, func(_seconds: float) -> Signal: return clock_tick)
+	var queued := Rule.new(&"queued", &"start")
+	queued.reentry = Rule.ReentryPolicy.QUEUE
+	queued.requires = [&"enabled"]
+	var received: Array[int] = []
+	queued.steps.append(Step.new(func(c: Dictionary) -> void: received.append(c["id"])).after(1.0))
+	engine.rules.append(queued)
+
+	engine.fire(&"start", {"id": 1})
+	var payload := {"id": 2}
+	engine.fire(&"start", payload)
+	payload["id"] = 99
+	engine.fire(&"start", {"id": 3})
+	clock_tick.emit()
+	var ok := _check("queued triggers wait for the active run", received == [1])
+	clock_tick.emit()
+	ok = _check("queue keeps the original payload and trigger order", received == [1, 2]) and ok
+	clock_tick.emit()
+	ok = _check("the queue drains in order", received == [1, 2, 3]) and ok
+
+	engine.fire(&"start", {"id": 4})
+	engine.fire(&"start", {"id": 5})
+	bb.write(&"enabled", false)
+	clock_tick.emit()
+	clock_tick.emit()
+	ok = _check("queued triggers recheck fire-time guards", received == [1, 2, 3, 4]) and ok
+
+	bb.write(&"enabled", true)
+	engine.fire(&"start", {"id": 6})
+	engine.fire(&"start", {"id": 7})
+	engine.cancel_all()
+	engine.fire(&"start", {"id": 8})
+	engine.fire(&"start", {"id": 9})
+	clock_tick.emit()
+	clock_tick.emit()
+	return _check("deactivation drops pending triggers and leaves later runs intact",
+		received == [1, 2, 3, 4, 8, 9]) and ok
 
 func _check(label: String, condition: bool) -> bool:
 	print(("  ok   " if condition else "  FAIL ") + label)
