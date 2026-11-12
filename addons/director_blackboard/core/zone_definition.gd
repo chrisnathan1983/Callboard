@@ -25,10 +25,11 @@ func apply_blackboard(zone: Zone) -> void:
 	zone.external_vars.assign(external_vars)
 	for variable in variables:
 		var key := StringName(variable["key"])
+		var state_key := StringName(variable.get("state_key", ""))
 		if variable["scope"] == "saved":
-			zone.define_saved(key, variable["default"])
+			zone.define_saved(key, variable["default"], state_key)
 		else:
-			zone.define_local(key, variable["default"])
+			zone.define_local(key, variable["default"], state_key)
 
 func apply_graph(zone: Zone) -> Array[String]:
 	var problems: Array[String] = []
@@ -43,6 +44,7 @@ func apply_graph(zone: Zone) -> Array[String]:
 		inputs[prop["name"]] = zone.get(prop["name"])
 	for entry in rules:
 		var rule := Rule.new(StringName(entry["id"]), StringName(entry["trigger"]))
+		rule.state_key = StringName(entry.get("state_key", ""))
 		rule.requires.assign(entry["requires"])
 		rule.forbids.assign(entry["forbids"])
 		rule.cancel_if.assign(entry["cancel_if"])

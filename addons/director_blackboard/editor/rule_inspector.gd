@@ -6,6 +6,7 @@ class_name RuleInspector extends ScrollContainer
 ## Blackboard `key` parameters a dropdown of declared keys, anything else a raw expression box.
 
 signal changed(rule_id: String)
+signal numeric_changed(rule_id: String, spin: SpinBox)
 signal structure_changed(rule_id: String)   # inspector rebuilt itself; board should refresh the graph
 signal delete_requested(rule_id: String)
 signal duplicate_requested(rule_id: String)
@@ -196,6 +197,7 @@ func _set_id(t: String) -> void:
 	if t == "" or ZoneSource.rule_ids(_data).has(t) or not t.is_valid_identifier():
 		_rebuild_later()   # reject: restore the old text
 		return
+	_rule["state_key"] = _rule.get("state_key", _rule["id"])
 	_rule["id"] = t
 	changed.emit(t)
 
@@ -307,7 +309,7 @@ func _step_panel(idx: int) -> Control:
 	sp.value = step["delay"].to_float()
 	sp.value_changed.connect(func(v: float) -> void:
 		step["delay"] = "" if v <= 0.0 else str(snappedf(v, 0.01))
-		changed.emit(_rule["id"]))
+		numeric_changed.emit(_rule["id"], sp))
 	delay_row.add_child(sp)
 	vb.add_child(delay_row)
 	return panel
@@ -318,13 +320,16 @@ func _current(step: Dictionary, i: int, param: Dictionary) -> String:
 	return param["default"] if param["default"] != "" else VerbCatalog.fallback(param, _data)
 
 ## Writes `expr` into argument i, filling any skipped earlier optional arguments with defaults.
-func _set_arg(step: Dictionary, i: int, expr: String) -> void:
+func _set_arg(step: Dictionary, i: int, expr: String, spin: SpinBox = null) -> void:
 	var verb := VerbCatalog.find(_data["catalog"], step["verb"])
 	while step["args"].size() <= i:
 		var p: Dictionary = verb["args"][step["args"].size()]
 		step["args"].append(p["default"] if p["default"] != "" else VerbCatalog.fallback(p, _data))
 	step["args"][i] = expr
-	changed.emit(_rule["id"])
+	if spin:
+		numeric_changed.emit(_rule["id"], spin)
+	else:
+		changed.emit(_rule["id"])
 
 func _arg_widget(step: Dictionary, i: int, param: Dictionary) -> Control:
 	var cur := _current(step, i, param)
@@ -358,7 +363,7 @@ func _arg_widget(step: Dictionary, i: int, param: Dictionary) -> Control:
 				s.value = float(lit["value"])
 				var is_int: bool = param["type"] == TYPE_INT
 				s.value_changed.connect(func(v: float) -> void:
-					_set_arg(step, i, str(int(v)) if is_int else ZoneSource.format_literal(snappedf(v, 0.001))))
+					_set_arg(step, i, str(int(v)) if is_int else ZoneSource.format_literal(snappedf(v, 0.001)), s))
 				return s
 		TYPE_STRING:
 			if lit["ok"] and typeof(lit["value"]) == TYPE_STRING:

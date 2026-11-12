@@ -5,6 +5,7 @@ class_name BlackboardPanel extends VBoxContainer
 ## matching the value's type. In live mode it is read-only and shows current values.
 
 signal changed
+signal numeric_changed(spin: SpinBox)
 
 const COL_SAVED := Color(1.0, 0.75, 0.35)
 const COL_LOCAL := Color(0.5, 0.75, 1.0)
@@ -102,10 +103,13 @@ func _make_row(v: Dictionary) -> Control:
 
 ## The control matches the value's type: CheckBox, SpinBox (int / float), or LineEdit.
 func _default_editor(v: Dictionary) -> Control:
-	var set_default := func(value: Variant) -> void:
+	var set_default := func(value: Variant, spin: SpinBox = null) -> void:
 		v["default"] = value
 		v["default_expr"] = ZoneSource.format_literal(value)
-		changed.emit()
+		if spin:
+			numeric_changed.emit(spin)
+		else:
+			changed.emit()
 	match typeof(v["default"]):
 		TYPE_BOOL:
 			var c := CheckBox.new()
@@ -123,7 +127,7 @@ func _default_editor(v: Dictionary) -> Control:
 			s.editable = _editable
 			s.custom_minimum_size = Vector2(80, 0)
 			var is_int := typeof(v["default"]) == TYPE_INT
-			s.value_changed.connect(func(x: float) -> void: set_default.call(int(x) if is_int else x))
+			s.value_changed.connect(func(x: float) -> void: set_default.call(int(x) if is_int else x, s))
 			return s
 	var l := LineEdit.new()
 	l.text = str(v["default"])
@@ -150,6 +154,7 @@ func _on_add(index: int) -> void:
 	var keys: Array = _data["vars"].map(func(x: Dictionary) -> String: return x["key"])
 	var value: Variant = TYPES[type_name]
 	_data["vars"].append({"key": ZoneSource.unique_name(keys, "new_var"), "scope": "local", "default": value,
+		"state_key": ZoneSource.new_state_key(),
 		"default_expr": ZoneSource.format_literal(value), "note": "", "note_pad": "   "})
 	_rebuild()
 	changed.emit()
@@ -161,6 +166,7 @@ func refresh_live(zone: Zone) -> void:
 		l.text = str(value)
 		l.add_theme_color_override("font_color", Color(0.4, 1.0, 0.5) if bool(value) else Color(0.75, 0.75, 0.75))
 	var latched: PackedStringArray = []
-	for id in zone.fired:
-		latched.append(String(id))
+	for rule in zone.engine.rules:
+		if rule.once and zone.fired.has(rule.latch_key()):
+			latched.append(String(rule.id))
 	_latched.text = "Latched once-rules: " + (", ".join(latched) if not latched.is_empty() else "none")

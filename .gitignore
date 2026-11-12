@@ -1,1 +1,11 @@
-.godot
+# Godot editor cache (includes export credentials)
+/.godot/
+
+# Local editor temporary files and backups
+*.tmp
+*.bak
+*~
+
+# Private copies kept outside the editor cache
+/export_credentials.cfg
+/export_presets.local.cfg

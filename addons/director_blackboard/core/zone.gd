@@ -70,11 +70,11 @@ func _exit_tree() -> void:
 func _wait(seconds: float) -> Signal:
 	return get_tree().create_timer(seconds).timeout
 
-func define_saved(key: StringName, default_val: Variant = false) -> void:
-	bb.define(key, &"saved", default_val)
+func define_saved(key: StringName, default_val: Variant = false, state_key: StringName = &"") -> void:
+	bb.define(key, &"saved", default_val, state_key)
 
-func define_local(key: StringName, default_val: Variant = false) -> void:
-	bb.define(key, &"local", default_val)
+func define_local(key: StringName, default_val: Variant = false, state_key: StringName = &"") -> void:
+	bb.define(key, &"local", default_val, state_key)
 
 func get_var(key: StringName) -> Variant:
 	return bb.get_var(key)

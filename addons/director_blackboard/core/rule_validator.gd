@@ -8,7 +8,7 @@ static func validate(rules: Array[Rule], bb: Blackboard,
 	var settable := {}
 	var seen := {}
 	for k in external_vars:
-		settable[k] = true
+		settable[bb.resolve_key(k)] = true
 	for r in rules:
 		if seen.has(r.id):
 			problems.append("duplicate rule id '%s'" % r.id)

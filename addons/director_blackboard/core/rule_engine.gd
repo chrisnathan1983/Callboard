@@ -28,7 +28,7 @@ func fire(event: StringName, ctx := {}) -> void:
 func _run(r: Rule, event: StringName, ctx: Dictionary) -> void:
 	var gen := _gen
 	if r.once:
-		fired[r.id] = true
+		fired[r.latch_key()] = true
 	rule_fired.emit(r.id, event)
 	if gen != _gen:
 		return
@@ -43,7 +43,7 @@ func _run(r: Rule, event: StringName, ctx: Dictionary) -> void:
 		fire("relay:" + r.emits, ctx)
 
 func passes(r: Rule) -> bool:
-	if r.once and fired.has(r.id): return false
+	if r.once and fired.has(r.latch_key()): return false
 	return r.requires.all(bb.is_set) and not r.forbids.any(bb.is_set)
 
 func alive(r: Rule, gen: int) -> bool:

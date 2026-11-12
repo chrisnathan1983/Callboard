@@ -2,14 +2,8 @@
 
 ## Rule Board and authored data
 
-- [ ] Fix rule renames so they preserve the saved `once` latch. The latch is keyed by rule ID, so renaming the rule currently orphans it. Preserve saved Blackboard values across key renames as well.
 - [ ] Add the missing rename and delete actions for both events and relays. Update rule triggers and emit references on rename, and surface affected connections when deleting.
-- [ ] Coalesce consecutive SpinBox changes to the same field into one undo entry per edit gesture.
 - [ ] Centralize the authored dictionary shapes for rules, steps, and variables. Revisit typed sub-resources (`RuleData`, `StepData`, `VariableData`) when native Inspector editing or cleaner diffs justify a resource migration.
-
-## Testing and tooling
-
-- [ ] Extend `.gitignore` for local temporary files and private export presets, if used.
 
 ## Deferred decisions
 

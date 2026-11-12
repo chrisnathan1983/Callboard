@@ -28,7 +28,7 @@ The editor plugin is enabled in `project.godot`. Open the **Rule Board** tab in 
 - **Events and graph:** add event cards, rules, and groups. Connect rule outputs to triggers; wires are derived from rule triggers and emitted relays.
 - **Rule inspector:** edit triggers, requirements, forbidden/cancellation conditions, once behavior, emitted relays, groups, and ordered steps. Step arguments use verb-specific controls where available.
 - **Save:** validates step expressions and saves the selected `.tres` zone definition. Use **Reload** to pick up zone edits made outside the Rule Board.
-- **Undo/redo:** use the toolbar or **Ctrl/Cmd+Z** and **Ctrl/Cmd+Shift+Z** (**Ctrl/Cmd+Y** also redoes).
+- **Undo/redo:** use the toolbar or **Ctrl/Cmd+Z** and **Ctrl/Cmd+Shift+Z** (**Ctrl/Cmd+Y** also redoes). Dragging or holding the arrows on a numeric field creates one undo entry per gesture.
 - **Create a zone:** in the Godot editor, use **Project > Tools > Create New Zone...** to generate a zone setup more quickly.
 
 ## Project layout
@@ -60,6 +60,8 @@ The **Godot tests** GitHub Actions workflow runs each suite as a separate check 
 4. Assign the definition to the zone scene and instantiate the scene. Inject any existing `saved_vars` and `fired` dictionaries before adding the zone to the tree, then call `activate()` when it is ready to receive events. Call `deactivate()` when unloading the zone.
 
 The zone builds props, applies resource defaults, calls the optional `_build_blackboard()` hook, and then builds its rules. Override the hook for values that depend on built props. Use `get_var()`, `write_var()`, and `fire()` in gameplay code. Saved keys retain injected values when defaults are applied; initialize local keys consistently when they should reset on reload.
+
+Rule Board renames preserve the storage keys in `saved_vars` and `fired`. Treat those dictionaries as saved state when passing them between zone instances. Gameplay code can continue using a variable's original saved name until that name is assigned to a different Blackboard variable.
 
 Resource step arguments use Godot Expression syntax. Typed zone props and script constants are available by name, along with literals such as `&"lamp_on"`. Expressions are for trusted project data and can call GDScript methods.
 

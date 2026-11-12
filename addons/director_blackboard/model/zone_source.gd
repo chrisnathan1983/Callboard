@@ -9,6 +9,7 @@ class_name ZoneSource extends RefCounted
 ## _build_blackboard():
 ##   define_saved(&"key", default)   # optional note
 ##   define_local(&"key", default)
+##   Both declarations accept an optional third argument for the saved-state key.
 ## _build_rules():
 ##   # @group: "Name" rect=Rect2(x, y, w, h)
 ##   var r: Rule
@@ -16,6 +17,7 @@ class_name ZoneSource extends RefCounted
 ##   r = rule(&"id", &"trigger")
 ##   r.requires = [&"a"]   r.forbids = [...]   r.cancel_if = [...]
 ##   r.once = true
+##   r.state_key = &"original_id"   # optional once-latch key
 ##   r.emits = &"relay"
 ##   r.steps = [
 ##       verb(arg, arg).after(0.25),
@@ -86,14 +88,21 @@ static func _parse_vars(lines: PackedStringArray, r: Vector2i, out: Dictionary) 
 		var m := re.search(t)
 		if m == null:
 			return "line %d: unsupported statement in %s(): %s" % [i + 1, FN_VARS, t]
-		var expr := m.get_string(3).strip_edges()
+		var args := split_args(m.get_string(3))
+		var expr: String = args[0] if not args.is_empty() else "false"
 		if expr == "":
 			expr = "false"
 		var lit := parse_literal(expr)
 		if not lit["ok"]:
 			return "line %d: default value '%s' must be a bool, number, or string literal" % [i + 1, expr]
-		out["vars"].append({"key": m.get_string(2), "scope": m.get_string(1), "default": lit["value"],
-			"default_expr": expr, "note": m.get_string(5).strip_edges(), "note_pad": m.get_string(4)})
+		var variable := {"key": m.get_string(2), "scope": m.get_string(1), "default": lit["value"],
+			"default_expr": expr, "note": m.get_string(5).strip_edges(), "note_pad": m.get_string(4)}
+		if args.size() > 1:
+			var state := parse_literal(args[1])
+			if args.size() != 2 or not state["ok"] or typeof(state["value"]) != TYPE_STRING_NAME or state["value"] == &"":
+				return "line %d: expected a StringName saved-state key" % (i + 1)
+			variable["state_key"] = String(state["value"])
+		out["vars"].append(variable)
 	return ""
 
 static func _parse_rules(lines: PackedStringArray, r: Vector2i, out: Dictionary) -> String:
@@ -103,6 +112,7 @@ static func _parse_rules(lines: PackedStringArray, r: Vector2i, out: Dictionary)
 	var re_list := RegEx.create_from_string('^r\\.(requires|forbids|cancel_if)\\s*=\\s*\\[(.*)\\]$')
 	var re_name := RegEx.create_from_string('&"([^"]*)"')
 	var re_once := RegEx.create_from_string('^r\\.once\\s*=\\s*(true|false)$')
+	var re_state := RegEx.create_from_string('^r\\.state_key\\s*=\\s*&"([^"]+)"$')
 	var re_emits := RegEx.create_from_string('^r\\.emits\\s*=\\s*&"([^"]*)"$')
 	var cur := {}
 	var pending := {}
@@ -151,6 +161,10 @@ static func _parse_rules(lines: PackedStringArray, r: Vector2i, out: Dictionary)
 		m = re_once.search(t)
 		if m:
 			cur["once"] = m.get_string(1) == "true"
+			continue
+		m = re_state.search(t)
+		if m:
+			cur["state_key"] = m.get_string(1)
 			continue
 		m = re_emits.search(t)
 		if m:
@@ -270,7 +284,9 @@ static func _gen_vars(data: Dictionary) -> PackedStringArray:
 		var expr: String = v.get("default_expr", "")
 		if expr == "":
 			expr = format_literal(v["default"])
-		var line := '\tdefine_%s(&"%s", %s)' % [v["scope"], v["key"], expr]
+		var state_key: String = v.get("state_key", "")
+		var state_arg := ', &"%s"' % state_key if not state_key.is_empty() else ""
+		var line := '\tdefine_%s(&"%s", %s%s)' % [v["scope"], v["key"], expr, state_arg]
 		if v.get("note", "") != "":
 			line += v.get("note_pad", "   ") + "# " + v["note"]
 		out.append(line)
@@ -313,6 +329,8 @@ static func _gen_rules(data: Dictionary) -> PackedStringArray:
 				out.append("\tr.%s = [%s]" % [g, names_expr(rd[g])])
 		if rd["once"]:
 			out.append("\tr.once = true")
+		if not rd.get("state_key", "").is_empty():
+			out.append('\tr.state_key = &"%s"' % rd["state_key"])
 		if rd["emit"] != "":
 			out.append('\tr.emits = &"%s"' % rd["emit"])
 		if not rd["steps"].is_empty():
@@ -335,11 +353,15 @@ static func unique_name(existing: Array, base: String) -> String:
 static func rule_ids(data: Dictionary) -> Array:
 	return data["rules"].map(func(r: Dictionary) -> String: return r["id"])
 
+static func new_state_key() -> String:
+	return "@" + Crypto.new().generate_random_bytes(16).hex_encode()
+
 ## Renames a Blackboard key everywhere the model references it: guard lists and any
 ## step argument bound to a `key` parameter.
 static func rename_key(data: Dictionary, old: String, new_key: String) -> void:
 	for v in data["vars"]:
 		if v["key"] == old:
+			v["state_key"] = v.get("state_key", old)
 			v["key"] = new_key
 	for rd in data["rules"]:
 		for g in GUARDS:

@@ -35,6 +35,9 @@ var _redo_stack: Array[Dictionary] = []
 var _current_edit := {}
 var _saved_edit := {}
 var _restoring := false
+var _spin_drag_active := false
+var _last_spin_edit := 0
+var _selecting_after_edit := false
 
 func _init() -> void:
 	var bar := HBoxContainer.new()
@@ -77,7 +80,9 @@ func _init() -> void:
 		_changed(_selected))
 	view.layout_changed.connect(_layout_changed)
 	blackboard.changed.connect(func() -> void: _changed(_selected))
+	blackboard.numeric_changed.connect(func(spin: SpinBox) -> void: _changed(_selected, spin))
 	inspector.changed.connect(func(id: String) -> void: _changed(id))
+	inspector.numeric_changed.connect(_changed)
 	inspector.delete_requested.connect(delete_rule)
 	inspector.duplicate_requested.connect(duplicate_rule)
 	inspector.group_edited.connect(func() -> void: _changed(_selected))
@@ -214,6 +219,7 @@ func _snapshot() -> Dictionary:
 	return state
 
 func _reset_history() -> void:
+	_last_spin_edit = 0
 	_undo_stack.clear()
 	_redo_stack.clear()
 	if _editable:
@@ -222,14 +228,21 @@ func _reset_history() -> void:
 	_saved_edit = _current_edit
 	_dirty = false
 
-func _record_edit() -> void:
+func _record_edit(spin: SpinBox = null) -> void:
+	var spin_id := spin.get_instance_id() if spin and _spin_drag_active else 0
 	var state := _snapshot()
 	if state != _current_edit:
-		_undo_stack.append(_current_edit)
-		if _undo_stack.size() > HISTORY_LIMIT:
-			_undo_stack.pop_front()
+		if spin_id == 0 or spin_id != _last_spin_edit:
+			_undo_stack.append(_current_edit)
+			if _undo_stack.size() > HISTORY_LIMIT:
+				_undo_stack.pop_front()
+		elif not _undo_stack.is_empty() and _undo_stack.back() == state:
+			# Returning to the starting value during a drag is a no-op.
+			_undo_stack.pop_back()
+			spin_id = 0
 		_redo_stack.clear()
 		_current_edit = state
+	_last_spin_edit = spin_id
 	_dirty = _current_edit != _saved_edit
 	_update_status()
 
@@ -251,6 +264,7 @@ func redo() -> void:
 	_restore_edit(_redo_stack.pop_back())
 
 func _restore_edit(state: Dictionary) -> void:
+	_last_spin_edit = 0
 	_restoring = true
 	# Release the old inspector controls before swapping in new model dictionaries.
 	inspector.show_message("Select a rule or group.")
@@ -268,6 +282,12 @@ func _restore_edit(state: Dictionary) -> void:
 	_current_edit = state
 	_dirty = state != _saved_edit
 	_update_status()
+
+func _input(event: InputEvent) -> void:
+	if event is InputEventMouseButton:
+		_last_spin_edit = 0
+		if event.button_index == MOUSE_BUTTON_LEFT:
+			_spin_drag_active = event.pressed
 
 func _shortcut_input(event: InputEvent) -> void:
 	if not _editable or not is_visible_in_tree() or _event_dialog.visible:
@@ -339,7 +359,7 @@ func _sync_layout() -> void:
 			var rect: Rect2 = rects[g["name"]]
 			g["rect"] = Rect2(rect.position.round(), rect.size.round())
 
-func _changed(select_id: String) -> void:
+func _changed(select_id: String, spin: SpinBox = null) -> void:
 	if not _editable or _restoring:
 		return
 	_sync_layout()
@@ -349,8 +369,10 @@ func _changed(select_id: String) -> void:
 	if _find_rule(select_id).is_empty():
 		_selected = ""
 	else:
+		_selecting_after_edit = spin != null
 		view.select_rule(_selected)
-	_record_edit()
+		_selecting_after_edit = false
+	_record_edit(spin)
 
 func _find_rule(id: String) -> Dictionary:
 	for rd in _data["rules"]:
@@ -364,6 +386,7 @@ func add_rule() -> Dictionary:
 	_sync_layout()
 	var rd := {
 		"id": ZoneSource.unique_name(ZoneSource.rule_ids(_data), "new_rule"),
+		"state_key": ZoneSource.new_state_key(),
 		"trigger": _data["external_events"][0] if not _data["external_events"].is_empty() else "arrive",
 		"requires": [], "forbids": [], "cancel_if": [], "once": false, "emit": "", "steps": [],
 		"has_pos": true, "pos": view.view_center() - Vector2(125, 60), "group": "",
@@ -382,6 +405,7 @@ func duplicate_rule(id: String) -> void:
 		return
 	var rd: Dictionary = src.duplicate(true)
 	rd["id"] = ZoneSource.unique_name(ZoneSource.rule_ids(_data), id + "_copy")
+	rd["state_key"] = ZoneSource.new_state_key()
 	rd["pos"] = src["pos"] + Vector2(30, 30)
 	rd["has_pos"] = true
 	_data["rules"].append(rd)
@@ -501,6 +525,8 @@ func save() -> void:
 # --- Selection --------------------------------------------------------------------
 
 func _on_rule_selected(rule_id: String) -> void:
+	if _selecting_after_edit:
+		return
 	var rd := _find_rule(rule_id)
 	if rd.is_empty():
 		return

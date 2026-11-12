@@ -7,6 +7,7 @@ const TMP_PATH := "user://zone_tmp.tres"
 
 func _initialize() -> void:
 	var ok := _test_factory()
+	ok = _test_rename_saved_state() and ok
 
 	# --- Authored resource ----------------------------------------------------------
 	var src := FileAccess.get_file_as_string(ZONE_PATH)
@@ -168,8 +169,121 @@ func _initialize() -> void:
 	b2.queue_free()
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(TMP_PATH))
 
+	await process_frame
+	ok = _test_numeric_undo() and ok
 	print("EDITOR: ", "PASS" if ok else "FAIL")
 	quit(0 if ok else 1)
+
+func _test_rename_saved_state() -> bool:
+	var definition := load(DEFINITION_PATH) as ZoneDefinition
+	if not _check("rename fixture saved", ResourceSaver.save(definition, TMP_PATH) == OK):
+		return false
+	var board := RuleBoard.new()
+	root.add_child(board)
+	board.open_script(TMP_PATH)
+	board._on_rule_selected("z1_delivered")
+	board.inspector._set_id("delivered")
+	board.undo()
+	var ok := _check("undo restores the rule ID", not _rule(board._data, "z1_delivered").is_empty())
+	board.redo()
+	board._on_rule_selected("delivered")
+	board.inspector._set_id("parcel_delivered")
+	var key_edit := board.blackboard._rows.get_child(0).get_child(0) as LineEdit
+	key_edit.text = "guard_relaxed"
+	key_edit.text_submitted.emit(key_edit.text)
+	board.save()
+
+	var data := RuleGraphReader.inspect_definition(TMP_PATH)
+	var renamed: ZoneDefinition = data["definition"]
+	var zone := renamed.instantiate()
+	zone.fired = {&"z1_delivered": true}
+	zone.saved_vars = {&"guard_calmed": true}
+	zone.build()
+	var delivered: Rule
+	for rule in zone.engine.rules:
+		if rule.id == &"parcel_delivered":
+			delivered = rule
+			break
+	ok = _check("an existing latch survives repeated rule renames and reload",
+		delivered != null and delivered.latch_key() == &"z1_delivered"
+		and not zone.engine.passes(delivered)) and ok
+	ok = _check("the renamed Blackboard key reads an existing saved value",
+		zone.get_var(&"guard_relaxed") == true and zone.get_var(&"guard_calmed") == true
+		and not zone.saved_vars.has(&"guard_relaxed")) and ok
+	zone.write_var(&"guard_relaxed", false)
+	ok = _check("writes still use the original saved storage key",
+		zone.saved_vars == {&"guard_calmed": false}) and ok
+	zone.free()
+
+	board.duplicate_rule("parcel_delivered")
+	board.inspector._set_id("z1_delivered")
+	var original := _rule(board._data, "parcel_delivered")
+	var copy := _rule(board._data, "z1_delivered")
+	ok = _check("a duplicate can reuse the old rule name without inheriting its latch",
+		original["state_key"] != copy["state_key"]) and ok
+	board.blackboard._on_add(0)
+	var rows := board.blackboard._rows
+	var reused_key := rows.get_child(rows.get_child_count() - 1).get_child(0) as LineEdit
+	reused_key.text = "guard_calmed"
+	reused_key.text_submitted.emit(reused_key.text)
+	board._data["vars"].back()["scope"] = "saved"
+	var reused_zone := RuleGraphReader.make_definition(board._data).instantiate()
+	reused_zone.saved_vars = {&"guard_calmed": true}
+	reused_zone.build()
+	ok = _check("a new saved variable can reuse the old name with its own default",
+		reused_zone.get_var(&"guard_relaxed") == true and reused_zone.get_var(&"guard_calmed") == false) and ok
+	reused_zone.free()
+	board.queue_free()
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(TMP_PATH))
+	return ok
+
+func _test_numeric_undo() -> bool:
+	var board := RuleBoard.new()
+	root.add_child(board)
+	board.open_script(DEFINITION_PATH)
+	board.blackboard._on_add(1)
+	var row := board.blackboard._rows.get_child(board.blackboard._rows.get_child_count() - 1)
+	var spin := row.get_child(2) as SpinBox
+	var mouse := InputEventMouseButton.new()
+	mouse.button_index = MOUSE_BUTTON_LEFT
+	mouse.pressed = true
+	board._input(mouse)
+	spin.value = 1.0
+	spin.value = 2.0
+	mouse.pressed = false
+	board._input(mouse)
+	mouse.pressed = true
+	board._input(mouse)
+	spin.value = 3.0
+	spin.value = 4.0
+	mouse.pressed = false
+	board._input(mouse)
+	board.undo()
+	var ok := _check("a second SpinBox gesture undoes independently",
+		board._data["vars"].back()["default"] == 2)
+	board.undo()
+	ok = _check("one undo restores the value before the first SpinBox gesture",
+		board._data["vars"].back()["default"] == 0) and ok
+	board.redo()
+	board.redo()
+	ok = _check("redo restores the final value of each gesture",
+		board._data["vars"].back()["default"] == 4) and ok
+
+	board._on_rule_selected("z1_standoff")
+	var interval := board.inspector.find_children("*", "SpinBox", true, false).front() as SpinBox
+	mouse.pressed = true
+	board._input(mouse)
+	interval.value = 4.0
+	interval.value = 5.0
+	mouse.pressed = false
+	board._input(mouse)
+	ok = _check("the numeric step field stays active throughout a gesture",
+		_rule(board._data, "z1_standoff")["steps"][0]["args"][0] == "5.0") and ok
+	board.undo()
+	ok = _check("one undo restores the step argument before the drag",
+		_rule(board._data, "z1_standoff")["steps"][0]["args"][0] == "3.5") and ok
+	board.queue_free()
+	return ok
 
 func _test_factory() -> bool:
 	# Build an unparented resource-backed zone with its own verb factory.

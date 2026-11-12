@@ -4,6 +4,7 @@ class_name Rule extends RefCounted
 ## Plain properties, so a graph editor and a code generator can read and write them directly.
 
 var id: StringName
+var state_key: StringName                 # optional stable key for the once latch
 var trigger: StringName                  # &"arrive", &"deliver", &"relay:calm_guard"
 var requires: Array[StringName] = []     # fire-time guard: keys that must be truthy
 var forbids: Array[StringName] = []      # fire-time guard: keys that must be falsy
@@ -15,3 +16,6 @@ var emits: StringName = &""              # optional relay fired when all steps f
 func _init(p_id: StringName, p_trigger: StringName) -> void:
 	id = p_id
 	trigger = p_trigger
+
+func latch_key() -> StringName:
+	return id if state_key.is_empty() else state_key
