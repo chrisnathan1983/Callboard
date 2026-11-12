@@ -321,11 +321,7 @@ func _current(step: Dictionary, i: int, param: Dictionary) -> String:
 
 ## Writes `expr` into argument i, filling any skipped earlier optional arguments with defaults.
 func _set_arg(step: Dictionary, i: int, expr: String, spin: SpinBox = null) -> void:
-	var verb := VerbCatalog.find(_data["catalog"], step["verb"])
-	while step["args"].size() <= i:
-		var p: Dictionary = verb["args"][step["args"].size()]
-		step["args"].append(p["default"] if p["default"] != "" else VerbCatalog.fallback(p, _data))
-	step["args"][i] = expr
+	VerbCatalog.set_arg(_data, step, i, expr)
 	if spin:
 		numeric_changed.emit(_rule["id"], spin)
 	else:

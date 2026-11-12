@@ -30,6 +30,14 @@ var _event_button: Button
 var _event_dialog := ConfirmationDialog.new()
 var _event_name := LineEdit.new()
 var _event_error := Label.new()
+var _connections_button: Button
+var _connections_dialog := ConfirmationDialog.new()
+var _connection_picker := OptionButton.new()
+var _connection_name := LineEdit.new()
+var _connection_impact := Label.new()
+var _connection_error := Label.new()
+var _delete_connection_button: Button
+var _delete_connection_dialog := ConfirmationDialog.new()
 var _undo_stack: Array[Dictionary] = []
 var _redo_stack: Array[Dictionary] = []
 var _current_edit := {}
@@ -49,6 +57,8 @@ func _init() -> void:
 	bar.add_child(_button("Reload", refresh, false))
 	_event_button = _button("+ Event", _open_event_dialog)
 	bar.add_child(_event_button)
+	_connections_button = _button("Events & Relays", _open_connections)
+	bar.add_child(_connections_button)
 	bar.add_child(_button("+ Rule", add_rule))
 	bar.add_child(_button("+ Group", add_group))
 	_undo_button = _button("Undo", undo)
@@ -62,6 +72,7 @@ func _init() -> void:
 	bar.add_child(_status)
 	add_child(bar)
 	_setup_event_dialog()
+	_setup_connections_dialog()
 
 	var outer := HSplitContainer.new()
 	outer.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -203,6 +214,7 @@ func _update_status() -> void:
 	_undo_button.disabled = not _editable or _undo_stack.is_empty()
 	_redo_button.disabled = not _editable or _redo_stack.is_empty()
 	_event_button.disabled = not _editable or not _data.has("definition")
+	_connections_button.disabled = not _editable or RuleConnections.ids(_data).is_empty()
 	var n: int = _data["problems"].size()
 	var t := "%d rules, %d variables, " % [_data["rules"].size(), _data["vars"].size()]
 	t += "no validation problems" if n == 0 else "%d validation problem(s)" % n
@@ -290,7 +302,7 @@ func _input(event: InputEvent) -> void:
 			_spin_drag_active = event.pressed
 
 func _shortcut_input(event: InputEvent) -> void:
-	if not _editable or not is_visible_in_tree() or _event_dialog.visible:
+	if not _editable or not is_visible_in_tree() or _event_dialog.visible or _connections_dialog.visible:
 		return
 	var focus := get_viewport().gui_get_focus_owner()
 	if focus and (not is_ancestor_of(focus) or focus is LineEdit or focus is TextEdit):
@@ -344,6 +356,112 @@ func add_event(event_id: String) -> bool:
 	_on_rule_selected(_selected)
 	return true
 
+func _setup_connections_dialog() -> void:
+	_connections_dialog.title = "Events and relays"
+	_connections_dialog.ok_button_text = "Rename"
+	_connections_dialog.dialog_hide_on_ok = false
+	_connections_dialog.confirmed.connect(_confirm_connection_rename)
+	_delete_connection_button = _connections_dialog.add_button("Delete…", false, "delete")
+	_connections_dialog.custom_action.connect(func(_action: StringName) -> void: _confirm_connection_delete())
+	var fields := VBoxContainer.new()
+	_connection_picker.item_selected.connect(func(_index: int) -> void: _show_connection())
+	fields.add_child(_connection_picker)
+	_connection_name.placeholder_text = "New name"
+	_connection_name.text_submitted.connect(func(_value: String) -> void: _confirm_connection_rename())
+	fields.add_child(_connection_name)
+	var scroll := ScrollContainer.new()
+	scroll.custom_minimum_size.y = 120
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_connection_impact.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_connection_impact.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(_connection_impact)
+	fields.add_child(scroll)
+	_connection_error.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	fields.add_child(_connection_error)
+	_connections_dialog.add_child(fields)
+	add_child(_connections_dialog)
+
+	_delete_connection_dialog.title = "Delete event or relay"
+	_delete_connection_dialog.ok_button_text = "Delete"
+	_delete_connection_dialog.confirmed.connect(_delete_selected_connection)
+	_connections_dialog.add_child(_delete_connection_dialog)
+
+func _open_connections() -> void:
+	_connection_picker.clear()
+	for id in RuleConnections.ids(_data):
+		_connection_picker.add_item(id)
+	if _connection_picker.item_count == 0:
+		return
+	_connection_picker.select(0)
+	_show_connection()
+	_connections_dialog.popup_centered(Vector2i(470, 300))
+
+func _selected_connection() -> String:
+	return _connection_picker.get_item_text(_connection_picker.selected)
+
+func _show_connection() -> void:
+	var id := _selected_connection()
+	var error := RuleConnections.edit_error(_data, id)
+	var can_rename := error.is_empty() and id != "arrive"
+	_connection_name.text = id.trim_prefix(RuleConnections.RELAY_PREFIX)
+	_connection_name.editable = can_rename
+	_connections_dialog.get_ok_button().disabled = not can_rename
+	_delete_connection_button.disabled = not error.is_empty()
+	_connection_error.text = "The zone lifecycle fires the built-in arrive event." if id == "arrive" and error.is_empty() else error
+	var affected := RuleConnections.impact(_data, id)
+	_connection_impact.text = "No rule connections." if affected.is_empty() else "Affected connections\n" + "\n".join(affected)
+	if id != "arrive" and _data["external_events"].has(id):
+		_connection_impact.text += "\n\nUpdate any gameplay code or scene triggers that fire this ID."
+
+func _confirm_connection_rename() -> void:
+	if _connections_dialog.get_ok_button().disabled:
+		return
+	var error := rename_connection(_selected_connection(), _connection_name.text)
+	if error.is_empty():
+		_connections_dialog.hide()
+	else:
+		_connection_error.text = error
+
+func _confirm_connection_delete() -> void:
+	if _delete_connection_button.disabled:
+		return
+	var id := _selected_connection()
+	var affected := RuleConnections.impact(_data, id)
+	var prompt := "Delete '%s'?" % id
+	if not affected.is_empty():
+		prompt += "\n\nThese connections will be removed. Listed steps will be deleted.\n"
+		prompt += "\n".join(affected.slice(0, 6))
+		if affected.size() > 6:
+			prompt += "\n…and %d more. See the full list in Events and Relays." % (affected.size() - 6)
+	_delete_connection_dialog.dialog_text = prompt
+	_delete_connection_dialog.popup_centered()
+
+func _delete_selected_connection() -> void:
+	var error := delete_connection(_selected_connection())
+	if error.is_empty():
+		_connections_dialog.hide()
+	else:
+		_connection_error.text = error
+
+func rename_connection(id: String, new_name: String) -> String:
+	if not _editable:
+		return "The graph is read-only."
+	var error := RuleConnections.rename(_data, id, new_name)
+	if error.is_empty():
+		_changed(_selected)
+		_on_rule_selected(_selected)
+	return error
+
+func delete_connection(id: String) -> String:
+	if not _editable:
+		return "The graph is read-only."
+	var error := RuleConnections.remove(_data, id)
+	if error.is_empty():
+		_changed(_selected)
+		_on_rule_selected(_selected)
+	return error
+
 # --- Edits (all go through the model) ----------------------------------------------
 
 ## Pull card positions and frame rects off the canvas into the model.
@@ -384,13 +502,12 @@ func add_rule() -> Dictionary:
 	if not _editable:
 		return {}
 	_sync_layout()
-	var rd := {
-		"id": ZoneSource.unique_name(ZoneSource.rule_ids(_data), "new_rule"),
-		"state_key": ZoneSource.new_state_key(),
-		"trigger": _data["external_events"][0] if not _data["external_events"].is_empty() else "arrive",
-		"requires": [], "forbids": [], "cancel_if": [], "once": false, "emit": "", "steps": [],
-		"has_pos": true, "pos": view.view_center() - Vector2(125, 60), "group": "",
-	}
+	var id := ZoneSource.unique_name(ZoneSource.rule_ids(_data), "new_rule")
+	var trigger: String = _data["external_events"][0] if not _data["external_events"].is_empty() else "arrive"
+	var rd := AuthoredData.new_rule(id, trigger)
+	rd["state_key"] = ZoneSource.new_state_key()
+	rd["pos"] = view.view_center() - Vector2(125, 60)
+	rd["has_pos"] = true
 	_data["rules"].append(rd)
 	_changed(rd["id"])
 	_on_rule_selected(rd["id"])
@@ -485,10 +602,9 @@ func disconnect_wire(to_id: String) -> void:
 
 func _all_relays() -> Array:
 	var out: Array = []
-	for rd in _data["rules"]:
-		for r in RuleGraphView.output_relays(rd):
-			if r != "":
-				out.append(r)
+	for id in RuleConnections.ids(_data):
+		if id.begins_with(RuleConnections.RELAY_PREFIX):
+			out.append(id.trim_prefix(RuleConnections.RELAY_PREFIX))
 	return out
 
 func save() -> void:

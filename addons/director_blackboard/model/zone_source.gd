@@ -25,12 +25,8 @@ class_name ZoneSource extends RefCounted
 ##
 ## Free-form comments inside those two functions are not preserved when regenerated.
 ##
-## Model (what parse returns and generate consumes):
-##   vars:   [{key, scope: "saved"|"local", default, default_expr, note, note_pad}]
-##   groups: [{name, rect: Rect2}]
-##   rules:  [{id, trigger, requires[], forbids[], cancel_if[], once, emit, group, pos, has_pos,
-##             steps: [{verb, args: [expr strings], delay: expr string or "", emits, sets}]}]
-## Step args are GDScript expression text, so constants and prop names round-trip exactly.
+## Rule, step and variable dictionaries use AuthoredData defaults.
+## Groups store a name and a Rect2. Step arguments retain their original expression text.
 
 const FN_VARS := "_build_blackboard"
 const FN_RULES := "_build_rules"
@@ -95,8 +91,9 @@ static func _parse_vars(lines: PackedStringArray, r: Vector2i, out: Dictionary) 
 		var lit := parse_literal(expr)
 		if not lit["ok"]:
 			return "line %d: default value '%s' must be a bool, number, or string literal" % [i + 1, expr]
-		var variable := {"key": m.get_string(2), "scope": m.get_string(1), "default": lit["value"],
-			"default_expr": expr, "note": m.get_string(5).strip_edges(), "note_pad": m.get_string(4)}
+		var variable := AuthoredData.new_variable(m.get_string(2), m.get_string(1), lit["value"], expr)
+		variable["note"] = m.get_string(5).strip_edges()
+		variable["note_pad"] = m.get_string(4)
 		if args.size() > 1:
 			var state := parse_literal(args[1])
 			if args.size() != 2 or not state["ok"] or typeof(state["value"]) != TYPE_STRING_NAME or state["value"] == &"":
@@ -142,10 +139,11 @@ static func _parse_rules(lines: PackedStringArray, r: Vector2i, out: Dictionary)
 			continue
 		m = re_rule.search(t)
 		if m:
-			cur = {"id": m.get_string(1), "trigger": m.get_string(2), "requires": [], "forbids": [],
-				"cancel_if": [], "once": false, "emit": "", "steps": [],
-				"has_pos": not pending.is_empty(), "pos": pending.get("pos", Vector2.ZERO),
-				"group": pending.get("group", "")}
+			cur = AuthoredData.new_rule(m.get_string(1), m.get_string(2))
+			if not pending.is_empty():
+				cur["has_pos"] = true
+				cur["pos"] = pending["pos"]
+				cur["group"] = pending["group"]
 			pending = {}
 			out["rules"].append(cur)
 			continue
@@ -192,7 +190,7 @@ static func _parse_step(t: String) -> Dictionary:
 	var c := RegEx.create_from_string('^(\\w+)\\((.*)\\)$').search(t)
 	if c == null:
 		return {}
-	return {"verb": c.get_string(1), "args": split_args(c.get_string(2)), "delay": delay, "emits": "", "sets": []}
+	return AuthoredData.new_step(c.get_string(1), split_args(c.get_string(2)), delay)
 
 ## Splits "a, f(b, c), \"x, y\"" on top-level commas.
 static func split_args(s: String) -> Array:

@@ -47,6 +47,18 @@ static func find(catalog: Array, verb: String) -> Dictionary:
 			return v
 	return {}
 
+## Replace an argument expression, keeping any intervening optional defaults.
+static func set_arg(data: Dictionary, step: Dictionary, index: int, expression: String) -> void:
+	var params: Array = find(data["catalog"], step["verb"])["args"]
+	var args: Array = step["args"]
+	while args.size() < index:
+		var param: Dictionary = params[args.size()]
+		args.append(param["default"] if param["default"] != "" else fallback(param, data))
+	if args.size() == index:
+		args.append(expression)
+	else:
+		args[index] = expression
+
 static func prop_fits(prop_class: String, param_class: String) -> bool:
 	return param_class == "" or prop_class == param_class or ClassDB.is_parent_class(prop_class, param_class)
 
@@ -85,4 +97,4 @@ static func new_step(data: Dictionary, verb: String) -> Dictionary:
 	var args: Array = []
 	for i in last_required + 1:
 		args.append(params[i]["default"] if params[i]["default"] != "" else fallback(params[i], data))
-	return {"verb": verb, "args": args, "delay": "", "emits": "", "sets": []}
+	return AuthoredData.new_step(verb, args)

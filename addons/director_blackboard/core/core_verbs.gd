@@ -35,4 +35,5 @@ func repeat_emit(interval: float, tick: StringName) -> Step:
 			engine.fire("relay:" + tick, c)
 	var step := Step.new(run)
 	step.emits = tick
+	step.emit_arg = 1
 	return step

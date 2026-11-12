@@ -171,8 +171,96 @@ func _initialize() -> void:
 
 	await process_frame
 	ok = _test_numeric_undo() and ok
+	ok = _test_event_and_relay_edits() and ok
 	print("EDITOR: ", "PASS" if ok else "FAIL")
 	quit(0 if ok else 1)
+
+func _test_event_and_relay_edits() -> bool:
+	var definition := load(DEFINITION_PATH) as ZoneDefinition
+	if not _check("connection fixture saved", ResourceSaver.save(definition, TMP_PATH) == OK):
+		return false
+	var board := RuleBoard.new()
+	root.add_child(board)
+	board.open_script(TMP_PATH)
+	board._connections_button.pressed.emit()
+	var picker := board._connection_picker
+	for i in picker.item_count:
+		if picker.get_item_text(i) == "offer:decoy":
+			picker.select(i)
+			picker.item_selected.emit(i)
+			break
+	var ok := _check("connection dialog lists affected rules and external callers",
+		board._connections_dialog.visible and "z1_decoy — trigger" in board._connection_impact.text
+		and "gameplay code" in board._connection_impact.text)
+	board._connection_name.text = "offer:parcel"
+	board._connections_dialog.confirmed.emit()
+	ok = _check("event rename updates its card and rule trigger",
+		board.view._event_nodes.has("offer:parcel")
+		and not board.view._event_nodes.has("offer:decoy")
+		and _rule(board._data, "z1_decoy")["trigger"] == "offer:parcel") and ok
+	ok = _check("event name collision leaves connections alone",
+		not board.rename_connection("offer:parcel", "deliver").is_empty()
+		and _rule(board._data, "z1_decoy")["trigger"] == "offer:parcel") and ok
+	board._connections_button.pressed.emit()
+	for i in picker.item_count:
+		if picker.get_item_text(i) == "offer:parcel":
+			picker.select(i)
+			picker.item_selected.emit(i)
+			break
+	board._delete_connection_button.pressed.emit()
+	ok = _check("delete confirmation names the affected trigger",
+		board._delete_connection_dialog.visible
+		and "z1_decoy — trigger" in board._delete_connection_dialog.dialog_text) and ok
+	board._delete_connection_dialog.confirmed.emit()
+	ok = _check("deleting an event clears its dependent trigger",
+		not board.view._event_nodes.has("offer:parcel")
+		and _rule(board._data, "z1_decoy")["trigger"] == "") and ok
+	board.undo()
+	ok = _check("undo restores the event and its wire",
+		board.view._event_nodes.has("offer:parcel")
+		and _rule(board._data, "z1_decoy")["trigger"] == "offer:parcel") and ok
+
+	ok = _check("relay rename updates every rule emitter and the listener",
+		board.rename_connection("relay:calm_guard", "guard_calm").is_empty()
+		and _rule(board._data, "z1_treat")["emit"] == "guard_calm"
+		and _rule(board._data, "z1_decoy")["emit"] == "guard_calm"
+		and _rule(board._data, "z1_calm")["trigger"] == "relay:guard_calm") and ok
+	ok = _check("relay rename updates the authored argument of a step emitter",
+		board.rename_connection("relay:standoff_tick", "guard_tick").is_empty()
+		and _rule(board._data, "z1_standoff")["steps"][0]["args"] == ["3.5", '&"guard_tick"']
+		and _rule(board._data, "z1_bark")["trigger"] == "relay:guard_tick") and ok
+	ok = _check("an external relay rename updates its declaration and listener",
+		board.rename_connection("relay:treat_out", "treat_ready").is_empty()
+		and board._data["external_events"].has("relay:treat_ready")
+		and _rule(board._data, "z1_treat")["trigger"] == "relay:treat_ready") and ok
+
+	board.save()
+	var reloaded := RuleGraphReader.inspect_definition(TMP_PATH)
+	var tick: Dictionary = _rule(reloaded, "z1_standoff")["steps"][0]
+	var saved: ZoneDefinition = reloaded["definition"]
+	ok = _check("save and reload preserve relay edits and rederive step metadata",
+		reloaded["compiles"] and tick["emits"] == "guard_tick" and tick["emit_arg"] == 1
+		and not saved.rules[0]["steps"][0].has("emit_arg")) and ok
+
+	var affected := RuleConnections.impact(board._data, "relay:guard_tick")
+	ok = _check("relay deletion lists its emitting step and receiving trigger",
+		affected.has("z1_standoff — step 1 (repeat_emit)") and affected.has("z1_bark — trigger")) and ok
+	ok = _check("deleting a step relay removes the emitting step and disconnects its listener",
+		board.delete_connection("relay:guard_tick").is_empty()
+		and _rule(board._data, "z1_standoff")["steps"].is_empty()
+		and _rule(board._data, "z1_bark")["trigger"] == "") and ok
+	board.undo()
+	ok = _check("undo restores the emitting step and relay connection",
+		_rule(board._data, "z1_standoff")["steps"][0]["emits"] == "guard_tick"
+		and _rule(board._data, "z1_bark")["trigger"] == "relay:guard_tick") and ok
+	ok = _check("deleting a rule relay clears all its outputs and listeners",
+		board.delete_connection("relay:guard_calm").is_empty()
+		and _rule(board._data, "z1_treat")["emit"] == ""
+		and _rule(board._data, "z1_decoy")["emit"] == ""
+		and _rule(board._data, "z1_calm")["trigger"] == "") and ok
+	board.queue_free()
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(TMP_PATH))
+	return ok
 
 func _test_rename_saved_state() -> bool:
 	var definition := load(DEFINITION_PATH) as ZoneDefinition

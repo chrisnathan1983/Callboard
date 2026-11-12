@@ -153,9 +153,9 @@ func _on_add(index: int) -> void:
 	var type_name: String = _add.get_popup().get_item_text(index)
 	var keys: Array = _data["vars"].map(func(x: Dictionary) -> String: return x["key"])
 	var value: Variant = TYPES[type_name]
-	_data["vars"].append({"key": ZoneSource.unique_name(keys, "new_var"), "scope": "local", "default": value,
-		"state_key": ZoneSource.new_state_key(),
-		"default_expr": ZoneSource.format_literal(value), "note": "", "note_pad": "   "})
+	var variable := AuthoredData.new_variable(ZoneSource.unique_name(keys, "new_var"), "local", value, ZoneSource.format_literal(value))
+	variable["state_key"] = ZoneSource.new_state_key()
+	_data["vars"].append(variable)
 	_rebuild()
 	changed.emit()
 

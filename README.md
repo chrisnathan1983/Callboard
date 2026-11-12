@@ -26,6 +26,7 @@ The editor plugin is enabled in `project.godot`. Open the **Rule Board** tab in 
 
 - **Blackboard:** add typed variables, choose saved or local scope, and set defaults.
 - **Events and graph:** add event cards, rules, and groups. Connect rule outputs to triggers; wires are derived from rule triggers and emitted relays.
+- **Events & Relays:** rename an event or relay across its authored connections, or review affected rules and steps before deleting it. Deleting a relay removes the steps that emit it and disconnects its listeners. Update gameplay code and scene triggers when you rename an external event or relay.
 - **Rule inspector:** edit triggers, requirements, forbidden/cancellation conditions, once behavior, emitted relays, groups, and ordered steps. Step arguments use verb-specific controls where available.
 - **Save:** validates step expressions and saves the selected `.tres` zone definition. Use **Reload** to pick up zone edits made outside the Rule Board.
 - **Undo/redo:** use the toolbar or **Ctrl/Cmd+Z** and **Ctrl/Cmd+Shift+Z** (**Ctrl/Cmd+Y** also redoes). Dragging or holding the arrows on a numeric field creates one undo entry per gesture.
@@ -68,6 +69,8 @@ Resource step arguments use Godot Expression syntax. Typed zone props and script
 ### Add a custom verb
 
 Resource-backed zones use `StagingVerbs` by default. Extend it to add to the standard verbs, or extend `CoreVerbs` for a factory with Blackboard writes, scoring, and repeating relays. Override `_make_verbs(context: StepContext) -> CoreVerbs` in the zone script to return your factory. Give each public verb typed parameters and a `Step` return type so it appears in the Rule Board. Return a `Step` with a callable that runs the behavior. Declare any keys the step writes in `sets` and any relay it emits in `emits`. The resource compiler fills in the verb name, arguments, and any authored delay.
+
+If a step emits a relay named by one of its arguments, set `Step.emit_arg` to that argument's zero-based index to support renaming in the Rule Board. Edit fixed relay names in the verb code. For script-authored zones, edit external event declarations in the zone script.
 
 Existing script-authored `_build_rules()` methods can still call the standard verbs on `Zone`. Move custom verbs used by a `.tres` definition into its factory.
 

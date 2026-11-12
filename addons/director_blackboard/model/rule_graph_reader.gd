@@ -91,6 +91,7 @@ static func make_definition(data: Dictionary) -> ZoneDefinition:
 	for rule in draft.rules:
 		for step in rule["steps"]:
 			step.erase("emits")
+			step.erase("emit_arg")
 			step.erase("sets")
 	return draft
 
@@ -113,6 +114,7 @@ static func _read_results(data: Dictionary, zone: Zone, ok: bool, problems: Arra
 	for rd in data["rules"]:
 		for s in rd["steps"]:
 			s["emits"] = ""
+			s.erase("emit_arg")
 			s["sets"] = []
 	if zone == null:
 		return
@@ -121,5 +123,7 @@ static func _read_results(data: Dictionary, zone: Zone, ok: bool, problems: Arra
 			if rd["id"] == String(pr.id) and rd["steps"].size() == pr.steps.size():
 				for i in pr.steps.size():
 					rd["steps"][i]["emits"] = String(pr.steps[i].emits)
+					if pr.steps[i].emit_arg >= 0:
+						rd["steps"][i]["emit_arg"] = pr.steps[i].emit_arg
 					rd["steps"][i]["sets"] = pr.steps[i].sets.map(func(k: StringName) -> String: return String(k))
 				break
