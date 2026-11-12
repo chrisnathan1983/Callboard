@@ -42,7 +42,7 @@ The editor plugin is enabled in `project.godot`. Open the **Rule Board** tab in 
 Run the smoke test from the project directory with:
 
 ```sh
-godot --headless --path . --script res://tests/smoke.gd
+godot --headless --max-fps 60 --fixed-fps 60 --quit-after 2000 --path . --script res://tests/smoke.gd
 ```
 
 ## Author a zone

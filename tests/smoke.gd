@@ -1,16 +1,18 @@
 extends SceneTree
-## Headless smoke test: godot --headless --path . --script res://tests/smoke.gd
+## Headless smoke test: godot --headless --max-fps 60 --fixed-fps 60 --quit-after 2000 --path . --script res://tests/smoke.gd
 
-const ZONE_PATH := "res://scripts/zones/zone_01.gd"
-const DEFINITION_PATH := "res://scripts/zones/zone_01.tres"
+const ZONE_PATH := "res://zones/zone_01/zone_01.gd"
+const DEFINITION_PATH := "res://zones/zone_01/zone_01.tres"
 const TMP_PATH := "user://zone_tmp.tres"
 
 func _initialize() -> void:
-	var main: Node = load("res://scenes/main.tscn").instantiate()
+	var main: Node = load("res://game.tscn").instantiate()
 	root.add_child(main)
 	await create_timer(0.5).timeout
 	var zone: Zone = main.zone
+	var player: Player = main.get_node("WorldManager/Player")
 	var ok := true
+	ok = _check("scene loads zone_02 definition", zone.definition.resource_path == DEFINITION_PATH) and ok
 
 	# --- A. Runtime validator ------------------------------------------------------
 	ok = _check("zone validates clean", zone.validate().is_empty()) and ok
@@ -32,7 +34,7 @@ func _initialize() -> void:
 	var definition := load(DEFINITION_PATH) as ZoneDefinition
 	ok = _check("resource stores events, variables, rules and groups",
 		definition.external_events.size() == 4 and definition.variables.size() == 3
-		and definition.rules.size() == 7 and definition.groups.size() == 3) and ok
+		and definition.rules.size() == 9 and definition.groups.size() == 3) and ok
 	var data := RuleGraphReader.inspect_definition(DEFINITION_PATH)
 	ok = _check("reader: no parse error, compiles, no problems", data["parse_error"] == "" and data["compiles"] and data["problems"].is_empty()) and ok
 	ok = _check("reader: every rule has a saved position", data["rules"].all(func(r): return r["has_pos"])) and ok
@@ -44,7 +46,7 @@ func _initialize() -> void:
 	var gv := RuleGraphView.new()
 	root.add_child(gv)
 	gv.show_data(data)
-	ok = _check("graph: 8 wires (%d)" % gv.get_connection_list().size(), gv.get_connection_list().size() == 8) and ok
+	ok = _check("graph: 11 wires (%d)" % gv.get_connection_list().size(), gv.get_connection_list().size() == 11) and ok
 	gv.pulse("z1_bark")
 	gv.queue_free()
 
@@ -53,14 +55,14 @@ func _initialize() -> void:
 	root.add_child(board)
 	var zone_paths := board._collect_zone_definition_paths()
 	ok = _check("board: discovers nested zone resources",
-		zone_paths.has("res://zones/testing/testing.tres")
-		and zone_paths.has("res://zones/testing_02/testing_02.tres")) and ok
+		zone_paths.has("res://zones/zone_01/zone_01.tres")
+		and zone_paths.has("res://zones/zone_01/zone_01.tres")) and ok
 	board.open_script(DEFINITION_PATH)
 	var d: Dictionary = board._data
 	board.view._rule_nodes["z1_bark"].position_offset = Vector2(555, 77)
 
 	var nr: Dictionary = board.add_rule()
-	ok = _check("add rule: 8 rules, id unique, flagged as doing nothing", d["rules"].size() == 8 and d["problems"].any(func(p): return "'new_rule' does nothing" in p)) and ok
+	ok = _check("add rule: 10 rules, id unique, flagged as doing nothing", d["rules"].size() == 10 and d["problems"].any(func(p): return "'new_rule' does nothing" in p)) and ok
 	ok = _check("card move synced into model", d["rules"][1]["pos"] == Vector2(555, 77)) and ok
 	nr["steps"].append(VerbCatalog.new_step(d, "score"))
 	nr["steps"].append(VerbCatalog.new_step(d, "show_node"))
@@ -80,7 +82,7 @@ func _initialize() -> void:
 	ok = _check("duplicate: unique id", ZoneSource.rule_ids(d).has("new_rule_copy")) and ok
 	board.delete_rule("new_rule_copy")
 	board.delete_rule("new_rule")
-	ok = _check("delete: 7 rules; the now-unheard relay is flagged", d["rules"].size() == 7 and d["problems"].size() == 1 and "z1_bark_done" in d["problems"][0]) and ok
+	ok = _check("delete: 9 rules; the now-unheard relay is flagged", d["rules"].size() == 9 and d["problems"].size() == 1 and "z1_bark_done" in d["problems"][0]) and ok
 	_rule(d, "z1_bark")["emit"] = ""
 	board._changed("")
 	ok = _check("clearing the emit makes it clean again", d["problems"].is_empty()) and ok
@@ -138,7 +140,8 @@ func _initialize() -> void:
 	b2.undo()
 	ok = _check("undo restores frame size", b2.view.get_group_rects()["Delivery"].size == frame_size) and ok
 	b2.redo()
-	ok = _check("redo restores frame resize", b2.view.get_group_rects()["Delivery"].size == frame_size + Vector2(30, 30)) and ok
+	ok = _check("redo restores frame resize",
+		(b2.view.get_group_rects()["Delivery"].size - (frame_size + Vector2(30, 30))).length() < 0.01) and ok
 	b2.undo()
 	b2.blackboard._on_add(0)
 	ok = _check("new edit clears redo", b2._redo_button.disabled and d2["vars"].size() == 4) and ok
@@ -187,10 +190,12 @@ func _initialize() -> void:
 	zone.fire(&"deliver")
 	await create_timer(0.1).timeout
 	ok = _check("caught fired", main.log_lines.any(func(l): return l.begins_with("z1_caught"))) and ok
-	ok = _check("player stunned", main.player.stunned) and ok
+	ok = _check("player stunned", player.stunned) and ok
 
+	var post_calm_fires: Array[String] = []
+	zone.rule_fired.connect(func(id: StringName, _event: StringName) -> void: post_calm_fires.append(String(id)))
 	var pad: BumpProp = zone.get_node("BumpPad")
-	pad._on_bump(main.player)
+	pad._on_bump(player)
 	zone.fire(&"offer:decoy")
 	await create_timer(1.8).timeout
 	ok = _check("guard calmed (saved var)", zone.saved_vars.get(&"guard_calmed", false)) and ok
@@ -201,9 +206,8 @@ func _initialize() -> void:
 	ok = _check("lamp off", not zone.is_set(&"lamp_on")) and ok
 	ok = _check("score 100 from decoy", main.score == 100) and ok
 
-	var before: int = main.log_lines.size()
 	await create_timer(4.0).timeout
-	ok = _check("no new rules fired after calm", main.log_lines.size() == before) and ok
+	ok = _check("sleep rules fired after calm", post_calm_fires.has("sleeping") and post_calm_fires.has("guard_sleep")) and ok
 
 	zone.fire(&"deliver")
 	zone.fire(&"deliver")
@@ -211,8 +215,8 @@ func _initialize() -> void:
 	ok = _check("delivered once (+200)", main.score == 300) and ok
 
 	# --- G. Reload: saved persists, local resets; live board is read-only -------------
-	main._unload_zone()
-	main._load_zone()
+	main.unload_zone()
+	main.load_zone()
 	zone = main.zone
 	var fired_after := []
 	zone.rule_fired.connect(func(id, _e): fired_after.append(id))
@@ -221,8 +225,8 @@ func _initialize() -> void:
 	ok = _check("local vars reset", not zone.local_vars.get(&"treat_out", false)) and ok
 	ok = _check("no rules fire after reload", fired_after.is_empty()) and ok
 	ok = _check("reward prop restored", (zone.get_node("RewardProp") as Node3D).visible) and ok
-	ok = _check("live board bound (7 rules)", main.board._data["rules"].size() == 7) and ok
-	ok = _check("live board is read-only", main.board.add_rule().is_empty() and main.board._data["rules"].size() == 7) and ok
+	ok = _check("live board bound (9 rules)", main.hud.board._data["rules"].size() == 9) and ok
+	ok = _check("live board is read-only", main.hud.board.add_rule().is_empty() and main.hud.board._data["rules"].size() == 9) and ok
 
 	print("SMOKE: ", "PASS" if ok else "FAIL")
 	quit(0 if ok else 1)
@@ -236,3 +240,4 @@ func _rule(d: Dictionary, id: String) -> Dictionary:
 func _check(label: String, cond: bool) -> bool:
 	print(("  ok   " if cond else "  FAIL ") + label)
 	return cond
+

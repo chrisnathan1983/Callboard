@@ -17,15 +17,7 @@ func _ready() -> void:
 	load_zone()
 
 func load_zone() -> void:
-	zone = zone_scene.instantiate()
-	zone.saved_vars = saved_vars      # by reference, as a manager would inject them
-	zone.fired = fired_rules
-	add_child(zone)                   # _ready() builds props, Blackboard, rules
-	zone.scored.connect(func(p: int) -> void: score += p)
-	zone.rule_fired.connect(_on_rule_fired)
-	hud.bind_zone(zone)
-	zone.activate()
-	_log("zone loaded")
+	load_zone_scene(zone_scene)
 
 func load_zone_scene(scene: PackedScene) -> void:
 	zone = scene.instantiate()
