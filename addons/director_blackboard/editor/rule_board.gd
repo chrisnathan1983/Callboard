@@ -1,6 +1,6 @@
 @tool
-class_name RuleBoard extends VBoxContainer
-## Blackboard sidebar + Rule Graph + inspector in one control.
+class_name RuleBoard extends Control
+## Full-viewport rule graph with floating authoring controls.
 ##
 ## Editor mode edits a ZoneDefinition and saves its resource after validation.
 ## Live mode shows a running zone's values and rule pulses.
@@ -10,6 +10,10 @@ signal layout_saved(path: String)
 const ZONES_DIR := "res://zones"
 const HISTORY_LIMIT := 100
 const EDIT_FIELDS := ["external_events", "vars", "rules", "groups"]
+const Style := preload("res://addons/director_blackboard/editor/board_style.gd")
+const GUTTER := 12.0
+enum CreateAction { EVENT, RULE, GROUP }
+enum ContextAction { EDIT = 10, DUPLICATE, DELETE }
 
 var view := RuleGraphView.new()
 var blackboard := BlackboardPanel.new()
@@ -20,24 +24,28 @@ var _edit_buttons: Array[Button] = []
 var _data := {}
 var _path := ""
 var _selected := ""
+var _selected_group := ""
 var _dirty := false
 var _editable := true
 var _live: Zone
 var _accum := 0.0
+var _save_button: Button
+var _reload_button: Button
 var _undo_button: Button
 var _redo_button: Button
 var _event_button: Button
 var _event_dialog := ConfirmationDialog.new()
 var _event_name := LineEdit.new()
 var _event_error := Label.new()
+var _blackboard_button: Button
 var _connections_button: Button
-var _connections_dialog := ConfirmationDialog.new()
-var _connection_picker := OptionButton.new()
-var _connection_name := LineEdit.new()
-var _connection_impact := Label.new()
-var _connection_error := Label.new()
-var _delete_connection_button: Button
+var _connections_panel: PanelContainer
+var _connection_scroll := ScrollContainer.new()
+var _connection_rows := VBoxContainer.new()
+var _connection_cards := {}
+var _expanded_connections := {}
 var _delete_connection_dialog := ConfirmationDialog.new()
+var _pending_connection_delete := ""
 var _undo_stack: Array[Dictionary] = []
 var _redo_stack: Array[Dictionary] = []
 var _current_edit := {}
@@ -46,41 +54,63 @@ var _restoring := false
 var _spin_drag_active := false
 var _last_spin_edit := 0
 var _selecting_after_edit := false
+var _reveal_pending := false
+var _file_tools: PanelContainer
+var _create_tools: PanelContainer
+var _left_tools: VBoxContainer
+var _blackboard_panel: PanelContainer
+var _settings_window: PanelContainer
+var _create_menu := PopupMenu.new()
+var _create_position := Vector2.ZERO
+var _context_target: Dictionary
 
 func _init() -> void:
-	var bar := HBoxContainer.new()
-	var lbl := Label.new()
-	lbl.text = "Zone:"
-	bar.add_child(lbl)
+	add_child(view)
+	view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	var zone_tools := HBoxContainer.new()
+	_picker.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_picker.fit_to_longest_item = false
+	_picker.custom_minimum_size.x = 212
+	_picker.ready.connect(func() -> void:
+		if Engine.is_editor_hint():
+			_picker.custom_minimum_size.x *= _picker.get_theme_default_base_scale())
 	_picker.item_selected.connect(_on_picker)
-	bar.add_child(_picker)
-	bar.add_child(_button("Reload", refresh, false))
-	_event_button = _button("+ Event", _open_event_dialog)
-	bar.add_child(_event_button)
-	_connections_button = _button("Events & Relays", _open_connections)
-	bar.add_child(_connections_button)
-	bar.add_child(_button("+ Rule", add_rule))
-	bar.add_child(_button("+ Group", add_group))
-	_undo_button = _button("Undo", undo)
-	_undo_button.tooltip_text = "Ctrl/Cmd+Z"
-	_redo_button = _button("Redo", redo)
-	_redo_button.tooltip_text = "Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y"
-	bar.add_child(_undo_button)
-	bar.add_child(_redo_button)
-	bar.add_child(_button("Save", save))
-	_status.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	bar.add_child(_status)
-	add_child(bar)
-	_setup_event_dialog()
-	_setup_connections_dialog()
+	zone_tools.add_child(_picker)
+	_save_button = _file_button(&"Save", "💾", "Save zone", save)
+	_reload_button = _file_button(&"Reload", "↻", "Reload zone from disk", refresh)
+	zone_tools.add_child(_save_button)
+	zone_tools.add_child(_reload_button)
+	_undo_button = _button("↶", undo)
+	_undo_button.accessibility_name = "Undo"
+	_undo_button.tooltip_text = "Undo (Ctrl/Cmd+Z)"
+	_redo_button = _button("↷", redo)
+	_redo_button.accessibility_name = "Redo"
+	_redo_button.tooltip_text = "Redo (Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y)"
+	zone_tools.add_child(_undo_button)
+	zone_tools.add_child(_redo_button)
+	var file_tools := VBoxContainer.new()
+	file_tools.add_child(zone_tools)
+	_status.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	Style.fallback_font_size(_status, 13)
+	_status.custom_minimum_size.x = 320
+	_status.mouse_filter = Control.MOUSE_FILTER_PASS
+	file_tools.add_child(_status)
+	_file_tools = _floating_toolbar(file_tools)
 
-	var outer := HSplitContainer.new()
-	outer.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	var inner := HSplitContainer.new()
-	inner.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var create_tools := HBoxContainer.new()
+	_event_button = _button("+ Event", _open_event_dialog)
+	create_tools.add_child(_event_button)
+	create_tools.add_child(_button("+ Rule", add_rule))
+	create_tools.add_child(_button("+ Group", add_group))
+	_create_tools = _floating_toolbar(create_tools)
+
+	_setup_event_dialog()
+	_setup_create_menu()
+
 	view.rule_selected.connect(_on_rule_selected)
 	view.group_selected.connect(_on_group_selected)
+	view.selection_cleared.connect(_clear_selection)
+	view.popup_request.connect(_open_create_menu)
 	view.wire_added.connect(func(src: Dictionary, to: String) -> void: connect_wire(src, to))
 	view.wire_removed.connect(func(to: String) -> void: disconnect_wire(to))
 	view.rules_delete_requested.connect(_delete_rules)
@@ -96,13 +126,113 @@ func _init() -> void:
 	inspector.numeric_changed.connect(_changed)
 	inspector.delete_requested.connect(delete_rule)
 	inspector.duplicate_requested.connect(duplicate_rule)
-	inspector.group_edited.connect(func() -> void: _changed(_selected))
+	inspector.group_edited.connect(func(group_name: String) -> void:
+		_selected_group = group_name
+		_changed(""))
 	inspector.group_delete_requested.connect(delete_group)
-	inner.add_child(view)
-	inner.add_child(inspector)
-	outer.add_child(blackboard)
-	outer.add_child(inner)
-	add_child(outer)
+	inspector.content_size_changed.connect(_layout_overlays, CONNECT_DEFERRED)
+	_make_left_tools()
+	blackboard.content_size_changed.connect(_layout_overlays, CONNECT_DEFERRED)
+	var settings := VBoxContainer.new()
+	settings.add_theme_constant_override("separation", 10)
+	settings.add_child(Style.label("Rule settings", Style.TEXT, 16))
+	inspector.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	settings.add_child(inspector)
+	_settings_window = Style.panel(settings, Style.SURFACE, Vector2(12, 10), true)
+	_settings_window.hide()
+	add_child(_settings_window)
+
+	resized.connect(_layout_overlays)
+	_layout_overlays.call_deferred()
+
+func _floating_toolbar(content: Control) -> PanelContainer:
+	var panel := Style.panel(content, Style.SURFACE, Vector2(6, 5))
+	panel.minimum_size_changed.connect(_layout_overlays, CONNECT_DEFERRED)
+	add_child(panel)
+	return panel
+
+func _make_left_tools() -> void:
+	_left_tools = VBoxContainer.new()
+	_left_tools.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_left_tools.add_theme_constant_override("separation", 6)
+	var launchers := HBoxContainer.new()
+	launchers.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_left_tools.add_child(launchers)
+	var buttons := ButtonGroup.new()
+	buttons.allow_unpress = true
+	_blackboard_panel = Style.panel(blackboard, Style.SURFACE, Vector2(12, 10), true)
+	_setup_connections_panel()
+	_blackboard_button = _panel_launcher("Blackboard", "▤", _blackboard_panel, buttons)
+	_connections_button = _panel_launcher("Events & relays", "⇄", _connections_panel, buttons)
+	_connections_button.toggled.connect(func(open: bool) -> void:
+		if open:
+			_refresh_connections())
+	launchers.add_child(_blackboard_button)
+	launchers.add_child(_connections_button)
+	_left_tools.add_child(_blackboard_panel)
+	_left_tools.add_child(_connections_panel)
+	_left_tools.minimum_size_changed.connect(_layout_overlays, CONNECT_DEFERRED)
+	add_child(_left_tools)
+
+func _panel_launcher(title: String, glyph: String, panel: PanelContainer, buttons: ButtonGroup) -> Button:
+	var button := Button.new()
+	button.toggle_mode = true
+	button.button_group = buttons
+	button.custom_minimum_size = Vector2(36, 32)
+	button.text = glyph
+	button.accessibility_name = title
+	button.tooltip_text = title
+	if not Engine.is_editor_hint():
+		button.add_theme_stylebox_override("normal", Style.surface(Style.SURFACE, Style.BORDER, Vector2(9, 4)))
+		button.add_theme_stylebox_override("pressed", Style.surface(Color("#26394c"), Style.BORDER, Vector2(9, 4)))
+	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	panel.hide()
+	button.toggled.connect(func(open: bool) -> void:
+		panel.visible = open
+		_layout_overlays.call_deferred())
+	return button
+
+func _layout_overlays() -> void:
+	if _settings_window == null:
+		return
+	for toolbar in [_file_tools, _create_tools]:
+		toolbar.reset_size()
+	_file_tools.position = Vector2(GUTTER, GUTTER)
+	var create_x := (size.x - _create_tools.size.x) * 0.5
+	var top_bottom := GUTTER + _file_tools.size.y
+	var create_y := GUTTER
+	var create_min_x := _file_tools.position.x + _file_tools.size.x + GUTTER
+	var create_max_x := size.x - GUTTER - _create_tools.size.x
+	if create_min_x <= create_max_x:
+		create_x = clampf(create_x, create_min_x, create_max_x)
+	elif create_x < create_min_x:
+		create_y = top_bottom + 6.0
+	_create_tools.position = Vector2(create_x, create_y)
+	if _create_tools.visible:
+		top_bottom = maxf(top_bottom, create_y + _create_tools.size.y)
+
+	var window_y := top_bottom + GUTTER
+	var available_height := maxf(size.y - window_y - 64.0, 32.0)
+	var left_size := _left_tools.get_combined_minimum_size()
+	if _blackboard_panel.visible:
+		left_size.y = minf(available_height, left_size.y + blackboard.rows_height())
+	elif _connections_panel.visible:
+		left_size.y = minf(available_height, left_size.y + _connection_rows.get_combined_minimum_size().y)
+	_left_tools.size = left_size
+	_left_tools.position = Vector2(GUTTER, window_y)
+	var fit_right := size.x - GUTTER * 2.0
+	if _settings_window.visible:
+		var settings_height := minf(inspector.content_height() + 60.0, 590.0)
+		_settings_window.size = Vector2(_settings_window.get_combined_minimum_size().x, minf(settings_height, available_height))
+		_settings_window.position = Vector2(size.x - _settings_window.size.x - GUTTER, window_y)
+		fit_right = _settings_window.position.x - GUTTER
+
+	var fit_left := _left_tools.size.x + GUTTER * 2.0
+	# A narrow workspace can pan beneath the overlays.
+	if fit_right - fit_left < size.x * 0.45:
+		fit_left = GUTTER * 2.0
+		fit_right = size.x - GUTTER * 2.0
+	view.fit_area = Rect2(fit_left, window_y, maxf(fit_right - fit_left, 1.0), maxf(size.y - window_y - 60.0, 1.0))
 
 func _button(text: String, cb: Callable, edit_only := true) -> Button:
 	var b := Button.new()
@@ -111,6 +241,18 @@ func _button(text: String, cb: Callable, edit_only := true) -> Button:
 	if edit_only:
 		_edit_buttons.append(b)
 	return b
+
+func _file_button(icon_name: StringName, fallback: String, title: String, action: Callable) -> Button:
+	var button := _button(fallback, action, false)
+	button.accessibility_name = title
+	button.tooltip_text = title
+	if Engine.is_editor_hint():
+		var refresh_icon := func() -> void:
+			button.icon = button.get_theme_icon(icon_name, &"EditorIcons") if button.has_theme_icon(icon_name, &"EditorIcons") else null
+			button.text = "" if button.icon != null else fallback
+		button.ready.connect(refresh_icon)
+		button.theme_changed.connect(refresh_icon, CONNECT_DEFERRED)
+	return button
 
 # --- Loading ----------------------------------------------------------------------
 
@@ -122,6 +264,7 @@ func refresh() -> void:
 	for path in _collect_zone_definition_paths():
 		_picker.add_item(path.trim_prefix(ZONES_DIR + "/"))
 		_picker.set_item_metadata(_picker.item_count - 1, path)
+		_picker.get_popup().set_item_tooltip(_picker.item_count - 1, path)
 	if _picker.item_count == 0:
 		_path = ""
 		_show({"error": "No zone definitions in " + ZONES_DIR}, false)
@@ -158,6 +301,7 @@ func _collect_zone_definition_paths(dir_path := ZONES_DIR) -> Array[String]:
 
 func open_script(path: String) -> void:
 	_path = path
+	_picker.tooltip_text = path
 	_dirty = false
 	_selected = ""
 	_show(RuleGraphReader.inspect_definition(path) if path.ends_with(".tres") else RuleGraphReader.inspect_script(path), true)
@@ -177,6 +321,8 @@ func bind_live(zone: Zone) -> void:
 	_live = zone
 	_path = zone.definition.resource_path if zone.definition else (zone.get_script() as Script).resource_path
 	_picker.visible = false
+	_save_button.hide()
+	_reload_button.hide()
 	zone.rule_fired.connect(_on_live_rule_fired)
 	_selected = ""
 	_dirty = false
@@ -200,27 +346,47 @@ func _show(data: Dictionary, editable: bool) -> void:
 		_status.text = data["error"]
 		return
 	_data = data
+	_expanded_connections.clear()
+	_clear_selection()
 	_editable = editable and data["parse_error"] == ""
 	for b in _edit_buttons:
 		b.visible = editable
+	_create_tools.visible = editable
+	_connections_button.visible = editable
+	if not _editable:
+		_connections_button.button_pressed = false
 	view.set_editable(_editable)
 	blackboard.show_data(data, _editable, not editable)
 	view.show_data(data)
+	_layout_overlays()
+	view.request_fit()
 	_reset_history()
 	_update_status()
-	inspector.show_message("Select a rule or group.\n\n" + "\n".join(data["problems"]) if not data["problems"].is_empty() else "Select a rule or group.")
 
 func _update_status() -> void:
+	_save_button.disabled = not _editable or _path.is_empty()
 	_undo_button.disabled = not _editable or _undo_stack.is_empty()
 	_redo_button.disabled = not _editable or _redo_stack.is_empty()
 	_event_button.disabled = not _editable or not _data.has("definition")
-	_connections_button.disabled = not _editable or RuleConnections.ids(_data).is_empty()
+	_connections_button.disabled = not _editable
+	var variable_count: int = _data["vars"].size()
+	var connection_count := RuleConnections.ids(_data).size()
+	_blackboard_button.text = "▤ %d" % variable_count
+	_blackboard_button.tooltip_text = "Blackboard (%d)" % variable_count
+	_connections_button.text = "⇄ %d" % connection_count
+	_connections_button.tooltip_text = "Events & relays (%d)" % connection_count
+	if _connections_panel.visible:
+		_refresh_connections()
 	var n: int = _data["problems"].size()
-	var t := "%d rules, %d variables, " % [_data["rules"].size(), _data["vars"].size()]
-	t += "no validation problems" if n == 0 else "%d validation problem(s)" % n
+	var t := "%d rules · %d variables · " % [_data["rules"].size(), _data["vars"].size()]
+	t += "Validation clear" if n == 0 else "%d validation %s" % [n, "issue" if n == 1 else "issues"]
 	if _dirty:
-		t = "● unsaved   " + t
+		t = "Unsaved · " + t
+	if is_instance_valid(_live):
+		t = "Live · " + t
 	_status.text = t
+	_status.tooltip_text = t + ("\n" + "\n".join(_data["problems"]) if n > 0 else "")
+	Style.tint(_status, Style.WARNING if n > 0 or _dirty else Style.SUCCESS)
 
 # --- History ----------------------------------------------------------------------
 
@@ -279,7 +445,7 @@ func _restore_edit(state: Dictionary) -> void:
 	_last_spin_edit = 0
 	_restoring = true
 	# Release the old inspector controls before swapping in new model dictionaries.
-	inspector.show_message("Select a rule or group.")
+	inspector.clear()
 	for field in EDIT_FIELDS:
 		_data[field] = state[field].duplicate(true)
 	RuleGraphReader.analyze(_data)
@@ -288,8 +454,10 @@ func _restore_edit(state: Dictionary) -> void:
 	if not _find_rule(_selected).is_empty():
 		view.select_rule(_selected)
 		_on_rule_selected(_selected)
+	elif view.select_group(_selected_group):
+		_on_group_selected(_selected_group)
 	else:
-		_selected = ""
+		_clear_selection()
 	_restoring = false
 	_current_edit = state
 	_dirty = state != _saved_edit
@@ -300,9 +468,11 @@ func _input(event: InputEvent) -> void:
 		_last_spin_edit = 0
 		if event.button_index == MOUSE_BUTTON_LEFT:
 			_spin_drag_active = event.pressed
+			if not event.pressed and _reveal_pending:
+				_reveal_selected_rule.call_deferred()
 
 func _shortcut_input(event: InputEvent) -> void:
-	if not _editable or not is_visible_in_tree() or _event_dialog.visible or _connections_dialog.visible:
+	if not _editable or not is_visible_in_tree() or _event_dialog.visible or _delete_connection_dialog.visible or _create_menu.visible:
 		return
 	var focus := get_viewport().gui_get_focus_owner()
 	if focus and (not is_ancestor_of(focus) or focus is LineEdit or focus is TextEdit):
@@ -312,11 +482,82 @@ func _shortcut_input(event: InputEvent) -> void:
 			redo()
 		elif event.keycode == KEY_Z:
 			undo()
+		elif event.keycode == KEY_S:
+			save()
 		else:
 			return
 		get_viewport().set_input_as_handled()
 
 # --- Events -----------------------------------------------------------------------
+
+func _setup_create_menu() -> void:
+	_create_menu.id_pressed.connect(_on_context_action)
+	add_child(_create_menu)
+
+func _open_create_menu(pointer: Vector2) -> void:
+	if not _editable:
+		return
+	_create_position = (pointer + view.scroll_offset) / view.zoom
+	_context_target = view.context_target_at(pointer)
+	_create_menu.clear()
+	if _context_target.is_empty():
+		_create_menu.add_item("New event", CreateAction.EVENT)
+		_create_menu.set_item_disabled(0, _event_button.disabled)
+		_create_menu.add_item("New rule", CreateAction.RULE)
+		_create_menu.add_item("New group", CreateAction.GROUP)
+	else:
+		var kind: String = _context_target["kind"]
+		_create_menu.add_item("Manage event" if kind == "event" else "Edit " + kind, ContextAction.EDIT)
+		if kind == "rule":
+			_create_menu.add_item("Duplicate rule", ContextAction.DUPLICATE)
+		_create_menu.add_separator()
+		_create_menu.add_item("Delete " + kind, ContextAction.DELETE)
+		if kind == "event":
+			var error := RuleConnections.edit_error(_data, _context_target["id"])
+			var index := _create_menu.get_item_index(ContextAction.DELETE)
+			_create_menu.set_item_disabled(index, not error.is_empty())
+			_create_menu.set_item_tooltip(index, error)
+	_create_menu.position = Vector2i(view.get_screen_transform() * pointer)
+	_create_menu.popup()
+
+func _on_context_action(action: int) -> void:
+	if not _editable:
+		return
+	if _context_target.is_empty():
+		_create_at_pointer(action)
+		return
+	var kind: String = _context_target["kind"]
+	var id: String = _context_target["id"]
+	match action:
+		ContextAction.EDIT:
+			match kind:
+				"event":
+					_connections_button.button_pressed = true
+					_refresh_connections(id)
+				"rule":
+					view.select_rule(id)
+				"group":
+					view.select_rule("")
+					view.select_group(id)
+		ContextAction.DUPLICATE:
+			duplicate_rule(id)
+		ContextAction.DELETE:
+			match kind:
+				"event":
+					_confirm_connection_delete(id)
+				"rule":
+					delete_rule(id)
+				"group":
+					delete_group(id)
+
+func _create_at_pointer(id: int) -> void:
+	match id:
+		CreateAction.EVENT:
+			_open_event_dialog()
+		CreateAction.RULE:
+			add_rule(_create_position)
+		CreateAction.GROUP:
+			add_group(_create_position)
 
 func _setup_event_dialog() -> void:
 	_event_dialog.title = "New event"
@@ -356,77 +597,136 @@ func add_event(event_id: String) -> bool:
 	_on_rule_selected(_selected)
 	return true
 
-func _setup_connections_dialog() -> void:
-	_connections_dialog.title = "Events and relays"
-	_connections_dialog.ok_button_text = "Rename"
-	_connections_dialog.dialog_hide_on_ok = false
-	_connections_dialog.confirmed.connect(_confirm_connection_rename)
-	_delete_connection_button = _connections_dialog.add_button("Delete…", false, "delete")
-	_connections_dialog.custom_action.connect(func(_action: StringName) -> void: _confirm_connection_delete())
+func _setup_connections_panel() -> void:
 	var fields := VBoxContainer.new()
-	_connection_picker.item_selected.connect(func(_index: int) -> void: _show_connection())
-	fields.add_child(_connection_picker)
-	_connection_name.placeholder_text = "New name"
-	_connection_name.text_submitted.connect(func(_value: String) -> void: _confirm_connection_rename())
-	fields.add_child(_connection_name)
-	var scroll := ScrollContainer.new()
-	scroll.custom_minimum_size.y = 120
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_connection_impact.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_connection_impact.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.add_child(_connection_impact)
-	fields.add_child(scroll)
-	_connection_error.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	fields.add_child(_connection_error)
-	_connections_dialog.add_child(fields)
-	add_child(_connections_dialog)
+	fields.custom_minimum_size.x = Style.LIST_WIDTH
+	fields.add_theme_constant_override("separation", Style.ENTRY_GAP)
+	var header := HBoxContainer.new()
+	var title := Style.label("Events & relays", Style.TEXT, 16)
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header.add_child(title)
+	header.add_child(_button("+ Event", _open_event_dialog))
+	fields.add_child(header)
+	_connection_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_connection_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_connection_rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_connection_rows.add_theme_constant_override("separation", Style.ENTRY_GAP)
+	_connection_rows.minimum_size_changed.connect(_layout_overlays, CONNECT_DEFERRED)
+	_connection_scroll.add_child(_connection_rows)
+	fields.add_child(_connection_scroll)
+	_connections_panel = Style.panel(fields, Style.SURFACE, Vector2(12, 10), true)
 
 	_delete_connection_dialog.title = "Delete event or relay"
 	_delete_connection_dialog.ok_button_text = "Delete"
 	_delete_connection_dialog.confirmed.connect(_delete_selected_connection)
-	_connections_dialog.add_child(_delete_connection_dialog)
+	add_child(_delete_connection_dialog)
 
-func _open_connections() -> void:
-	_connection_picker.clear()
-	for id in RuleConnections.ids(_data):
-		_connection_picker.add_item(id)
-	if _connection_picker.item_count == 0:
-		return
-	_connection_picker.select(0)
-	_show_connection()
-	_connections_dialog.popup_centered(Vector2i(470, 300))
+func _refresh_connections(preferred := "") -> void:
+	for card in _connection_rows.get_children():
+		_connection_rows.remove_child(card)
+		card.queue_free()
+	_connection_cards.clear()
+	var ids := RuleConnections.ids(_data)
+	for id in _expanded_connections.keys():
+		if not ids.has(id):
+			_expanded_connections.erase(id)
+	if ids.has(preferred):
+		_expanded_connections[preferred] = true
+	for id in ids:
+		var card := _make_connection_card(id)
+		_connection_cards[id] = card
+		_connection_rows.add_child(card)
+	if ids.is_empty():
+		_connection_rows.add_child(Style.label("No events or relays.", Style.MUTED, 13))
+	if _connection_cards.has(preferred):
+		_reveal_connection.call_deferred(preferred)
 
-func _selected_connection() -> String:
-	return _connection_picker.get_item_text(_connection_picker.selected)
+func _reveal_connection(id: String) -> void:
+	var card: Control = _connection_cards.get(id)
+	if card != null and _connections_panel.is_visible_in_tree():
+		_connection_scroll.ensure_control_visible(card)
 
-func _show_connection() -> void:
-	var id := _selected_connection()
-	var error := RuleConnections.edit_error(_data, id)
-	var can_rename := error.is_empty() and id != "arrive"
-	_connection_name.text = id.trim_prefix(RuleConnections.RELAY_PREFIX)
-	_connection_name.editable = can_rename
-	_connections_dialog.get_ok_button().disabled = not can_rename
-	_delete_connection_button.disabled = not error.is_empty()
-	_connection_error.text = "The zone lifecycle fires the built-in arrive event." if id == "arrive" and error.is_empty() else error
+func _make_connection_card(id: String) -> PanelContainer:
+	var card := VBoxContainer.new()
+	card.add_theme_constant_override("separation", 6)
+	var is_relay := id.begins_with(RuleConnections.RELAY_PREFIX)
+	var edit_error := RuleConnections.edit_error(_data, id)
+	var name_edit := LineEdit.new()
+	name_edit.name = "ConnectionName"
+	name_edit.text = id.trim_prefix(RuleConnections.RELAY_PREFIX)
+	name_edit.tooltip_text = id
+	name_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	name_edit.editable = _editable and edit_error.is_empty() and id != "arrive"
+	var header := HBoxContainer.new()
+	header.add_child(name_edit)
+	var delete := _button("✕", func() -> void: _confirm_connection_delete(id), false)
+	delete.name = "DeleteConnection"
+	delete.disabled = not _editable or not edit_error.is_empty()
+	delete.tooltip_text = "Delete %s" % id if edit_error.is_empty() else edit_error
+	header.add_child(delete)
+	card.add_child(header)
+
+	var actions := HBoxContainer.new()
+	var kind := Style.label("Relay" if is_relay else "Event", Style.RELAY if is_relay else Style.EVENT, 13)
+	kind.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	actions.add_child(kind)
 	var affected := RuleConnections.impact(_data, id)
-	_connection_impact.text = "No rule connections." if affected.is_empty() else "Affected connections\n" + "\n".join(affected)
-	if id != "arrive" and _data["external_events"].has(id):
-		_connection_impact.text += "\n\nUpdate any gameplay code or scene triggers that fire this ID."
+	var details_button := Button.new()
+	details_button.text = "%d %s" % [affected.size(), "use" if affected.size() == 1 else "uses"]
+	details_button.tooltip_text = "Show or hide affected rules"
+	details_button.toggle_mode = true
+	details_button.button_pressed = _expanded_connections.has(id)
+	actions.add_child(details_button)
+	var rename := Button.new()
+	rename.text = "Rename"
+	rename.disabled = true
+	rename.visible = name_edit.editable
+	actions.add_child(rename)
+	card.add_child(actions)
 
-func _confirm_connection_rename() -> void:
-	if _connections_dialog.get_ok_button().disabled:
-		return
-	var error := rename_connection(_selected_connection(), _connection_name.text)
-	if error.is_empty():
-		_connections_dialog.hide()
-	else:
-		_connection_error.text = error
+	var details_text := "\n".join(affected) if not affected.is_empty() else "No rule connections."
+	if id == "arrive":
+		details_text += "\n\nThe zone lifecycle fires this built-in event."
+	elif _data["external_events"].has(id):
+		details_text += "\n\nUpdate any gameplay code or scene triggers that fire this ID."
+	var details := Style.label(details_text, Style.TEXT, 13)
+	details.name = "ConnectionDetails"
+	details.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	details.visible = details_button.button_pressed
+	details_button.toggled.connect(func(open: bool) -> void:
+		details.visible = open
+		if open:
+			_expanded_connections[id] = true
+		else:
+			_expanded_connections.erase(id))
+	card.add_child(details)
 
-func _confirm_connection_delete() -> void:
-	if _delete_connection_button.disabled:
+	var error := Style.label("", Style.WARNING, 13)
+	error.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	error.hide()
+	card.add_child(error)
+	var commit := func() -> void:
+		if rename.disabled:
+			return
+		var new_name := name_edit.text.strip_edges()
+		var failure := rename_connection(id, new_name)
+		if failure.is_empty():
+			var new_id := RuleConnections.RELAY_PREFIX + new_name if is_relay else new_name
+			_refresh_connections(new_id)
+		else:
+			error.text = failure
+			error.show()
+	name_edit.text_changed.connect(func(value: String) -> void:
+		rename.disabled = value.strip_edges() == id.trim_prefix(RuleConnections.RELAY_PREFIX)
+		error.hide())
+	name_edit.text_submitted.connect(func(_value: String) -> void: commit.call())
+	rename.pressed.connect(commit)
+	return Style.entry(card)
+
+func _confirm_connection_delete(id: String) -> void:
+	if not _editable or not RuleConnections.edit_error(_data, id).is_empty():
 		return
-	var id := _selected_connection()
+	_pending_connection_delete = id
 	var affected := RuleConnections.impact(_data, id)
 	var prompt := "Delete '%s'?" % id
 	if not affected.is_empty():
@@ -438,11 +738,12 @@ func _confirm_connection_delete() -> void:
 	_delete_connection_dialog.popup_centered()
 
 func _delete_selected_connection() -> void:
-	var error := delete_connection(_selected_connection())
-	if error.is_empty():
-		_connections_dialog.hide()
-	else:
-		_connection_error.text = error
+	var error := delete_connection(_pending_connection_delete)
+	_pending_connection_delete = ""
+	if not error.is_empty():
+		_status.text = error
+		_status.tooltip_text = error
+		Style.tint(_status, Style.WARNING)
 
 func rename_connection(id: String, new_name: String) -> String:
 	if not _editable:
@@ -486,7 +787,16 @@ func _changed(select_id: String, spin: SpinBox = null) -> void:
 	_selected = select_id
 	if _find_rule(select_id).is_empty():
 		_selected = ""
+		if not _selected_group.is_empty():
+			_selecting_after_edit = true
+			var restored := view.select_group(_selected_group)
+			_selecting_after_edit = false
+			if not restored:
+				_clear_selection()
+		else:
+			_clear_selection()
 	else:
+		_selected_group = ""
 		_selecting_after_edit = spin != null
 		view.select_rule(_selected)
 		_selecting_after_edit = false
@@ -498,7 +808,7 @@ func _find_rule(id: String) -> Dictionary:
 			return rd
 	return {}
 
-func add_rule() -> Dictionary:
+func add_rule(at := Vector2.INF) -> Dictionary:
 	if not _editable:
 		return {}
 	_sync_layout()
@@ -506,7 +816,7 @@ func add_rule() -> Dictionary:
 	var trigger: String = _data["external_events"][0] if not _data["external_events"].is_empty() else "arrive"
 	var rd := AuthoredData.new_rule(id, trigger)
 	rd["state_key"] = ZoneSource.new_state_key()
-	rd["pos"] = view.view_center() - Vector2(125, 60)
+	rd["pos"] = (view.view_center() - Vector2(125, 60) if at == Vector2.INF else at).round()
 	rd["has_pos"] = true
 	_data["rules"].append(rd)
 	_changed(rd["id"])
@@ -541,15 +851,14 @@ func _delete_rules(ids: Array) -> void:
 	if _data["rules"].size() == previous_count:
 		return
 	_changed("")
-	inspector.show_message("Select a rule or group.")
 
-func add_group() -> void:
+func add_group(at := Vector2.INF) -> void:
 	if not _editable:
 		return
 	_sync_layout()
 	var names: Array = _data["groups"].map(func(g: Dictionary) -> String: return g["name"])
-	var c := view.view_center()
-	_data["groups"].append({"name": ZoneSource.unique_name(names, "Group"), "rect": Rect2(c - Vector2(150, 100), Vector2(300, 200))})
+	var origin := view.view_center() - Vector2(150, 100) if at == Vector2.INF else at
+	_data["groups"].append({"name": ZoneSource.unique_name(names, "Group"), "rect": Rect2(origin.round(), Vector2(300, 200))})
 	_changed(_selected)
 
 func delete_group(group_name: String) -> void:
@@ -564,7 +873,6 @@ func delete_group(group_name: String) -> void:
 		if rd["group"] == group_name:
 			rd["group"] = ""
 	_changed("")
-	inspector.show_message("Group '%s' deleted." % group_name)
 
 ## Dragging output -> input makes the target rule listen to what the source fires.
 ## `source` is {"event": name} or {"rule": id, "port": index}.
@@ -614,12 +922,14 @@ func save() -> void:
 	RuleGraphReader.analyze(_data)
 	if not _data["compiles"]:
 		_status.text = "Not saved: check invalid steps or script errors."
+		Style.tint(_status, Style.WARNING)
 		return
 	if _data.has("definition"):
 		var draft := RuleGraphReader.make_definition(_data)
 		var error := ResourceSaver.save(draft, _path)
 		if error != OK:
 			_status.text = "Save failed (error %d)" % error
+			Style.tint(_status, Style.WARNING)
 			return
 		_data["definition"] = draft
 	else:
@@ -627,6 +937,7 @@ func save() -> void:
 		var f := FileAccess.open(_path, FileAccess.WRITE)
 		if f == null:
 			_status.text = "Save failed (error %d)" % FileAccess.get_open_error()
+			Style.tint(_status, Style.WARNING)
 			return
 		f.store_string(updated)
 		f.close()
@@ -647,10 +958,36 @@ func _on_rule_selected(rule_id: String) -> void:
 	if rd.is_empty():
 		return
 	_selected = rule_id
+	_selected_group = ""
 	inspector.show_rule(rd, _data, not _editable)
+	_settings_window.show()
+	_layout_overlays()
+	_reveal_pending = true
+	_reveal_selected_rule.call_deferred()
+
+func _reveal_selected_rule() -> void:
+	if not _reveal_pending or Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+		return
+	_reveal_pending = false
+	if not _selected.is_empty() and _settings_window.is_visible_in_tree():
+		view.reveal_rule(_selected, _settings_window.get_rect())
 
 func _on_group_selected(group_name: String) -> void:
+	if _selecting_after_edit:
+		return
 	for g in _data["groups"]:
 		if g["name"] == group_name:
+			_selected = ""
+			_selected_group = group_name
 			inspector.show_group(g, _data, not _editable)
+			_settings_window.show()
+			_layout_overlays()
 			return
+
+func _clear_selection() -> void:
+	_selected = ""
+	_reveal_pending = false
+	_selected_group = ""
+	inspector.clear()
+	_settings_window.hide()
+	_layout_overlays()

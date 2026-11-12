@@ -172,8 +172,79 @@ func _initialize() -> void:
 	await process_frame
 	ok = _test_numeric_undo() and ok
 	ok = _test_event_and_relay_edits() and ok
+	ok = (await _test_canvas_actions()) and ok
 	print("EDITOR: ", "PASS" if ok else "FAIL")
 	quit(0 if ok else 1)
+
+func _test_canvas_actions() -> bool:
+	var board := RuleBoard.new()
+	root.add_child(board)
+	board.open_script(DEFINITION_PATH)
+	await process_frame
+	var view := board.view
+	var ok := _check("rule settings starts hidden", not board._settings_window.visible)
+	view.select_rule("z1_bark")
+	var rule: GraphNode = view._rule_nodes["z1_bark"]
+	ok = _check("canvas selection opens rule settings",
+		board._settings_window.visible and board.inspector._rule.get("id") == "z1_bark") and ok
+	var other_rule: GraphNode = view._rule_nodes["z1_calm"]
+	other_rule.selected = true
+	other_rule.selected = false
+	await process_frame
+	ok = _check("rule settings follows a remaining selected rule",
+		board._settings_window.visible and board.inspector._rule.get("id") == "z1_bark") and ok
+	rule.selected = false
+	await process_frame
+	ok = _check("canvas deselection clears and hides rule settings",
+		board._selected.is_empty() and board.inspector._rule.is_empty() and not board._settings_window.visible) and ok
+
+	view.zoom = 0.75
+	view.scroll_offset = Vector2(80, -40)
+	var pointer := Vector2(-40, -40)
+	var origin := ((pointer + view.scroll_offset) / view.zoom).round()
+	view.popup_request.emit(pointer)
+	ok = _check("canvas popup offers all three creation actions",
+		board._create_menu.visible and board._create_menu.item_count == 3) and ok
+	board._create_menu.id_pressed.emit(RuleBoard.CreateAction.RULE)
+	board._create_menu.hide()
+	ok = _check("context-created rule uses the clicked graph coordinates",
+		_rule(board._data, "new_rule").get("pos") == origin) and ok
+	board.undo()
+	view.popup_request.emit(pointer)
+	board._create_menu.id_pressed.emit(RuleBoard.CreateAction.GROUP)
+	board._create_menu.hide()
+	ok = _check("context-created group uses the clicked graph coordinates",
+		board._data["groups"].back()["rect"].position == origin) and ok
+	board.undo()
+	await process_frame
+	rule = view._rule_nodes["z1_bark"]
+	view.popup_request.emit(rule.position + rule.size * view.zoom * 0.5)
+	ok = _check("right-click on a rule inside a frame targets the rule",
+		board._context_target.get("id") == "z1_bark"
+		and board._create_menu.get_item_index(RuleBoard.ContextAction.DELETE) >= 0) and ok
+	board._create_menu.id_pressed.emit(RuleBoard.ContextAction.DELETE)
+	board._create_menu.hide()
+	ok = _check("context delete removes the targeted rule", not view._rule_nodes.has("z1_bark")) and ok
+	board.undo()
+	await process_frame
+	var frame: GraphFrame = view._frames["Delivery"]
+	view.popup_request.emit(frame.position + Vector2(6, 6))
+	board._create_menu.id_pressed.emit(RuleBoard.ContextAction.DELETE)
+	board._create_menu.hide()
+	ok = _check("context delete removes a group and keeps its rules",
+		not view._frames.has("Delivery") and view._rule_nodes.has("z1_delivered")) and ok
+	board.undo()
+	await process_frame
+	var event: GraphNode = view._event_nodes["offer:decoy"]
+	view.popup_request.emit(event.position + event.size * view.zoom * 0.5)
+	board._create_menu.id_pressed.emit(RuleBoard.ContextAction.DELETE)
+	board._create_menu.hide()
+	ok = _check("event context delete confirms the targeted event",
+		board._delete_connection_dialog.visible and "offer:decoy" in board._delete_connection_dialog.dialog_text) and ok
+	board._delete_connection_dialog.confirmed.emit()
+	ok = _check("event context delete removes the targeted event", not view._event_nodes.has("offer:decoy")) and ok
+	board.queue_free()
+	return ok
 
 func _test_event_and_relay_edits() -> bool:
 	var definition := load(DEFINITION_PATH) as ZoneDefinition
@@ -182,18 +253,17 @@ func _test_event_and_relay_edits() -> bool:
 	var board := RuleBoard.new()
 	root.add_child(board)
 	board.open_script(TMP_PATH)
-	board._connections_button.pressed.emit()
-	var picker := board._connection_picker
-	for i in picker.item_count:
-		if picker.get_item_text(i) == "offer:decoy":
-			picker.select(i)
-			picker.item_selected.emit(i)
-			break
-	var ok := _check("connection dialog lists affected rules and external callers",
-		board._connections_dialog.visible and "z1_decoy — trigger" in board._connection_impact.text
-		and "gameplay code" in board._connection_impact.text)
-	board._connection_name.text = "offer:parcel"
-	board._connections_dialog.confirmed.emit()
+	board._connections_button.button_pressed = true
+	board._refresh_connections("offer:decoy")
+	var card: Control = board._connection_cards["offer:decoy"]
+	var details := card.find_child("ConnectionDetails", true, false) as Label
+	var ok := _check("connection window lists affected rules and external callers",
+		board._connections_panel.visible and details.visible and "z1_decoy — trigger" in details.text
+		and "gameplay code" in details.text)
+	var edit := card.find_child("ConnectionName", true, false) as LineEdit
+	edit.text = "offer:parcel"
+	edit.text_changed.emit(edit.text)
+	edit.text_submitted.emit(edit.text)
 	ok = _check("event rename updates its card and rule trigger",
 		board.view._event_nodes.has("offer:parcel")
 		and not board.view._event_nodes.has("offer:decoy")
@@ -201,13 +271,9 @@ func _test_event_and_relay_edits() -> bool:
 	ok = _check("event name collision leaves connections alone",
 		not board.rename_connection("offer:parcel", "deliver").is_empty()
 		and _rule(board._data, "z1_decoy")["trigger"] == "offer:parcel") and ok
-	board._connections_button.pressed.emit()
-	for i in picker.item_count:
-		if picker.get_item_text(i) == "offer:parcel":
-			picker.select(i)
-			picker.item_selected.emit(i)
-			break
-	board._delete_connection_button.pressed.emit()
+	card = board._connection_cards["offer:parcel"]
+	var delete := card.find_child("DeleteConnection", true, false) as Button
+	delete.pressed.emit()
 	ok = _check("delete confirmation names the affected trigger",
 		board._delete_connection_dialog.visible
 		and "z1_decoy — trigger" in board._delete_connection_dialog.dialog_text) and ok
@@ -276,7 +342,7 @@ func _test_rename_saved_state() -> bool:
 	board.redo()
 	board._on_rule_selected("delivered")
 	board.inspector._set_id("parcel_delivered")
-	var key_edit := board.blackboard._rows.get_child(0).get_child(0) as LineEdit
+	var key_edit := board.blackboard._rows.get_child(0).find_children("*", "LineEdit", true, false).front() as LineEdit
 	key_edit.text = "guard_relaxed"
 	key_edit.text_submitted.emit(key_edit.text)
 	board.save()
@@ -311,7 +377,7 @@ func _test_rename_saved_state() -> bool:
 		original["state_key"] != copy["state_key"]) and ok
 	board.blackboard._on_add(0)
 	var rows := board.blackboard._rows
-	var reused_key := rows.get_child(rows.get_child_count() - 1).get_child(0) as LineEdit
+	var reused_key := rows.get_child(rows.get_child_count() - 1).find_children("*", "LineEdit", true, false).front() as LineEdit
 	reused_key.text = "guard_calmed"
 	reused_key.text_submitted.emit(reused_key.text)
 	board._data["vars"].back()["scope"] = "saved"
@@ -331,7 +397,7 @@ func _test_numeric_undo() -> bool:
 	board.open_script(DEFINITION_PATH)
 	board.blackboard._on_add(1)
 	var row := board.blackboard._rows.get_child(board.blackboard._rows.get_child_count() - 1)
-	var spin := row.get_child(2) as SpinBox
+	var spin := row.find_children("*", "SpinBox", true, false).front() as SpinBox
 	var mouse := InputEventMouseButton.new()
 	mouse.button_index = MOUSE_BUTTON_LEFT
 	mouse.pressed = true

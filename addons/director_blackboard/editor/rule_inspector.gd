@@ -10,8 +10,11 @@ signal numeric_changed(rule_id: String, spin: SpinBox)
 signal structure_changed(rule_id: String)   # inspector rebuilt itself; board should refresh the graph
 signal delete_requested(rule_id: String)
 signal duplicate_requested(rule_id: String)
-signal group_edited
+signal group_edited(group_name: String)
 signal group_delete_requested(group_name: String)
+signal content_size_changed
+
+const Style := preload("res://addons/director_blackboard/editor/board_style.gd")
 
 var _data: Dictionary
 var _rule: Dictionary
@@ -20,17 +23,24 @@ var _read_only := false
 var _box := VBoxContainer.new()
 
 func _init() -> void:
-	custom_minimum_size = Vector2(290, 0)
+	custom_minimum_size = Vector2(284, 0)
 	horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_box.add_theme_constant_override("separation", 8)
+	_box.minimum_size_changed.connect(func() -> void: content_size_changed.emit())
 	add_child(_box)
 
-func show_message(text: String) -> void:
+func _ready() -> void:
+	if Engine.is_editor_hint():
+		custom_minimum_size.x = 284 * get_theme_default_base_scale()
+
+func content_height() -> float:
+	return _box.get_combined_minimum_size().y
+
+func clear() -> void:
 	_clear()
-	var l := Label.new()
-	l.text = text
-	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_box.add_child(l)
+	_rule = {}
+	_group = {}
 
 func show_rule(rule: Dictionary, data: Dictionary, read_only := false) -> void:
 	_rule = rule
@@ -70,25 +80,28 @@ func _rebuild_later() -> void:
 # --- Rule form --------------------------------------------------------------------
 
 func _build_rule() -> void:
-	_clear()
 	if _rule.is_empty():
 		return
+	_clear()
 	var r := _rule
-	_title("Rule")
-	_line("id", r["id"], func(t: String) -> void: _set_id(t))
+	_line("ID", r["id"], func(t: String) -> void: _set_id(t))
 
 	var trig := HBoxContainer.new()
 	var trig_edit := LineEdit.new()
 	trig_edit.text = r["trigger"]
+	trig_edit.tooltip_text = trig_edit.text
 	trig_edit.placeholder_text = "trigger"
 	trig_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	var apply_trig := func(_t := "") -> void: _set_trigger(trig_edit.text.strip_edges())
+	var apply_trig := func(_t := "") -> void:
+		trig_edit.tooltip_text = trig_edit.text.strip_edges()
+		_set_trigger(trig_edit.tooltip_text)
 	trig_edit.text_submitted.connect(apply_trig)
 	trig_edit.focus_exited.connect(apply_trig)
-	trig.add_child(_name_label("on"))
+	trig.add_child(_name_label("Trigger"))
 	trig.add_child(trig_edit)
 	var pick := MenuButton.new()
 	pick.text = "▾"
+	pick.flat = false
 	pick.tooltip_text = "Pick a declared event or an emitted relay"
 	var options := _trigger_options()
 	for o in options:
@@ -103,20 +116,24 @@ func _build_rule() -> void:
 		_box.add_child(_guard_menu(g))
 
 	var once := CheckBox.new()
-	once.text = "once (latched, persists)"
+	once.text = "Run once"
+	once.tooltip_text = "The rule's latch persists in saved state"
 	once.button_pressed = r["once"]
 	once.toggled.connect(func(on: bool) -> void:
 		r["once"] = on
 		changed.emit(r["id"]))
 	_box.add_child(once)
 
-	_line("emits relay", r["emit"], func(t: String) -> void:
+	_line("Emits relay", r["emit"], func(t: String) -> void:
 		r["emit"] = t
 		changed.emit(r["id"]))
 
 	var grp := HBoxContainer.new()
-	grp.add_child(_name_label("group"))
+	grp.add_child(_name_label("Group"))
 	var ob := OptionButton.new()
+	ob.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	ob.fit_to_longest_item = false
+	ob.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	ob.add_item("(none)")
 	var sel := 0
 	for i in _data["groups"].size():
@@ -135,6 +152,7 @@ func _build_rule() -> void:
 		_box.add_child(_step_panel(i))
 	var add := MenuButton.new()
 	add.text = "+ Add step"
+	add.flat = false
 	var verbs: Array = _data["catalog"].map(func(v: Dictionary) -> String: return v["name"])
 	for v in verbs:
 		add.get_popup().add_item(v)
@@ -162,21 +180,19 @@ func _build_rule() -> void:
 			var l := Label.new()
 			l.text = "⚠ " + p
 			l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-			l.add_theme_color_override("font_color", Color(1, 0.8, 0.4))
+			Style.tint(l, Style.WARNING)
 			_box.add_child(l)
 	if _read_only:
 		_lock(_box)
 
 func _title(text: String) -> void:
-	var l := Label.new()
-	l.text = text
-	l.add_theme_font_size_override("font_size", 16)
-	_box.add_child(l)
+	_box.add_child(Style.label(text, Style.EVENT, 13))
 
 func _name_label(text: String) -> Label:
-	var l := Label.new()
-	l.text = text
-	l.custom_minimum_size = Vector2(70, 0)
+	var l := Style.label(text, Style.MUTED, 13)
+	l.custom_minimum_size.x = 92 * get_theme_default_base_scale()
+	l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	l.tooltip_text = text
 	return l
 
 func _line(label: String, value: String, on_commit: Callable) -> void:
@@ -185,7 +201,11 @@ func _line(label: String, value: String, on_commit: Callable) -> void:
 	var e := LineEdit.new()
 	e.text = value
 	e.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	var apply := func(_t := "") -> void: on_commit.call(e.text.strip_edges())
+	var apply := func(_t := "") -> void:
+		var text := e.text.strip_edges()
+		if text != e.get_meta("committed", value):
+			e.set_meta("committed", text)
+			on_commit.call(text)
 	e.text_submitted.connect(apply)
 	e.focus_exited.connect(apply)
 	row.add_child(e)
@@ -220,6 +240,7 @@ func _guard_menu(field: String) -> MenuButton:
 	var mb := MenuButton.new()
 	mb.flat = false
 	mb.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	mb.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	var popup := mb.get_popup()
 	popup.hide_on_checkable_item_selection = false
 	var keys: Array = _data["vars"].map(func(v: Dictionary) -> String: return v["key"])
@@ -227,7 +248,8 @@ func _guard_menu(field: String) -> MenuButton:
 		if not keys.has(k):
 			keys.append(k)
 	var refresh_text := func() -> void:
-		mb.text = "%s: %s" % [field, ", ".join(_rule[field]) if not _rule[field].is_empty() else "-"]
+		mb.text = "%s: %s" % [field.capitalize(), ", ".join(_rule[field]) if not _rule[field].is_empty() else "None"]
+		mb.tooltip_text = mb.text
 	for i in keys.size():
 		popup.add_check_item(keys[i])
 		popup.set_item_checked(i, _rule[field].has(keys[i]))
@@ -249,13 +271,12 @@ func _step_panel(idx: int) -> Control:
 	var step: Dictionary = _rule["steps"][idx]
 	var verb := VerbCatalog.find(_data["catalog"], step["verb"])
 	var params: Array = verb.get("args", [])
-	var panel := PanelContainer.new()
 	var vb := VBoxContainer.new()
-	panel.add_child(vb)
+	vb.add_theme_constant_override("separation", 6)
+	var panel := Style.panel(vb, Color("#1b2635"), Vector2(8, 8))
 
 	var head := HBoxContainer.new()
-	var num := Label.new()
-	num.text = "%d." % (idx + 1)
+	var num := Style.label("%02d" % (idx + 1), Style.EVENT, 12)
 	head.add_child(num)
 	var ob := OptionButton.new()
 	var names: Array = _data["catalog"].map(func(v: Dictionary) -> String: return v["name"])
@@ -265,6 +286,8 @@ func _step_panel(idx: int) -> Control:
 		ob.add_item(n)
 	ob.select(names.find(step["verb"]))
 	ob.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	ob.fit_to_longest_item = false
+	ob.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	ob.item_selected.connect(func(i: int) -> void:
 		var fresh := VerbCatalog.new_step(_data, names[i])
 		step["verb"] = fresh["verb"]
@@ -301,7 +324,7 @@ func _step_panel(idx: int) -> Control:
 		vb.add_child(row)
 
 	var delay_row := HBoxContainer.new()
-	delay_row.add_child(_name_label("after (s)"))
+	delay_row.add_child(_name_label("Delay (s)"))
 	var sp := SpinBox.new()
 	sp.min_value = 0.0
 	sp.max_value = 60.0
@@ -417,7 +440,7 @@ func _rename_group(edit: LineEdit) -> void:
 		if rd["group"] == _group["name"]:
 			rd["group"] = new_name
 	_group["name"] = new_name
-	group_edited.emit()
+	group_edited.emit(new_name)
 
 func _lock(node: Node) -> void:
 	for c in node.get_children():

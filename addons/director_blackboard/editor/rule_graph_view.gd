@@ -12,28 +12,59 @@ class_name RuleGraphView extends GraphEdit
 
 signal rule_selected(rule_id: String)
 signal group_selected(group_name: String)
+signal selection_cleared
 signal wire_added(source: Dictionary, to_rule: String)   # source: {"event": name} or {"rule": id, "port": int}
 signal wire_removed(to_rule: String)
 signal rules_delete_requested(ids: Array)
 signal rules_linked_to_group(ids: Array, group_name: String)
 signal layout_changed
 
-const COL_EVENT := Color(0.45, 0.7, 1.0)
-const COL_RELAY := Color(1.0, 0.7, 0.3)
-const COL_REQ := Color(0.5, 0.85, 0.5)
-const COL_FORBID := Color(0.95, 0.5, 0.5)
-const COL_CANCEL := Color(0.95, 0.75, 0.4)
-const COL_DIM := Color(0.7, 0.7, 0.75)
+const Style := preload("res://addons/director_blackboard/editor/board_style.gd")
+const CARD_WIDTH := 264.0
+const COL_EVENT := Style.EVENT
+const COL_RELAY := Style.RELAY
+const COL_REQ := Style.SUCCESS
+const COL_FORBID := Style.ERROR
+const COL_CANCEL := Style.WARNING
+const COL_DIM := Style.MUTED
+const LIVE_ACTIVITY := Color("#fff3b2")
 
+var fit_area := Rect2()
 var _rule_nodes := {}    # rule id -> GraphNode
 var _event_nodes := {}   # event name -> GraphNode
 var _frames := {}        # group name -> GraphFrame
 var _resizing_frame := false
+var _editable := true
+var _fit_requested := false
+var _inspected_node: GraphElement
+var _icon_material: ShaderMaterial
 
 func _init() -> void:
 	minimap_enabled = true
+	minimap_size = Vector2i(170, 110)
 	show_zoom_label = true
+	grid_pattern = GRID_PATTERN_DOTS
+	connection_lines_thickness = 2.0
+	if not Engine.is_editor_hint():
+		var canvas := StyleBoxFlat.new()
+		canvas.bg_color = Color("#101621")
+		add_theme_stylebox_override("panel", canvas)
+		add_theme_stylebox_override("menu_panel", Style.surface(Style.SURFACE, Style.BORDER, Vector2(8, 5), 6))
+		add_theme_color_override("grid_minor", Color("#202b3a"))
+		add_theme_color_override("grid_major", Color("#293649"))
+		add_theme_color_override("activity", LIVE_ACTIVITY)
+	var fit := Button.new()
+	fit.text = "Fit all"
+	fit.tooltip_text = "Frame every event, rule and group"
+	fit.pressed.connect(request_fit)
+	get_menu_hbox().add_child(fit)
+	var menu := get_menu_hbox().get_parent() as Control
+	menu.minimum_size_changed.connect(_position_view_tools, CONNECT_DEFERRED)
+	_position_view_tools.call_deferred()
+	visibility_changed.connect(_queue_fit)
+	theme_changed.connect(_refresh_wire_focus, CONNECT_DEFERRED)
 	node_selected.connect(_on_node_selected)
+	node_deselected.connect(_on_node_deselected)
 	end_node_move.connect(func() -> void: layout_changed.emit())
 	connection_request.connect(_on_connection_request)
 	disconnection_request.connect(_on_disconnection_request)
@@ -41,7 +72,46 @@ func _init() -> void:
 	graph_elements_linked_to_frame_request.connect(_on_linked_to_frame)
 
 func set_editable(on: bool) -> void:
+	if _editable and not on:
+		_apply_wire_focus(&"")
+	_editable = on
 	right_disconnects = on
+	if not on:
+		if Engine.is_editor_hint():
+			remove_theme_color_override("activity")
+		else:
+			add_theme_color_override("activity", LIVE_ACTIVITY)
+
+func _position_view_tools() -> void:
+	var menu := get_menu_hbox().get_parent() as Control
+	menu.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT, Control.PRESET_MODE_MINSIZE, 12)
+
+func request_fit() -> void:
+	_fit_requested = true
+	_queue_fit()
+
+func _queue_fit() -> void:
+	if _fit_requested and is_visible_in_tree() and not get_tree().process_frame.is_connected(_fit_all):
+		# Let the split containers and card rows settle before measuring their bounds.
+		get_tree().process_frame.connect(_fit_all, CONNECT_ONE_SHOT)
+
+func _fit_all() -> void:
+	if not is_visible_in_tree():
+		return
+	_fit_requested = false
+	var bounds := Rect2()
+	var has_elements := false
+	for nodes in [_event_nodes, _rule_nodes, _frames]:
+		for element: GraphElement in nodes.values():
+			var rect := Rect2(element.position_offset, element.size)
+			bounds = bounds.merge(rect) if has_elements else rect
+			has_elements = true
+	if not has_elements:
+		return
+	var area := fit_area if fit_area.has_area() else Rect2(Vector2.ZERO, size)
+	var available := (area.size - Vector2(40, 32)).max(Vector2.ONE)
+	zoom = clampf(minf(available.x / bounds.size.x, available.y / bounds.size.y), zoom_min, 1.0)
+	scroll_offset = bounds.get_center() * zoom - area.get_center()
 
 func _input(event: InputEvent) -> void:
 	if _resizing_frame and event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
@@ -50,6 +120,7 @@ func _input(event: InputEvent) -> void:
 
 func clear_view() -> void:
 	_resizing_frame = false
+	_inspected_node = null
 	clear_connections()
 	var elements: Array = get_children().filter(func(c: Node) -> bool: return c is GraphElement and not c.has_meta("dead"))
 	# GraphEdit queues deferred move_child calls when frames are added, and freeing or removing
@@ -83,7 +154,15 @@ func show_data(data: Dictionary) -> void:
 		f.position_offset = g["rect"].position
 		f.size = g["rect"].size
 		f.autoshrink_enabled = false
-		f.resizable = true
+		f.autoshrink_margin = 24
+		f.resizable = _editable
+		if not Engine.is_editor_hint():
+			f.add_theme_stylebox_override("panel", Style.surface(Color("#1c27366b"), Color("#384c64"), Vector2.ZERO, 9))
+			f.add_theme_stylebox_override("panel_selected", Style.surface(Color("#233447a3"), COL_EVENT, Vector2.ZERO, 9))
+			f.add_theme_stylebox_override("titlebar", Style.surface(Color("#27374a"), Color("#384c64"), Vector2(12, 4), 7))
+			f.add_theme_stylebox_override("titlebar_selected", Style.surface(Color("#2a4655"), COL_EVENT, Vector2(12, 4), 7))
+		_style_title(f.get_titlebar_hbox(), Style.TEXT, &"Folder", 17)
+		_scale_card_padding(f, &"GraphFrame")
 		f.resize_request.connect(func(new_size: Vector2) -> void:
 			f.size = new_size
 			_resizing_frame = Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
@@ -118,14 +197,73 @@ func get_group_rects() -> Dictionary:
 
 ## World-space point at the middle of the visible canvas.
 func view_center() -> Vector2:
-	return (scroll_offset + size * 0.5) / zoom
+	var center := fit_area.get_center() if fit_area.has_area() else size * 0.5
+	return (scroll_offset + center) / zoom
+
+func reveal_rule(rule_id: String, obstruction: Rect2) -> void:
+	var card: GraphNode = _rule_nodes.get(rule_id)
+	if card == null:
+		return
+	var bounds := Rect2(card.position_offset * zoom - scroll_offset, card.size * zoom)
+	if not bounds.intersects(obstruction):
+		return
+	# Rule Settings sits on the right. Stop as soon as the card clears it.
+	var left := maxf(0.0, obstruction.position.x - 12.0 - bounds.size.x)
+	scroll_offset.x += maxf(0.0, bounds.position.x - left)
+
+func context_target_at(pointer: Vector2) -> Dictionary:
+	# Cards draw over frames. Within each layer, the last child draws on top.
+	var children := get_children()
+	children.reverse()
+	for layer in [&"GraphNode", &"GraphFrame"]:
+		for child in children:
+			var element := child as GraphElement
+			if element == null or not element.visible or not element.is_class(layer):
+				continue
+			if not Rect2(element.position, element.size * zoom).has_point(pointer):
+				continue
+			if element.has_meta("event"):
+				return {"kind": "event", "id": element.get_meta("event")}
+			if element.has_meta("rule_id"):
+				return {"kind": "rule", "id": element.get_meta("rule_id")}
+			if element.has_meta("group_name"):
+				return {"kind": "group", "id": element.get_meta("group_name")}
+	return {}
 
 func select_rule(id: String) -> void:
 	for c in get_children():
 		if c is GraphElement:
 			c.selected = false
 	if _rule_nodes.has(id):
-		_rule_nodes[id].selected = true
+		_inspected_node = _rule_nodes[id]
+		_inspected_node.selected = true
+
+func select_group(group_name: String) -> bool:
+	var frame: GraphFrame = _frames.get(group_name)
+	if frame == null:
+		return false
+	_inspected_node = frame
+	frame.selected = true
+	return true
+
+func _refresh_wire_focus() -> void:
+	if not _editable:
+		return
+	var focused := &""
+	if is_instance_valid(_inspected_node) and _inspected_node.selected and _inspected_node.has_meta("rule_id"):
+		focused = _inspected_node.name
+	if focused != &"":
+		var canvas := get_theme_stylebox("panel") as StyleBoxFlat
+		var dim_color := canvas.bg_color if canvas != null else Style.SURFACE
+		dim_color.a = 0.55
+		if get_theme_color("activity") != dim_color:
+			add_theme_color_override("activity", dim_color)
+	_apply_wire_focus(focused)
+
+func _apply_wire_focus(focused: StringName) -> void:
+	for wire in get_connection_list():
+		var unrelated: bool = focused != &"" and wire["from_node"] != focused and wire["to_node"] != focused
+		set_connection_activity(wire["from_node"], wire["from_port"], wire["to_node"], wire["to_port"], 0.65 if unrelated else 0.0)
 
 ## Port layout of a rule card: relays fired by its steps, then the rule's own `emits`.
 static func output_relays(rd: Dictionary) -> Array:
@@ -171,9 +309,29 @@ func _node_of(node_name: StringName) -> Node:
 
 func _on_node_selected(node: Node) -> void:
 	if node.has_meta("rule_id"):
+		_inspected_node = node as GraphElement
+		_refresh_wire_focus()
 		rule_selected.emit(node.get_meta("rule_id"))
 	elif node.has_meta("group_name"):
+		_inspected_node = node as GraphElement
+		_refresh_wire_focus()
 		group_selected.emit(node.get_meta("group_name"))
+
+func _on_node_deselected(node: Node) -> void:
+	if node == _inspected_node:
+		# GraphEdit may select another card in the same input event.
+		_clear_deselected.call_deferred()
+
+func _clear_deselected() -> void:
+	if is_instance_valid(_inspected_node) and not _inspected_node.selected:
+		for nodes in [_rule_nodes, _frames]:
+			for element: GraphElement in nodes.values():
+				if element.selected:
+					_on_node_selected(element)
+					return
+		_inspected_node = null
+		_refresh_wire_focus()
+		selection_cleared.emit()
 
 func _on_connection_request(from_node: StringName, from_port: int, to_node: StringName, _to_port: int) -> void:
 	var src := _node_of(from_node)
@@ -237,59 +395,195 @@ func _auto_layout(rules: Array) -> void:
 			continue
 		var d: int = depth[rd["id"]]
 		var y: float = col_y.get(d, 40.0)
-		rd["pos"] = Vector2(40 + d * 300, y)
+		rd["pos"] = Vector2(40 + d * (CARD_WIDTH + 42.0), y)
 		col_y[d] = y + 220.0
 
 # --- Cards ------------------------------------------------------------------------
 
-func _row(text: String, color: Color) -> Label:
-	var l := Label.new()
-	l.text = text
-	l.add_theme_color_override("font_color", color)
-	l.add_theme_font_size_override("font_size", 13)
-	return l
+func _row(text: String, color: Color, icon_name := &"", fill := Color.TRANSPARENT) -> Control:
+	var label := Style.label(text, color, 13)
+	_scale_card_label(label, 13)
+	label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	label.mouse_filter = Control.MOUSE_FILTER_PASS
+	label.tooltip_text = text
+	if fill.a > 0 and not Engine.is_editor_hint():
+		label.add_theme_stylebox_override("normal", Style.surface(fill, Color.TRANSPARENT, Vector2(7, 2), 4))
+	if not Engine.is_editor_hint() or icon_name == &"":
+		return label
+	var row := HBoxContainer.new()
+	row.mouse_filter = Control.MOUSE_FILTER_PASS
+	row.tooltip_text = text
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	if icon_name == &"✓":
+		var check := Style.label("✓", color, 13)
+		_scale_card_label(check, 13)
+		check.custom_minimum_size.x = 16
+		check.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		check.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		row.add_child(check)
+	else:
+		row.add_child(_editor_icon(icon_name, color))
+	row.add_child(label)
+	return row
+
+func _editor_icon(icon_name: StringName, color: Color) -> TextureRect:
+	if _icon_material == null:
+		# Keep the native glyph's silhouette and use the label color for its ink.
+		var shader := Shader.new()
+		shader.code = """
+shader_type canvas_item;
+render_mode unshaded;
+
+varying vec4 icon_tint;
+
+void vertex() {
+	icon_tint = COLOR;
+}
+
+void fragment() {
+	COLOR = vec4(icon_tint.rgb, icon_tint.a * texture(TEXTURE, UV).a);
+}
+"""
+		_icon_material = ShaderMaterial.new()
+		_icon_material.shader = shader
+	var icon := TextureRect.new()
+	icon.material = _icon_material
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	var refresh := func() -> void:
+		icon.visible = icon.has_theme_icon(icon_name, &"EditorIcons")
+		if icon.visible:
+			icon.texture = icon.get_theme_icon(icon_name, &"EditorIcons")
+			icon.self_modulate = Style.resolve_color(icon, color)
+			icon.custom_minimum_size = Vector2(16, 16) * minf(1.0, icon.get_theme_default_base_scale())
+	icon.ready.connect(refresh)
+	icon.theme_changed.connect(refresh, CONNECT_DEFERRED)
+	return icon
+
+func _style_title(titlebar: HBoxContainer, color: Color, icon_name: StringName, size_in_graph := 14) -> void:
+	for child in titlebar.get_children():
+		if child is Label:
+			child.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+			child.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+			Style.tint(child, color)
+			Style.fallback_font_size(child, size_in_graph)
+			_scale_card_label(child, size_in_graph)
+	if Engine.is_editor_hint():
+		var icon := _editor_icon(icon_name, color)
+		titlebar.add_child(icon)
+		titlebar.move_child(icon, 0)
+
+func _style_card(node: GraphNode, width: float, title_color: Color, header: Color, icon_name: StringName) -> void:
+	node.custom_minimum_size.x = width
+	node.add_theme_constant_override("separation", 5)
+	if not Engine.is_editor_hint():
+		node.add_theme_stylebox_override("panel", Style.surface(Style.SURFACE, Style.BORDER, Vector2(13, 9)))
+		node.add_theme_stylebox_override("panel_selected", Style.surface(Color("#1d2938"), COL_EVENT, Vector2(13, 9)))
+		node.add_theme_stylebox_override("titlebar", Style.surface(header, Style.BORDER, Vector2(12, 7), 6))
+		node.add_theme_stylebox_override("titlebar_selected", Style.surface(header.lightened(0.07), COL_EVENT, Vector2(12, 7), 6))
+	_style_title(node.get_titlebar_hbox(), title_color, icon_name)
+	_scale_card_padding(node, &"GraphNode")
+
+func _scale_card_label(label: Label, size_in_graph: int) -> void:
+	if Engine.is_editor_hint():
+		# The graph uses authored coordinates and has its own zoom.
+		label.ready.connect(func() -> void:
+			if label.get_theme_default_base_scale() > 1.0:
+				label.add_theme_font_size_override("font_size", size_in_graph))
+
+func _scale_card_padding(card: GraphElement, type: StringName) -> void:
+	if not Engine.is_editor_hint():
+		return
+	var refresh := func() -> void:
+		if not is_instance_valid(card):
+			return
+		var editor_scale := get_theme_default_base_scale()
+		if editor_scale <= 1.0:
+			return
+		var items: Array[StringName] = [&"panel", &"panel_selected", &"titlebar", &"titlebar_selected"]
+		if card is GraphNode:
+			items.append_array([&"slot", &"slot_selected"])
+			if card.get_theme_constant("separation") != 2:
+				card.add_theme_constant_override("separation", 2)
+		for item in items:
+			var source := get_theme_stylebox(item, type)
+			if card.has_meta(item) and card.get_meta(item) == source:
+				continue
+			var scaled := source.duplicate() as StyleBox
+			for side in [SIDE_LEFT, SIDE_TOP, SIDE_RIGHT, SIDE_BOTTOM]:
+				scaled.set_content_margin(side, source.get_margin(side) / editor_scale)
+			card.set_meta(item, source)
+			card.add_theme_stylebox_override(item, scaled)
+		if card is GraphNode:
+			card.reset_size()
+	card.ready.connect(refresh)
+	card.theme_changed.connect(refresh, CONNECT_DEFERRED)
 
 func _make_rule_node(rd: Dictionary, problems: Array) -> GraphNode:
 	var n := GraphNode.new()
 	n.name = _safe(rd["id"])
 	n.set_meta("rule_id", rd["id"])
 	var warned := problems.any(func(p: String) -> bool: return ("'%s'" % rd["id"]) in p)
-	n.title = ("⚠ " if warned else "") + rd["id"]
+	n.title = ("⚠ " if warned and not Engine.is_editor_hint() else "") + rd["id"]
+	n.tooltip_text = rd["id"]
 	n.position_offset = rd["pos"]
-	n.custom_minimum_size = Vector2(250, 0)
+	_style_card(n, CARD_WIDTH, Style.WARNING if warned else Style.TEXT, Color("#253347"), &"NodeWarning" if warned else &"GraphNode")
 
 	# Each row is one slot. Entries: [label, left_port, right_port, color]
 	var rows: Array = []
-	rows.append([_row("on  " + (rd["trigger"] if rd["trigger"] != "" else "(drag a wire here)"), COL_EVENT), true, false, COL_EVENT])
+	var trigger: String = rd["trigger"]
+	var trigger_text := "On  " + trigger if not trigger.is_empty() else "Connect a trigger"
+	var trigger_color := COL_RELAY if trigger.begins_with("relay:") else COL_EVENT
+	rows.append([_row(trigger_text, trigger_color, &"Signal", Color("#203341")), true, false, trigger_color])
 	if not rd["requires"].is_empty():
-		rows.append([_row("requires: " + ", ".join(rd["requires"]), COL_REQ), false, false, COL_DIM])
+		rows.append([_row("requires: " + ", ".join(rd["requires"]), COL_REQ, &"✓"), false, false, COL_DIM])
 	if not rd["forbids"].is_empty():
-		rows.append([_row("forbids: " + ", ".join(rd["forbids"]), COL_FORBID), false, false, COL_DIM])
+		rows.append([_row("forbids: " + ", ".join(rd["forbids"]), COL_FORBID, &"GuiClose"), false, false, COL_DIM])
 	if not rd["cancel_if"].is_empty():
-		rows.append([_row("cancel_if: " + ", ".join(rd["cancel_if"]), COL_CANCEL), false, false, COL_DIM])
+		rows.append([_row("cancel_if: " + ", ".join(rd["cancel_if"]), COL_CANCEL, &"Stop"), false, false, COL_DIM])
 	if rd["once"]:
-		rows.append([_row("once", COL_DIM), false, false, COL_DIM])
+		rows.append([_row("Run once", COL_DIM, &"Lock"), false, false, COL_DIM])
 	var i := 1
 	for s in rd["steps"]:
 		var prefix := "%d. " % i
 		if s["delay"] != "":
-			prefix += "(+%ss) " % s["delay"]
-		rows.append([_row(prefix + "%s(%s)" % [s["verb"], ", ".join(PackedStringArray(s["args"]))], Color.WHITE), false, false, COL_DIM])
+			prefix += "+%ss  " % s["delay"]
+		var step_icon := &"Timer" if s["delay"] != "" else &"Play"
+		rows.append([_row(prefix + "%s(%s)" % [s["verb"], ", ".join(PackedStringArray(s["args"]))], Style.TEXT, step_icon), false, false, COL_DIM])
 		i += 1
 	var relays := output_relays(rd)
 	for p in relays.size():
 		var last := p == relays.size() - 1
-		var label: String = ("emits  " + relays[p]) if relays[p] != "" else "emits  (drag to wire)"
+		if not _editable and relays[p] == "":
+			continue
+		var label: String = ("Emits  " + relays[p]) if relays[p] != "" else "Add relay"
 		if not last:
-			label = "fires  " + relays[p]
-		rows.append([_row(label, COL_RELAY if relays[p] != "" else COL_DIM), false, true, COL_RELAY])
+			label = "Fires  " + relays[p]
+		var relay_icon := &"Signal" if relays[p] != "" else &"Add"
+		var row := _row(label, COL_RELAY if relays[p] != "" else COL_DIM, relay_icon, Color("#302b2a") if relays[p] != "" else Color.TRANSPARENT)
+		if relays[p] == "":
+			row.tooltip_text = "Drag the output port to a rule to create a relay"
+		rows.append([row, false, true, COL_RELAY])
 
-	for row in rows:
-		n.add_child(row[0])
-	for idx in rows.size():
-		var row: Array = rows[idx]
-		n.set_slot(idx, row[1], 0, row[3], row[2], 0, row[3])
+	_add_card_rows(n, rows)
 	return n
+
+func _add_card_rows(node: GraphNode, rows: Array) -> void:
+	for row in rows:
+		node.add_child(row[0])
+	for i in rows.size():
+		var row: Array = rows[i]
+		node.set_slot(i, row[1], 0, row[3], row[2], 0, row[3])
+	if Engine.is_editor_hint():
+		node.theme_changed.connect(func() -> void:
+			for i in rows.size():
+				var row: Array = rows[i]
+				if row[1]:
+					node.set_slot_color_left(i, Style.resolve_color(node, row[3]))
+				if row[2]:
+					node.set_slot_color_right(i, Style.resolve_color(node, row[3])))
 
 func _make_event_nodes(events: Array, rules: Array) -> void:
 	var min_x := 0.0
@@ -310,11 +604,11 @@ func _make_event_nodes(events: Array, rules: Array) -> void:
 		var n := GraphNode.new()
 		n.name = "ev_" + _safe(en["event"])
 		n.set_meta("event", en["event"])
-		n.title = "event"
+		n.title = "External event"
+		n.tooltip_text = en["event"]
 		n.position_offset = Vector2(min_x - 230.0, y)
-		n.custom_minimum_size = Vector2(170, 0)
-		n.add_child(_row(en["event"], COL_EVENT))
-		n.set_slot(0, false, 0, COL_EVENT, true, 0, COL_EVENT)
+		_style_card(n, 174.0, COL_EVENT, Color("#1e3947"), &"Signal")
+		_add_card_rows(n, [[_row(en["event"], Style.TEXT), false, true, COL_EVENT]])
 		add_child(n)
 		_event_nodes[en["event"]] = n
 
