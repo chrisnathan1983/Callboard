@@ -1,0 +1,8 @@
+[gd_scene format=3 uid="uid://c3qqdni5bspdi"]
+
+[ext_resource type="Script" uid="uid://erywf5nq7fp6" path="res://zones/zone_01/zone_01.gd" id="1_01y1u"]
+[ext_resource type="Resource" uid="uid://cs3ga5savhn1y" path="res://zones/zone_01/zone_02.tres" id="2_phck5"]
+
+[node name="Zone01" type="Node3D" unique_id=779149304]
+script = ExtResource("1_01y1u")
+definition = ExtResource("2_phck5")
