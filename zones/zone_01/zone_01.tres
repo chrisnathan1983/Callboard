@@ -48,14 +48,14 @@ rules = [{
 "has_pos": true,
 "id": "z1_bark",
 "once": false,
-"pos": Vector2(380, 70),
+"pos": Vector2(380, 80),
 "requires": [],
 "steps": [{
 "args": ["guard", "\"WOOF!\""],
 "delay": "",
 "verb": "say"
 }, {
-"args": ["lamp", "true", "3.0"],
+"args": ["lamp", "true", "3.5"],
 "delay": "0.25",
 "verb": "light"
 }],
@@ -136,7 +136,7 @@ rules = [{
 "has_pos": true,
 "id": "z1_caught",
 "once": false,
-"pos": Vector2(730, 70),
+"pos": Vector2(1000, 80),
 "requires": ["lamp_on"],
 "steps": [{
 "args": ["1.5"],
@@ -156,7 +156,7 @@ rules = [{
 "has_pos": true,
 "id": "z1_delivered",
 "once": true,
-"pos": Vector2(730, 280),
+"pos": Vector2(1000, 300),
 "requires": [],
 "steps": [{
 "args": ["reward"],
@@ -175,11 +175,11 @@ rules = [{
 }]
 groups = [{
 "name": "Guard Standoff",
-"rect": Rect2(40, 20, 620, 300)
+"rect": Rect2(40, 20, 628, 324)
 }, {
 "name": "Calming Paths",
-"rect": Rect2(40, 360, 620, 420)
+"rect": Rect2(40, 360, 628, 470)
 }, {
 "name": "Delivery",
-"rect": Rect2(700, 20, 300, 520)
+"rect": Rect2(960, 39, 344, 567)
 }]

@@ -41,7 +41,7 @@ Unchanged: `Rule`, `RuleEngine`, `RuleValidator`, `RuleGraphView`, `RuleGraphRea
 
 - **Don't use a bare identifier `call`.** It shadows `Object.call()`. Use `external_calls`, `add_call_name()`, `_call_nodes`, and so on.
 - **`Stage` has no Godot ClassDB conflict** that we know of, but `plugin.gd` hardcodes `cls == "Zone"` in `_validate_zone_name`. Update that to `"Stage"`, and update the generated template text (`extends Zone`).
-- **`ZoneSource` is more than the legacy parser.** Deleting the legacy path is still the right call (it avoids maintaining two grammars through the rename, and FEEDBACK.md already recommends it), but the class also holds helpers the board, inspector, and blackboard panel use. Split it first:
+- **`ZoneSource` is more than the legacy parser.** Deleting the legacy path is still the right call (it avoids maintaining two grammars through the rename), but the class also holds helpers the board, inspector, and blackboard panel use. Split it first:
   - `ExprText`: `parse_literal`, `format_literal`, `split_args`, `step_text`.
   - `AuthoredData` (or a new `GraphModel` helper): `unique_name`, `rule_ids`, `new_state_key`, `rename_key`, `names_expr`, `GUARDS`.
   - Delete: `parse`, `generate`, `body_range`, `_parse_*`, `_gen_*`, `FN_VARS`, `FN_RULES`.
@@ -87,7 +87,7 @@ Unchanged: `Rule`, `RuleEngine`, `RuleValidator`, `RuleGraphView`, `RuleGraphRea
 
 **Commit 4: Terms in the UI and API.** "Stage:" picker label, "+ Call", "One-shot (latched, persists)", "Notes" in the inspector and status bar, "Create New Stage...", the HUD hints ("R: reset the stage", "X: strike the show"), the "Latched once-rules" label in `BlackboardPanel`, and renames like `add_event` → `add_call_name`. Then update the tests and run all three.
 
-**Commit 5: Docs.** Rewrite the README around Callboard, Stage, Call, One-shot, and Notes, with a short glossary and a "Formerly Director Blackboard / Rule Board" line. Update FEEDBACK.md and this file, where the `Zone` split is now the `Stage` split.
+**Commit 5: Docs.** Rewrite the README around Callboard, Stage, Call, One-shot, and Notes, with a short glossary and a "Formerly Director Blackboard / Rule Board" line. Update this file, where the `Zone` split is now the `Stage` split.
 
 ## Verification
 
