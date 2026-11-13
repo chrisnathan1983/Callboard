@@ -40,6 +40,10 @@ flowchart LR
 
 The two calming paths emit the same `calm_guard` relay. The two delivery rules share the `deliver` Call and use opposite checks on `lamp_on`.
 
+Open [Stage 01’s scene](demo/stages/stage_01/stage_01.tscn) to inspect the placed props. Select the Stage root to see the guard and lamp assignments. Select **DeliveryArea** or **DecoyArea** to see which Call each area fires. The [annotated stage script](demo/stages/stage_01/stage_01.gd) shows how to expose these scene nodes to the graph and how to build the treat and decoy in code from scene markers.
+
+Press **F1** during play and open **DEBUG** to follow a Call through its rules, waits, and relays. After delivering, press **R** to see the saved guard state and one-shot delivery latch restore the scene. Press **X** to start fresh.
+
 ## Install in your project
 
 1. Copy [`addons/callboard/`](addons/callboard/) into your project's `addons/` directory.

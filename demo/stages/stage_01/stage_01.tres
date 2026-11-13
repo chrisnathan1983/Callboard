@@ -222,6 +222,7 @@ state_key = &"treat_out"
 [resource]
 script = ExtResource("1_6haco")
 stage_script = ExtResource("2_nih50")
+preview_scene_path = "res://demo/stages/stage_01/stage_01.tscn"
 external_calls = PackedStringArray("arrive", "deliver", "offer:decoy", "relay:treat_out")
 external_vars = PackedStringArray("treat_out")
 variables = [SubResource("Resource_i23g0"), SubResource("Resource_0mpv0"), SubResource("Resource_a1q52")]

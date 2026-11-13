@@ -1,81 +1,71 @@
 @tool
 class_name Stage01 extends Stage
-## Stage 1: a guard patrols a doorway and trips a warning lamp until it is calmed.
-## Events, Blackboard defaults and graph are authored in stage_01.tres.
+## A playable example of a Callboard Stage that mixes scene-placed and scripted props.
+##
+## Open stage_01.tscn to arrange the set, assign nodes, and configure the trigger areas.
+## Open stage_01.tres in Callboard to edit the Calls, Blackboard keys, and rules.
+## The scene root extends Stage and its Definition points to that resource. Load the
+## PackedScene in your game so the authored children and Inspector assignments are present.
+## Callboard uses the matching scene when previewing the definition, so it validates
+## the same prop references the running game uses.
 
-const SHELTER_POS := Vector3(-6, 0.5, -3)
+# Constants are available to argument expressions in the graph. The calm rule passes
+# this offset to move_to(guard, shelter, GUARD_REST_OFFSET).
 const GUARD_REST_OFFSET := Vector3(0, -0.1, 1.5)
 
-var guard: MeshInstance3D
-var shelter: MeshInstance3D
-var lamp: OmniLight3D
-var window: MeshInstance3D
+# Option 1: Export a typed node reference, then assign it on the Stage root in the
+# Inspector. You can swap the node without changing any rule that refers to its field.
+@export var guard: MeshInstance3D
+@export var lamp: OmniLight3D
+
+# Option 2: Resolve a child by path after the scene enters the tree. Keep the field
+# typed so Callboard can offer it for compatible verb arguments. In the graph, type
+# the field name (window), not the node path ($Window).
+@onready var shelter: MeshInstance3D = $Shelter
+@onready var window: MeshInstance3D = $Window
+@onready var reward: MeshInstance3D = $Reward
+
+# Option 3: Declare a typed field here and assign it in _build_props(). These props
+# are absent from the scene tree in the editor, but available in the rule graph.
 var treat: MeshInstance3D
 var decoy: MeshInstance3D
-var reward: MeshInstance3D
 
-func _init() -> void:
-	name = "Stage01"
+func _build_props() -> void:
+	# Stage calls this hook before compiling rule arguments, both during gameplay
+	# and when Callboard validates a draft. Build only the nodes the graph needs.
+	# Don't fire Calls or depend on Blackboard values here. The Blackboard defaults
+	# from the definition are applied after this hook.
+	treat = Props.box(self, "TreatProp", Vector3(0.7, 0.2, 0.2), $TreatSpawn.position,
+		Color(0.98, 0.96, 0.85))
+	decoy = Props.box(self, "DecoyProp", Vector3(0.5, 0.4, 0.5), $DecoySpawn.position,
+		Color(0.2, 0.75, 0.25))
+	treat.hide()
+	decoy.hide()
+
+	# The scene-placed DeliveryArea and DecoyArea use TriggerArea in Interact mode.
+	# Their Event fields match the external Calls "deliver" and "offer:decoy".
+	# BumpPad is another scene-placed prop. It calls Stage.fire_relay_once() with
+	# "treat_out", using the local Blackboard key of the same name as its latch.
+	# Both the decoy and treat paths eventually emit the "calm_guard" relay.
 
 func can_reuse_analysis_props() -> bool:
+	# Opt in because the prop layout is independent of the draft graph and its
+	# Blackboard values. Callboard can validate edits against the same preview nodes.
 	return true
 
 func _make_verbs(context: StepContext) -> CoreVerbs:
+	# Extend StagingVerbs to keep built-in actions like show_node() and move_to().
+	# Stage01Verbs adds light() and stun_player(). Callboard reads their typed
+	# parameters and defaults for the step editor and validates the arguments.
 	return Stage01Verbs.new(context)
 
-func _build_props() -> void:
-	Props.box(self, "Ground", Vector3(24, 0.1, 18), Vector3(0, -0.05, 0), Color(0.92, 0.95, 1.0))
-	Props.box(self, "Building", Vector3(7, 3.5, 3), Vector3(0, 1.75, -6), Color(0.55, 0.35, 0.25))
-	Props.box(self, "DoorStep", Vector3(3, 0.2, 1.4), Vector3(0, 0.1, -4.1), Color(0.4, 0.4, 0.4))
-	window = Props.box(self, "Window", Vector3(1.4, 1.1, 0.1), Vector3(2.4, 2.0, -4.45), Color(0.9, 0.85, 0.5))
-
-	lamp = OmniLight3D.new()
-	lamp.name = "Lamp"
-	lamp.position = Vector3(0, 2.6, -4.0)
-	lamp.light_energy = 3.0
-	lamp.omni_range = 7.0
-	lamp.visible = false
-	add_child(lamp)
-	Props.box(self, "LampBulb", Vector3(0.25, 0.25, 0.25), Vector3(0, 2.6, -4.3), Color(1, 0.95, 0.6))
-	Props.trigger_box(self, Vector3(3.2, 2, 2.4), Vector3(0, 1, -3.6), &"deliver")
-
-	shelter = Props.box(self, "Shelter", Vector3(1.6, 1.0, 1.6), SHELTER_POS, Color(0.7, 0.2, 0.15))
-	Props.trigger_box(self, Vector3(3.5, 2, 3.5), SHELTER_POS + Vector3(0, 0.5, 0), &"offer:decoy")
-
-	guard = MeshInstance3D.new()
-	guard.name = "Guard"
-	var capsule := CapsuleMesh.new()
-	capsule.radius = 0.4
-	capsule.height = 1.0
-	guard.mesh = capsule
-	guard.material_override = Props.mat(Color(0.45, 0.28, 0.12))
-	guard.position = Vector3(-2.5, 0.5, -1.0)
-	add_child(guard)
-
-	var pad := BumpProp.new()
-	pad.name = "BumpPad"
-	pad.relay = &"treat_out"
-	pad.position = Vector3(5, 0.6, -1)
-	Props.box(pad, "Mesh", Vector3(0.7, 0.7, 1.1), Vector3.ZERO, Color(0.2, 0.3, 0.8))
-	var bump := Area3D.new()
-	bump.name = "BumpArea"
-	var cs := CollisionShape3D.new()
-	var shape := BoxShape3D.new()
-	shape.size = Vector3(1.8, 2.0, 2.2)
-	cs.shape = shape
-	bump.add_child(cs)
-	pad.add_child(bump)
-	pad.bump_area = bump
-	add_child(pad)
-
-	treat = Props.box(self, "TreatProp", Vector3(0.7, 0.2, 0.2), Vector3(5.9, 0.3, -1), Color(0.98, 0.96, 0.85))
-	decoy = Props.box(self, "DecoyProp", Vector3(0.5, 0.4, 0.5), Vector3(-4.8, 0.25, -2.2), Color(0.2, 0.75, 0.25))
-	reward = Props.box(self, "RewardProp", Vector3(0.6, 0.6, 0.6), Vector3(0.9, 0.5, -3.6), Color(0.85, 0.1, 0.3))
-	for p in [treat, decoy, reward]:
-		p.visible = false
-
 func _restore_state() -> void:
+	# The game manager supplies the saved Blackboard values and one-shot latches
+	# before adding this Stage to the tree. This hook runs after build() and before
+	# the manager calls activate(), which dispatches the "arrive" Call.
+	# Restore the visible result directly so a reload doesn't replay the delivery
+	# animation or award the score a second time.
 	if get_var(&"guard_calmed"):
-		guard.position = SHELTER_POS + GUARD_REST_OFFSET
+		guard.global_position = shelter.global_position + GUARD_REST_OFFSET
 	if has_fired(&"z1_delivered"):
-		reward.visible = true
+		reward.show()

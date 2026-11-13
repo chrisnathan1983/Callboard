@@ -5,12 +5,34 @@
 [ext_resource type="Script" uid="uid://fvf3f7fkja4" path="res://demo/scripts/world_manager.gd" id="3_feb5d"]
 [ext_resource type="Script" uid="uid://oxor5iyf4oi7" path="res://demo/scripts/game_hud.gd" id="4_fc0e3"]
 
+[sub_resource type="Environment" id="Environment_demo"]
+background_mode = 1
+background_color = Color(0.05, 0.07, 0.15, 1)
+ambient_light_source = 2
+ambient_light_color = Color(0.45, 0.5, 0.7, 1)
+ambient_light_energy = 0.7
+
 [node name="GameManager" type="Node3D" unique_id=93247648]
 script = ExtResource("1_e2o6t")
 stage_scene = ExtResource("2_feb5d")
 
 [node name="WorldManager" type="Node3D" parent="." unique_id=752824251]
 script = ExtResource("3_feb5d")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="WorldManager"]
+environment = SubResource("Environment_demo")
+
+[node name="KeyLight" type="DirectionalLight3D" parent="WorldManager"]
+rotation = Vector3(-0.959931, 0.523599, 0)
+light_energy = 0.4
+
+[node name="Camera" type="Camera3D" parent="WorldManager"]
+position = Vector3(0, 13, 10)
+rotation = Vector3(-0.846546, 0, 0)
+current = true
+
+[node name="PlayerSpawn" type="Marker3D" parent="WorldManager"]
+position = Vector3(0, 0.9, 4)
 
 [node name="HUD" type="CanvasLayer" parent="." unique_id=33095439]
 script = ExtResource("4_fc0e3")

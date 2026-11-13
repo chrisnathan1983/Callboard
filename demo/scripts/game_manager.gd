@@ -20,17 +20,22 @@ func load_stage() -> void:
 
 func load_stage_scene(scene: PackedScene) -> void:
 	stage = scene.instantiate()
-	stage.saved_vars = saved_vars      # by reference, as a manager would inject them
+	# Supply both dictionaries before add_child(): Stage._ready() builds the graph
+	# and calls _restore_state() as soon as the scene enters the tree.
+	stage.saved_vars = saved_vars
 	stage.fired = fired_rules
-	add_child(stage)                   # _ready() builds props, Blackboard, rules
+	add_child(stage)
 	stage.scored.connect(_on_scored)
 	stage.rule_fired.connect(_on_rule_fired)
+	# Bind listeners before activate() dispatches the arrival Call. That lets the
+	# debugger and HUD see rules that fire immediately on arrival.
 	hud.bind_stage(stage)
 	stage.activate()
 	_log("stage loaded")
 
 func unload_stage() -> void:
-	stage.deactivate()          # cancels every pending delay and loop
+	# Cancel the old graph's work before replacing its scene.
+	stage.deactivate()
 	remove_child(stage)
 	stage.queue_free()
 

@@ -238,6 +238,7 @@ func show_data(data: Dictionary) -> void:
 ## Updates stable graph structures in place. A structural change falls back to a full build;
 ## otherwise only rule cards whose rendered content changed are recreated.
 func update_data(data: Dictionary) -> void:
+	_last_data = data
 	var rules: Array = data["rules"]
 	var problems: Array = data["notes"]
 	if (not _same_ids(_rule_nodes, rules.map(func(rd: Dictionary) -> String: return rd["id"]))

@@ -7,6 +7,7 @@ const TMP_PATH := "res://.godot/stage_tmp.tres"
 const Settings := preload("res://addons/callboard/core/callboard_settings.gd")
 
 func _initialize() -> void:
+	await process_frame
 	var ok := _test_authored_resource_graph()
 	ok = _test_board_editing() and ok
 	ok = _test_additional_stage_locations() and ok
@@ -36,7 +37,10 @@ func _test_authored_resource_graph() -> bool:
 	ok = _check("reader: step text keeps source expressions", ExprText.step_text(data["rules"][1]["steps"][1]) == "light(lamp, true, 3.5).after(0.25)") and ok
 	ok = _check("reader: step emits come from runtime Steps", data["rules"][0]["steps"][0]["emits"] == "standoff_tick") and ok
 	ok = _check("catalog: 12 verbs incl. typed params", data["catalog"].size() == 12 and VerbCatalog.find(data["catalog"], "move_to")["args"][2]["type"] == TYPE_VECTOR3) and ok
-	ok = _check("props discovered", data["props"].any(func(p): return p["name"] == "guard")) and ok
+	var prop_names: Array = data["props"].map(func(prop: Dictionary) -> String: return prop["name"])
+	ok = _check("Callboard discovers exported, onready, and scripted props",
+		["guard", "lamp", "window", "shelter", "reward", "treat", "decoy"].all(
+			func(prop: String) -> bool: return prop in prop_names)) and ok
 
 	var gv := RuleGraphView.new()
 	root.add_child(gv)
@@ -541,10 +545,11 @@ func _test_rename_saved_state() -> bool:
 
 	var data := RuleGraphReader.inspect_definition(TMP_PATH)
 	var renamed: StageDefinition = data["definition"]
-	var stage := renamed.instantiate()
+	var stage := (load(renamed.preview_scene_path) as PackedScene).instantiate() as Stage
+	stage.definition = renamed
 	stage.fired = {&"z1_delivered": true}
 	stage.saved_vars = {&"guard_calmed": true}
-	stage.build()
+	root.add_child(stage)
 	var delivered: Rule
 	for rule in stage.engine.rules:
 		if rule.id == &"parcel_delivered":
@@ -573,10 +578,11 @@ func _test_rename_saved_state() -> bool:
 	reused_key.text = "guard_calmed"
 	reused_key.text_submitted.emit(reused_key.text)
 	board._data["vars"].back()["scope"] = "saved"
-	var reused_stage := RuleGraphReader.make_definition(board._data).instantiate()
+	var reused_stage := (load(renamed.preview_scene_path) as PackedScene).instantiate() as Stage
+	reused_stage.definition = RuleGraphReader.make_definition(board._data)
 	reused_stage.saved_vars = {&"guard_calmed": true}
 	reused_stage.fired = {&"z1_delivered": true}
-	reused_stage.build()
+	root.add_child(reused_stage)
 	ok = _check("has_fired checks each current rule's own latch after an ID is reused",
 		reused_stage.has_fired(&"parcel_delivered") and not reused_stage.has_fired(&"z1_delivered")) and ok
 	ok = _check("a new saved variable can reuse the old name with its own default",
@@ -637,8 +643,7 @@ func _test_numeric_undo() -> bool:
 
 func _test_live_debug() -> bool:
 	var definition := load(DEFINITION_PATH) as StageDefinition
-	var stage := definition.instantiate()
-	root.add_child(stage)
+	var stage := definition.instantiate_for_analysis(root)
 	var board := Callboard.new()
 	root.add_child(board)
 	board._show({"error": "No stage definitions"}, false)

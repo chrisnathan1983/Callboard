@@ -6,11 +6,17 @@ const GAME_SCENE_PATH := "res://demo/game.tscn"
 
 func _initialize() -> void:
 	var packed := load(STAGE_SCENE_PATH) as PackedScene
-	var stage := packed.instantiate() as Stage
+	var stage := packed.instantiate() as Stage01
+	var ok := _check("the packed scene owns its set, guard, and pad",
+		stage.guard == stage.get_node("Guard") and stage.has_node("Ground")
+		and stage.get_node("BumpPad") is BumpProp and not stage.has_node("TreatProp"))
 	root.add_child(stage)
 	await process_frame
 
-	var ok := _check("stage loads and validates", stage.check().is_empty())
+	ok = _check("scene-placed and scripted props resolve when the stage builds",
+		stage.window == stage.get_node("Window") and stage.treat == stage.get_node("TreatProp")
+		and stage.decoy == stage.get_node("DecoyProp") and not stage.treat.visible
+		and stage.graph_errors.is_empty() and stage.check().is_empty()) and ok
 	ok = (await _test_staging_verbs(stage)) and ok
 	var fired: Array[StringName] = []
 	stage.rule_fired.connect(func(id: StringName, _event: StringName) -> void: fired.append(id))
@@ -161,7 +167,7 @@ func _test_game_scene() -> bool:
 	var packed := load(GAME_SCENE_PATH) as PackedScene
 	if not _check("the main scene loads", packed != null):
 		return false
-	var game := packed.instantiate()
+	var game := packed.instantiate() as GameManager
 	root.add_child(game)
 	await process_frame
 	var hud := game.get_node("HUD") as GameHud
@@ -174,10 +180,58 @@ func _test_game_scene() -> bool:
 	ok = _check("the HUD mounts the hidden live panel when available",
 		(hud.board_panel != null and not hud.board_panel.visible) if has_debug_board
 		else hud.board_panel == null) and ok
-	game.stage.deactivate()
-	await create_timer(3.5).timeout
+	ok = (await _test_demo_paths(game)) and ok
 	game.queue_free()
 	await process_frame
+	return ok
+
+func _test_demo_paths(game: GameManager) -> bool:
+	var stage := game.stage as Stage01
+	var player := game.get_node("WorldManager/Player") as Player
+	var delivery := stage.get_node("DeliveryArea") as TriggerArea
+	var shelter := stage.get_node("DecoyArea") as TriggerArea
+	# Simulate a standoff tick without waiting for the ambient loop's first interval.
+	stage.fire(&"relay:standoff_tick")
+	await create_timer(0.4).timeout
+	player.global_position = delivery.global_position
+	for frame in range(3):
+		await physics_frame
+	player.interact()
+	var ok := _check("scene delivery Call uses the lamp guard and the custom stun verb",
+		stage.lamp.visible and stage.is_set(&"lamp_on") and player.stunned
+		and not stage.has_fired(&"z1_delivered"))
+	if player.stunned:
+		await player._stun_timer.timeout
+	player.global_position = shelter.global_position
+	for frame in range(3):
+		await physics_frame
+	player.interact()
+	await create_timer(0.6).timeout
+	ok = _check("scene shelter Call reveals the scripted decoy and relays to calm the guard",
+		stage.decoy.visible and stage.is_set(&"guard_calmed") and not stage.lamp.visible) and ok
+	player.global_position = delivery.global_position
+	for frame in range(3):
+		await physics_frame
+	player.interact()
+	await create_timer(0.9).timeout
+	ok = _check("delivery reveals the scene reward and awards its one-shot score",
+		stage.reward.visible and stage.has_fired(&"z1_delivered") and game.score == 325) and ok
+	game.clear_stage(false)
+	stage = game.stage as Stage01
+	(stage.get_node("DeliveryArea") as TriggerArea).interact()
+	ok = _check("stage reload restores saved props and leaves local props hidden",
+		stage.reward.visible and stage.guard.global_position.is_equal_approx(
+			stage.shelter.global_position + Stage01.GUARD_REST_OFFSET)
+		and not stage.decoy.visible and not stage.is_set(&"lamp_on") and game.score == 325) and ok
+	game.clear_stage(true)
+	stage = game.stage as Stage01
+	var pad := stage.get_node("BumpPad") as BumpProp
+	player.global_position = pad.global_position
+	await create_timer(1.4).timeout
+	ok = _check("a fresh run can use the placed bump pad to reveal the scripted treat",
+		stage.treat.visible and stage.is_set(&"treat_out") and stage.is_set(&"guard_calmed")
+		and not stage.reward.visible and not stage.has_fired(&"z1_delivered")
+		and game.score == 0) and ok
 	return ok
 
 func _check(label: String, condition: bool) -> bool:

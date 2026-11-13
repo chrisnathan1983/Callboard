@@ -369,6 +369,7 @@ func _on_picker(i: int) -> void:
 
 func bind_live(stage: Stage) -> void:
 	_clear_analysis_stage()
+	var same_definition: bool = stage.definition != null and _data.get("definition") == stage.definition
 	if _live and is_instance_valid(_live) and _live.rule_fired.is_connected(_on_live_rule_fired):
 		_live.rule_fired.disconnect(_on_live_rule_fired)
 	_live = stage
@@ -380,7 +381,7 @@ func bind_live(stage: Stage) -> void:
 	_live_debug_ui.bind_stage(stage)
 	_selected = ""
 	_dirty = false
-	_show(RuleGraphReader.read(stage), false, true)
+	_show(RuleGraphReader.read(stage), false, true, same_definition)
 
 func _on_live_rule_fired(rule_id: StringName, event: StringName) -> void:
 	view.pulse(String(rule_id))
@@ -424,7 +425,7 @@ func _clear_analysis_stage() -> void:
 	_analysis_stage = null
 	_analysis_source_key = ""
 
-func _show(data: Dictionary, editable: bool, live := false) -> void:
+func _show(data: Dictionary, editable: bool, live := false, reuse_graph := false) -> void:
 	if data.has("error"):
 		_show({"rules": [], "groups": [], "vars": [], "external_calls": [], "call_positions": {},
 			"external_vars": [], "notes": [data["error"]]}, false)
@@ -447,7 +448,10 @@ func _show(data: Dictionary, editable: bool, live := false) -> void:
 	_live_debug_panel.visible = live
 	view.set_editable(_editable)
 	blackboard.show_data(data, _editable, live)
-	view.show_data(data)
+	if reuse_graph:
+		view.update_data(data)
+	else:
+		view.show_data(data)
 	_layout_overlays()
 	view.request_fit()
 	_reset_history()
