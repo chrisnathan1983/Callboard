@@ -2,7 +2,7 @@
 
 **Choreograph event-driven gameplay in Godot.** Callboard is a visual rule editor and GDScript runtime for 3D scenes. Define what can happen, which conditions must be true, and what runs next in a Stage graph. Your gameplay code supplies events and actions. Callboard handles the sequencing, state checks, and relays between rules.
 
-[Run the demo](#run-the-demo) · [Install](#install-in-your-project) · [Author a stage](#author-a-stage) · [Live debugging](#live-debugging) · [API reference](docs/api.md)
+[Download](https://github.com/chrisnathan1983/director_blackboard_demo_4/releases/latest) · [Run the demo](#run-the-demo) · [Install](#install-in-your-project) · [Author a stage](#author-a-stage) · [Live debugging](#live-debugging) · [API reference](docs/api.md)
 
 [![Godot tests](https://github.com/chrisnathan1983/director_blackboard_demo_4/actions/workflows/test.yml/badge.svg)](https://github.com/chrisnathan1983/director_blackboard_demo_4/actions/workflows/test.yml)
 **Godot 4.7** · **GDScript** · **[0BSD](LICENSE)**
@@ -46,7 +46,7 @@ Press **F1** during play and open **DEBUG** to follow a Call through its rules, 
 
 ## Install in your project
 
-1. Copy [`addons/callboard/`](addons/callboard/) into your project's `addons/` directory.
+1. Download `callboard-<version>.zip` from the **Assets** section of the [latest release](https://github.com/chrisnathan1983/director_blackboard_demo_4/releases/latest). Extract it beside your `project.godot` file to install `addons/callboard/`.
 2. Open **Project → Project Settings → Plugins** and enable **Callboard**.
 3. Choose **Project → Tools → Create New Stage…**. The generator creates a scene, a GDScript extending `Stage`, and an assigned `StageDefinition` resource under the configured Callboard stages directory (default `res://stages/`). In **Project Settings → General → Callboard**, set **Default Stage Folder** to choose where new stages are saved. Add folders under **Stage Scan Folders** to discover stages elsewhere. Callboard scans the default folder and all listed folders recursively.
 4. Open the **Callboard** tab and select your new definition. Instance the generated scene in your game and call `activate()` after it has entered the scene tree.
@@ -151,6 +151,12 @@ godot --headless --path . --script res://demo/tests/smoke.gd
 ```
 
 [GitHub Actions](.github/workflows/test.yml) runs the four suites separately and checks that the demo runtime works without the editor and authoring model.
+
+### Releases and PR builds
+
+After all tests pass, a default-branch run publishes the addon ZIP to [GitHub Releases](https://github.com/chrisnathan1983/director_blackboard_demo_4/releases). To try a pull request, open its **Checks** tab, then follow **Package Callboard** to the workflow run and download the ZIP from the run summary or **Artifacts**.
+
+The workflow adds its run number to the patch number in `plugin.cfg`. PR builds append `-pr.<number>`, and reruns reuse the same version. Version numbers can skip when a run fails or builds a preview. Each ZIP contains the installable addon and its license.
 
 If a Windows headless import reports `Safe save failed` in a restricted workspace, use a writable workspace or disable **Filesystem → On Save → Safe Save On Backup Then Rename** in a dedicated test editor profile. The setting is in Godot’s **Editor Settings**.
 
