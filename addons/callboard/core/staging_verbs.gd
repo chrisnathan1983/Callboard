@@ -100,17 +100,16 @@ func say(n: Node3D, text: String, seconds := 1.0) -> Step:
 
 func move_to(n: Node3D, dest: Node3D, offset := Vector3.ZERO, duration := 0.7) -> Step:
 	var host := context.host
-	var f := func(_c: Dictionary) -> Signal:
-		_kill_node_tween(n, POSITION_TWEEN_META)
+	var move := func(_payload: Dictionary) -> Signal:
 		var target_global := dest.global_position + offset
 		var parent := n.get_parent_node_3d()
 		var target_local := target_global if parent == null or n.top_level else parent.to_local(target_global)
 		n.set_meta(BASE_Y_META, target_local.y)
-		var t := host.create_tween()
-		n.set_meta(POSITION_TWEEN_META, t)
-		t.tween_property(n, "global_position", target_global, duration)
-		return t.finished
-	return Step.new(f)
+		var tween := host.create_tween()
+		var set_position := _position_setter(n, tween, ^"global_position")
+		tween.tween_method(set_position, n.global_position, target_global, duration)
+		return tween.finished
+	return Step.new(move)
 
 ## Tints the mesh's material_override.
 func flash(m: MeshInstance3D) -> Step:
@@ -140,24 +139,29 @@ func jump(m: MeshInstance3D) -> Step:
 		color_tween.tween_method(set_color, base, tint, 0.08)
 		color_tween.tween_method(set_color, tint, base, 0.32)
 		var previous: Tween = m.get_meta(POSITION_TWEEN_META) if m.has_meta(POSITION_TWEEN_META) else null
-		var y := m.position.y
+		var base_y := m.position.y
 		if previous and previous.is_running() and m.has_meta(BASE_Y_META):
-			y = float(m.get_meta(BASE_Y_META))
-		_kill_node_tween(m, POSITION_TWEEN_META)
-		m.set_meta(BASE_Y_META, y)
-		var t := host.create_tween()
-		m.set_meta(POSITION_TWEEN_META, t)
-		t.tween_property(m, "position:y", y + 0.6, 0.15)
-		t.tween_property(m, "position:y", y, 0.25).set_trans(Tween.TRANS_BOUNCE)
-		return t.finished
+			base_y = float(m.get_meta(BASE_Y_META))
+		m.set_meta(BASE_Y_META, base_y)
+		var hop := host.create_tween()
+		var set_height := _position_setter(m, hop, ^"position:y")
+		hop.tween_method(set_height, m.position.y, base_y + 0.6, 0.15)
+		hop.tween_method(set_height, base_y + 0.6, base_y, 0.25).set_trans(Tween.TRANS_BOUNCE)
+		return hop.finished
 	return Step.new(f)
 
-func _kill_node_tween(node: Node, meta: StringName) -> void:
-	if not is_instance_valid(node) or not node.has_meta(meta):
-		return
-	var previous: Variant = node.get_meta(meta)
-	if previous is Tween and previous.is_running():
-		previous.kill()
+## The newest tween controls position. Earlier tweens still finish so their rules resume.
+func _position_setter(node: Node3D, tween: Tween, property: NodePath) -> Callable:
+	var node_id := node.get_instance_id()
+	var tween_id := tween.get_instance_id()
+	node.set_meta(POSITION_TWEEN_META, tween)
+	return func(value: Variant) -> void:
+		var target := instance_from_id(node_id) as Node3D
+		if target == null:
+			return
+		var current_tween := target.get_meta(POSITION_TWEEN_META, null) as Tween
+		if current_tween != null and current_tween.get_instance_id() == tween_id:
+			target.set_indexed(property, value)
 
 func _effect_material(m: MeshInstance3D, verb: String) -> BaseMaterial3D:
 	if not is_instance_valid(m):

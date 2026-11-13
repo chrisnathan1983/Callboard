@@ -42,6 +42,23 @@ static func edit_error(data: Dictionary, id: String) -> String:
 		return "This Call or relay no longer exists."
 	return ""
 
+static func new_call_error(data: Dictionary, call_id: String) -> String:
+	if call_id.is_empty():
+		return "Enter a Call ID."
+	var error := _name_error(call_id)
+	if not error.is_empty():
+		return error
+	if data["external_calls"].has(call_id):
+		return "That Call already exists."
+	return ""
+
+static func _name_error(connection_name: String) -> String:
+	if _invalid_name_pattern == null:
+		_invalid_name_pattern = RegEx.create_from_string('[\\x00-\\x1f"\\\\]')
+	if connection_name.is_empty() or connection_name.begins_with(RELAY_PREFIX) or _invalid_name_pattern.search(connection_name):
+		return "Enter a name without quotes, backslashes, control characters, or the relay: prefix."
+	return ""
+
 ## new_name is the bare relay name for relays, or the full Call ID for Calls.
 static func rename(data: Dictionary, id: String, new_name: String) -> String:
 	var error := edit_error(data, id)
@@ -50,10 +67,9 @@ static func rename(data: Dictionary, id: String, new_name: String) -> String:
 	if id == "arrive":
 		return "The stage lifecycle fires the built-in arrive Call."
 	new_name = new_name.strip_edges()
-	if _invalid_name_pattern == null:
-		_invalid_name_pattern = RegEx.create_from_string('[\\x00-\\x1f"\\\\]')
-	if new_name.is_empty() or new_name.begins_with(RELAY_PREFIX) or _invalid_name_pattern.search(new_name):
-		return "Enter a name without quotes, backslashes, control characters, or the relay: prefix."
+	error = _name_error(new_name)
+	if not error.is_empty():
+		return error
 	var is_relay := id.begins_with(RELAY_PREFIX)
 	var new_id := RELAY_PREFIX + new_name if is_relay else new_name
 	if id == new_id:

@@ -41,14 +41,14 @@ When `SceneTree.paused` is true, rule delays, repeat ticks, timed lights, and th
 | --- | --- |
 | `activate() -> void` | Fires `arrive` after setup. Graph compilation errors block activation. Each call can dispatch `arrive` again. |
 | `deactivate() -> void` | Cancels the current engine runs and clears pending work from diagnostics. Stage exit also cancels runs. |
-| `fire(event: StringName, ctx := {}) -> void` | Dispatches an event and optional payload. Awaiting the rules is the engine's responsibility. Custom steps can read payload values from their `Dictionary` argument. |
+| `fire(event: StringName, ctx := {}) -> void` | Dispatches a Call ID such as `deliver` or a relay event ID such as `relay:calm_guard`. The optional `ctx` dictionary is the payload available to steps. The engine runs any asynchronous work. |
 | `get_var(key: StringName) -> Variant` | Reads the resolved Blackboard value. An unknown key returns `null`. |
 | `write_var(key: StringName, value: Variant) -> void` | Writes a declared key using its Variant type. Integer inputs to float keys are converted to floats. |
 | `is_set(key: StringName) -> bool` | Returns the value's truthiness. |
 | `define_local(key, default_val = false, state_key = &"")` | Defines a key on the runtime Blackboard. Its initial value is rebuilt on each Stage load. |
 | `define_saved(key, default_val = false, state_key = &"")` | Defines a key backed by `saved_vars`. The optional stable key selects the entry in the save dictionary. |
 | `has_fired(rule_id: StringName) -> bool` | Checks whether a rule has a one-shot latch. Pass the current rule ID after a rename. |
-| `fire_relay_once(relay, latch, source_id, source_event) -> bool` | Uses a declared Boolean Blackboard key as a latch. If it is false, writes true, emits `rule_fired(source_id, source_event)`, then dispatches `relay:<relay>`. Returns false for an empty relay, missing latch, or already truthy latch. Pass the bare relay name. |
+| `fire_relay_once(relay, latch, source_id, source_event) -> bool` | Uses a declared Boolean Blackboard key as a latch. If it is false, writes true, emits `rule_fired(source_id, source_event)`, then dispatches `relay:<relay>`. Returns false for an empty relay, an invalid latch key, or an already set latch. Pass the bare relay name. |
 | `check() -> Array[String]` | Runs the rule validator on the built Stage. |
 
 | Signal | When it fires |
@@ -70,13 +70,14 @@ Use `@tool` on the Stage script and custom verb factory so Callboard can analyze
 
 ## StageDefinition
 
-[`StageDefinition`](../addons/callboard/core/stage_definition.gd) is the resource assigned to `Stage.definition`. The editor saves variables, rules, steps, and groups as typed subresources. Dictionary-based definitions migrate to format version 3 and retain their persisted state keys.
+[`StageDefinition`](../addons/callboard/core/stage_definition.gd) is the resource assigned to `Stage.definition`. The editor saves variables, rules, steps, and groups as typed subresources. Older dictionary-based definitions migrate to the current format and retain their persisted state keys.
 
 | Field | Purpose |
 | --- | --- |
 | `stage_script` | The `@tool` script extending `Stage`. |
 | `preview_scene_path` | Optional scene path for editor analysis of scene-assigned props. Callboard otherwise looks for a same-name sibling `.tscn`, then falls back to constructing the script. |
-| `external_calls` | Events supplied by gameplay. Include `arrive` when using that lifecycle trigger. |
+| `external_calls` | Events supplied by gameplay. Use bare IDs for Calls and `relay:<name>` IDs for external relays. Include `arrive` when using that lifecycle trigger. |
+| `call_positions` | Saved graph positions keyed by external event ID. |
 | `external_vars` | Declared Blackboard keys that gameplay writes. This tells validation which values have a writer outside the graph. |
 | `variables`, `rules`, `groups` | Authored subresources. Rule steps are stored with the rule. |
 
@@ -104,7 +105,7 @@ The `changed(key, value)` signal is forwarded as `Stage.var_changed`. Use the wr
 - **ENTER** dispatches when a body in the `Player` or `Companion` group enters. Its mask uses physics layers 2 and 4, respectively.
 - **INTERACT** dispatches when your controller calls `interact()`. The demo [player](../demo/scripts/actors/player.gd) finds a nearby area using the trigger layer, physics layer 3.
 
-Use [`StageCollisionLayers`](../addons/callboard/core/collision_layers.gd) for the bit masks, or call `stage.fire()` directly from your own interaction system.
+`TriggerArea` assigns its collision layer and mask on startup. Use [`StageCollisionLayers`](../addons/callboard/core/collision_layers.gd) for the bit masks, or call `stage.fire()` directly from your own interaction system.
 
 ## Built-in verbs
 
@@ -120,6 +121,8 @@ The default factory is [`StagingVerbs`](../addons/callboard/core/staging_verbs.g
 | Staging | `say(n, text, seconds = 1.0)` | Show temporary text at a node. |
 | Staging | `move_to(n, dest, offset = Vector3.ZERO, duration = 0.7)` | Tween a node to a target with an offset. |
 | Staging | `flash(m)`, `jump(m)` | Tint a mesh or animate a vertical hop. Both use a BaseMaterial3D material override. |
+
+When `move_to` and `jump` overlap on the same node, the latest step controls its position. Earlier steps finish on their original schedule so their rules can continue.
 
 The demo's [`Stage01Verbs`](../demo/stages/stage_01/stage_01_verbs.gd) supplies `light(n, on, duration = 0.0)`, which updates its `lamp_on` key, and `stun_player(seconds)`. It is selected by `Stage01._make_verbs()`; other games can define their own methods and actor lookup without inheriting demo group names. To build a key-agnostic light action, call the protected-by-convention `StagingVerbs._light(n, on, duration, key)` helper from your own verb method.
 
@@ -175,6 +178,8 @@ Declare a Boolean Blackboard key `door_open` and assign a typed `Node3D` propert
 | `pending_changed(entries)`, `run_cancelled(rule_id)`, `all_cancelled` | Observe wait changes and cancellation. |
 
 The rule engine dispatches matching rules in authored order. A rule's steps run in order and await their completion when applicable. A rule's own relay fires after its final step completes. Different rules can overlap. The re-entry policy governs repeated triggers of the same rule.
+
+Graph compilation errors block `activate()`. `Stage.check()` reports validation findings such as relay cycles and shared-trigger overlap. In a debug build, `activate()` logs those findings and still dispatches `arrive` if compilation succeeded. A direct call to `fire()` dispatches without running `activate()`.
 
 The [unit suite](../addons/callboard/tests/unit.gd) exercises guards, re-entry, cancellation, and migration. The [demo runtime smoke test](../demo/tests/smoke.gd) shows how to drive a Stage through the same calls the game uses.
 

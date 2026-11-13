@@ -132,7 +132,7 @@ func _build_rule() -> void:
 	var policy := OptionButton.new()
 	var one_shot := CheckBox.new()
 	one_shot.text = "One-shot"
-	one_shot.tooltip_text = "The rule's latch persists in saved state"
+	one_shot.tooltip_text = "Latch when the rule starts. Reuse the Stage's fired dictionary to preserve the latch across loads."
 	one_shot.button_pressed = r[AuthoredData.FIELD_ONE_SHOT]
 	one_shot.toggled.connect(func(on: bool) -> void:
 		r[AuthoredData.FIELD_ONE_SHOT] = on
@@ -170,7 +170,7 @@ func _build_rule() -> void:
 	reentry.add_child(policy)
 	_box.add_child(reentry)
 	var overlap := CheckBox.new()
-	overlap.text = "Allow simultaneous rules"
+	overlap.text = "Expect shared-trigger overlap"
 	overlap.tooltip_text = "Suppress shared-trigger overlap warnings for this rule. Use when concurrent runs are intentional."
 	overlap.button_pressed = bool(r.get(AuthoredData.FIELD_ALLOW_OVERLAP, false))
 	overlap.toggled.connect(func(on: bool) -> void:

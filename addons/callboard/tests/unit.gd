@@ -44,6 +44,23 @@ func _initialize() -> void:
 		typeof(bb.saved[&"speed"]) == TYPE_FLOAT and bb.saved[&"speed"] == 1.0
 		and speed_changes.size() == 1 and typeof(speed_changes[0]) == TYPE_FLOAT) and ok
 
+	var relay_stage := Stage.new()
+	relay_stage.build()
+	relay_stage.define_local(&"wrong_latch_type", 0)
+	var relay_emitted: Array[StringName] = []
+	relay_stage.rule_fired.connect(func(id: StringName, _event: StringName) -> void: relay_emitted.append(id))
+	ok = _check("a relay latch requires a Boolean Blackboard key",
+		not relay_stage.fire_relay_once(&"ready", &"wrong_latch_type", &"source", &"interact")
+		and relay_emitted.is_empty() and relay_stage.get_var(&"wrong_latch_type") == 0) and ok
+	relay_stage.free()
+
+	bb.alias(&"previous_lamp_name", &"lamp_on")
+	var alias_rule := Rule.new(&"alias_writer", &"alarm")
+	alias_rule.requires = [&"lamp_on"]
+	alias_rule.steps.append(CoreVerbs.new(StepContext.new(bb, null, null, Callable())).set_var(&"previous_lamp_name"))
+	ok = _check("validator resolves renamed Blackboard keys in step writes",
+		RuleValidator.check([alias_rule], bb, [&"alarm"], []).is_empty()) and ok
+
 	var cycle_a := Rule.new(&"loop_a", &"relay:a")
 	var cycle_step := Step.new()
 	cycle_step.emits = &"b"

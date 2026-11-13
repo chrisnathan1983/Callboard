@@ -153,6 +153,21 @@ func _test_staging_verbs(stage: Stage) -> bool:
 	mesh.position.y = 2.0
 	await verbs.jump(mesh).fn.call({})
 	ok = _check("a later jump returns to the mesh's new height", is_equal_approx(mesh.position.y, 2.0)) and ok
+	var destination := Node3D.new()
+	stage.add_child(destination)
+	destination.position = Vector3(2, 3, 4)
+	var move_rule := Rule.new(&"test_move", &"test_move")
+	move_rule.steps.append(verbs.move_to(mesh, destination, Vector3.ZERO, 0.5))
+	move_rule.steps.append(Step.new(func(_payload: Dictionary) -> void: completed.append(true)))
+	stage.engine.rules.append(move_rule)
+	stage.fire(&"test_move")
+	stage.fire(&"test_jump")
+	await create_timer(0.7).timeout
+	ok = _check("a jump replaces movement and both rules finish",
+		completed.size() == 2 and stage.engine.active_snapshot().is_empty()
+		and is_equal_approx(mesh.position.y, destination.position.y)) and ok
+	stage.engine.rules.erase(move_rule)
+	destination.queue_free()
 	stage.engine.rules.erase(flash_rule)
 	stage.engine.rules.erase(jump_rule)
 	verbs.say(mesh, "First line", 10.0).fn.call({})

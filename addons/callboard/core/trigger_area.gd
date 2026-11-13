@@ -1,7 +1,8 @@
 @tool
 class_name TriggerArea extends Area3D
 ## Fires a named event on the owning Stage.
-## ENTER: the player or a companion walks in. INTERACT: the player presses E nearby.
+## ENTER fires for a Player or Companion body entering the area.
+## INTERACT fires when gameplay calls interact().
 
 enum Mode { ENTER, INTERACT }
 

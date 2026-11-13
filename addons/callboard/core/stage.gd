@@ -14,7 +14,7 @@ var engine: RuleEngine
 var verbs: CoreVerbs
 var graph_errors: Array[String] = []
 
-## Events and keys supplied by gameplay code outside the rules.
+## Call IDs, external relay event IDs, and keys supplied by gameplay code.
 var external_calls: Array[StringName] = [&"arrive"]
 var external_vars: Array[StringName] = []
 
@@ -114,16 +114,20 @@ func has_fired(rule_id: StringName) -> bool:
 
 func fire(event: StringName, ctx := {}) -> void:
 	if OS.is_debug_build() and not _event_is_known(event):
-		push_warning("Stage '%s' fired undeclared Call '%s'; no rule emits it and it is not declared as external." % [name, event])
+		push_warning("Stage '%s' fired unknown event '%s'. Declare gameplay events in external_calls." % [name, event])
 	engine.fire(event, ctx)
 
-## Use a declared Blackboard key to latch a relay fired by gameplay code.
+## Use a declared Boolean Blackboard key to latch a relay fired by gameplay code.
 func fire_relay_once(relay: StringName, latch: StringName, source_id: StringName, source_event: StringName) -> bool:
 	if bb == null or relay.is_empty():
 		return false
 	if not bb.has(latch):
 		if OS.is_debug_build():
 			push_warning("Stage '%s' cannot fire relay '%s': latch key '%s' is not declared." % [name, relay, latch])
+		return false
+	if bb.schema[bb.resolve_key(latch)]["type"] != TYPE_BOOL:
+		if OS.is_debug_build():
+			push_warning("Stage '%s' cannot fire relay '%s': latch key '%s' must be Boolean." % [name, relay, latch])
 		return false
 	if is_set(latch):
 		return false

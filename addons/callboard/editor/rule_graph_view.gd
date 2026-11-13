@@ -862,7 +862,7 @@ func _make_event_nodes(events: Array, rules: Array, saved_positions: Dictionary)
 		var n := GraphNode.new()
 		n.name = "ev_" + _safe(event_id)
 		n.set_meta("event", event_id)
-		n.title = "External Call"
+		n.title = "External Relay" if event_id.begins_with(RuleConnections.RELAY_PREFIX) else "Call"
 		n.tooltip_text = event_id
 		n.position_offset = positions[event_id]
 		_style_card(n, CALL_WIDTH, COL_EVENT, &"Signal")

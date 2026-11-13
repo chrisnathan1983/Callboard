@@ -48,27 +48,30 @@ Press **F1** during play and open **DEBUG** to follow a Call through its rules, 
 
 1. Download `callboard-<version>.zip` from the **Assets** section of the [latest release](https://github.com/chrisnathan1983/director_blackboard_demo_4/releases/latest). Extract it beside your `project.godot` file to install `addons/callboard/`.
 2. Open **Project → Project Settings → Plugins** and enable **Callboard**.
-3. Choose **Project → Tools → Create New Stage…**. The generator creates a scene, a GDScript extending `Stage`, and an assigned `StageDefinition` resource under the configured Callboard stages directory (default `res://stages/`). In **Project Settings → General → Callboard**, set **Default Stage Folder** to choose where new stages are saved. Add folders under **Stage Scan Folders** to discover stages elsewhere. Callboard scans the default folder and all listed folders recursively.
+3. Choose **Project → Tools → Create New Stage...**. The generator creates a scene, a GDScript extending `Stage`, and an assigned `StageDefinition` resource under the configured Callboard stages directory (default `res://stages/`). In **Project Settings → General → Callboard**, set **Default Stage Folder** to choose where new stages are saved. Add folders under **Stage Scan Folders** to discover stages elsewhere. Callboard scans the default folder and all listed folders recursively.
 4. Open the **Callboard** tab and select your new definition. Instance the generated scene in your game and call `activate()` after it has entered the scene tree.
 
 See [Godot's plugin installation guide](https://docs.godotengine.org/en/stable/tutorials/plugins/editor/installing_plugins.html) for the editor settings.
 
 ## Author a Stage
 
-A **Stage** is a `Node3D` scene with a **StageDefinition** resource. The resource holds Calls, Blackboard variables, rules, ordered steps, and graph layout. The scene supplies actors and props.
+A **Stage** is a `Node3D` scene with a **StageDefinition** resource. The resource holds event declarations, Blackboard variables, rules, ordered steps, and graph layout. The scene supplies actors and props.
 
 | On the board | In the game |
 | --- | --- |
 | **Call** | An event fired by gameplay, such as `deliver`. `activate()` fires `arrive`. |
 | **Blackboard** | Typed state read by rules and written by steps or gameplay. Local values reset on reload. Saved values use a dictionary supplied by your game. |
-| **Rule** | A response to a Call or relay. Its guards decide whether it can start. |
-| **Step** | An action built by a GDScript verb, optionally preceded by a delay. |
-| **Relay** | A named event emitted by a rule or step. Listeners use a trigger such as `relay:calm_guard`. |
+| **Trigger** | The event ID a rule listens for, such as the Call `deliver` or the relay `relay:calm_guard`. |
+| **Rule** | An ordered sequence of steps with a trigger, optional guards, and an optional completion relay. |
+| **Guard** | A Blackboard check used by Requires, Forbids, or Cancel If. |
+| **Verb** | A GDScript factory method, such as `set_var`, that builds a step. |
+| **Step** | One use of a verb with its own arguments and optional delay. |
+| **Relay** | A named event, usually emitted by a rule or step. Enter the bare name `calm_guard` when configuring a rule's output. Its listeners use `relay:calm_guard` as the trigger. |
 
 ### Build your first rule
 
 1. In a new Stage, open **Blackboard** and add a local `bool` named `door_open` with a default of `false`.
-2. Add a Call named `open_door`. Add a rule and wire the Call to its trigger, or choose `open_door` in **Rule settings**.
+2. Add a Call named `open_door`. Add a rule and wire the Call to its trigger, or choose `open_door` in **Rule Settings**.
 3. Set **Forbids** to `door_open`. Add a `set_var` step with arguments `&"door_open"` and `true`, then save.
 4. From an interaction handler, send the Call to your initialized Stage.
 
@@ -93,13 +96,14 @@ Add a `show_node` or `move_to` step to make a scene prop respond. Step arguments
 | --- | --- |
 | **Requires** | Every listed guard must pass when the rule is considered. Bare keys use truthiness; numeric comparisons such as `score >= 10` work with `int` and `float` keys. |
 | **Forbids** | Any passing guard blocks the start. A comparison such as `heat < 2.5` can be forbidden just like a truthy key. |
-| **Cancel If** | Any passing guard cancels the run at a cancellation check, such as after a delay or awaited step. |
+| **Cancel If** | Any passing guard cancels the run at a cancellation check, including before the first step and after a delay or awaited step. |
 | **One-shot** | Latches when the rule starts. The latch survives reloads when your game reuses the `fired` dictionary. |
-| **Re-entry** | **Ignore** drops another trigger during a run. **Restart** keeps the newest payload and replaces the run at a cancellation check. **Queue** retains payloads in arrival order and rechecks guards before each run. One-shot rules use **Ignore**. |
+| **While running** | Sets the rule's re-entry policy. **Ignore** drops another trigger during a run. **Restart** keeps the newest eligible payload and replaces the run at a cancellation check. **Queue** retains eligible payloads in arrival order and rechecks guards before each run. One-shot rules use **Ignore**. |
+| **Expect shared-trigger overlap** | Suppresses the validation warning when this rule and another rule listening to the same event may both run. |
 
 ### Edit and rename authored data
 
-Use **Calls & relays** to manage connections. Renaming updates authored references. Update Call names in gameplay code and scene triggers separately. Blackboard renames preserve aliases for existing gameplay references.
+Use **Calls & relays** to manage connections. Renaming updates authored references. Update event IDs in gameplay code and scene triggers separately. Blackboard renames preserve aliases for existing gameplay references.
 
 Select a rule to edit its guards, steps, and relay. Rule renames preserve saved one-shot latches. Pass the current rule ID to `Stage.has_fired()`. Use the toolbar to save, reload, undo, or redo. Validation checks step expressions and surfaces issues such as relay cycles and overlapping guards.
 

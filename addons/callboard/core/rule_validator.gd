@@ -19,8 +19,8 @@ static func check(rules: Array[Rule], bb: Blackboard,
 			if s.emits != &"":
 				emitted["relay:" + s.emits] = true
 			for k in s.sets:
-				settable[k] = true
-				if not bb.schema.has(k):
+				settable[bb.resolve_key(k)] = true
+				if not bb.has(k):
 					problems.append("rule '%s' writes '%s' which is not declared on the Blackboard" % [r.id, k])
 	for r in rules:
 		if r.one_shot and r.reentry != Rule.ReentryPolicy.IGNORE:
@@ -28,7 +28,7 @@ static func check(rules: Array[Rule], bb: Blackboard,
 		if r.trigger == &"":
 			problems.append("rule '%s' has no trigger" % r.id)
 		elif not emitted.has(r.trigger) and not external_calls.has(r.trigger):
-			problems.append("rule '%s' listens to '%s' but nothing emits it and it is not a declared external Call" % [r.id, r.trigger])
+			problems.append("rule '%s' listens to '%s', which has no relay emitter or external declaration" % [r.id, r.trigger])
 		for guard in r.requires + r.forbids + r.cancel_if:
 			var parsed := GuardExpression.parse(String(guard))
 			if not parsed["ok"]:
@@ -46,7 +46,7 @@ static func check(rules: Array[Rule], bb: Blackboard,
 			if s.args.has(null):
 				problems.append("rule '%s' has a '%s' step with an unset prop" % [r.id, s.verb])
 		if r.steps.is_empty() and r.emits == &"":
-			problems.append("rule '%s' does nothing (no steps, no emit)" % r.id)
+			problems.append("rule '%s' has no steps or completion relay" % r.id)
 	for event in emitted:
 		if not rules.any(func(x: Rule) -> bool: return x.trigger == event):
 			problems.append("'%s' is emitted but no rule listens to it" % event)

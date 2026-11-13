@@ -41,10 +41,10 @@ var _save_button: Button
 var _reload_button: Button
 var _undo_button: Button
 var _redo_button: Button
-var _event_button: Button
-var _event_dialog := ConfirmationDialog.new()
-var _event_name := LineEdit.new()
-var _event_error := Label.new()
+var _create_call_button: Button
+var _call_dialog := ConfirmationDialog.new()
+var _call_name := LineEdit.new()
+var _call_error := Label.new()
 var _blackboard_button: Button
 var _connections_button: Button
 var _debug_button: Button
@@ -130,13 +130,13 @@ func _init() -> void:
 	_file_tools = _floating_toolbar(file_tools)
 
 	var create_tools := HBoxContainer.new()
-	_event_button = _button("+ Call", _open_event_dialog)
-	create_tools.add_child(_event_button)
+	_create_call_button = _button("+ Call", _open_call_dialog)
+	create_tools.add_child(_create_call_button)
 	create_tools.add_child(_button("+ Rule", add_rule))
 	create_tools.add_child(_button("+ Group", add_group))
 	_create_tools = _floating_toolbar(create_tools)
 
-	_setup_event_dialog()
+	_setup_call_dialog()
 	_setup_create_menu()
 
 	view.rule_selected.connect(_on_rule_selected)
@@ -461,7 +461,7 @@ func _update_status() -> void:
 	_save_button.disabled = not _editable or _path.is_empty()
 	_undo_button.disabled = not _editable or not _history.can_undo()
 	_redo_button.disabled = not _editable or not _history.can_redo()
-	_event_button.disabled = not _editable
+	_create_call_button.disabled = not _editable
 	_connections_button.disabled = false
 	var variable_count: int = _data["vars"].size()
 	var connection_count := RuleConnections.ids(_data).size()
@@ -586,7 +586,7 @@ func is_dirty() -> bool:
 	return _history.is_dirty()
 
 func _shortcut_input(event: InputEvent) -> void:
-	if not _editable or not is_visible_in_tree() or _event_dialog.visible or _delete_connection_dialog.visible or _create_menu.visible or _reload_dialog.visible:
+	if not _editable or not is_visible_in_tree() or _call_dialog.visible or _delete_connection_dialog.visible or _create_menu.visible or _reload_dialog.visible:
 		return
 	var focus := get_viewport().gui_get_focus_owner()
 	if focus and (not is_ancestor_of(focus) or focus is LineEdit or focus is TextEdit):
@@ -611,7 +611,7 @@ func _setup_create_menu() -> void:
 func _open_create_menu(pointer: Vector2) -> void:
 	if not _editable:
 		return
-	_context_menu.open_for(_data, view, pointer, _event_button.disabled,
+	_context_menu.open_for(_data, view, pointer, _create_call_button.disabled,
 		CreateAction.EVENT, CreateAction.RULE, CreateAction.GROUP,
 		ContextAction.EDIT, ContextAction.DUPLICATE, ContextAction.DELETE)
 
@@ -648,58 +648,57 @@ func _on_context_action(action: int) -> void:
 func _create_at_pointer(id: int) -> void:
 	match id:
 		CreateAction.EVENT:
-			_open_event_dialog()
+			_open_call_dialog()
 		CreateAction.RULE:
 			add_rule(_create_position)
 		CreateAction.GROUP:
 			add_group(_create_position)
 
-func _setup_event_dialog() -> void:
-	_event_dialog.title = "New Call"
-	_event_dialog.ok_button_text = "Create"
-	_event_dialog.dialog_hide_on_ok = false
+func _setup_call_dialog() -> void:
+	_call_dialog.title = "New Call"
+	_call_dialog.ok_button_text = "Create"
+	_call_dialog.dialog_hide_on_ok = false
 	var fields := VBoxContainer.new()
-	_event_name.placeholder_text = "Call ID"
-	fields.add_child(_event_name)
-	fields.add_child(_event_error)
-	_event_dialog.add_child(fields)
-	add_child(_event_dialog)
-	_event_dialog.confirmed.connect(_confirm_event)
-	_event_name.text_submitted.connect(func(_value: String) -> void: _confirm_event())
-	_event_name.text_changed.connect(func(_value: String) -> void: _event_error.text = "")
+	_call_name.placeholder_text = "Call ID"
+	fields.add_child(_call_name)
+	fields.add_child(_call_error)
+	_call_dialog.add_child(fields)
+	add_child(_call_dialog)
+	_call_dialog.confirmed.connect(_confirm_call)
+	_call_name.text_submitted.connect(func(_value: String) -> void: _confirm_call())
+	_call_name.text_changed.connect(func(_value: String) -> void: _call_error.text = "")
 
-func _open_event_dialog() -> void:
-	if _event_button.disabled:
+func _open_call_dialog() -> void:
+	if _create_call_button.disabled:
 		return
-	_event_name.clear()
-	_event_error.text = ""
-	_event_dialog.popup_centered(Vector2i(350, 110))
-	_event_name.grab_focus()
+	_call_name.clear()
+	_call_error.text = ""
+	_call_dialog.popup_centered(Vector2i(350, 110))
+	_call_name.grab_focus()
 
-func _confirm_event() -> void:
-	var event_id := _event_name.text.strip_edges()
-	if add_call_name(event_id):
-		_event_dialog.hide()
-	else:
-		_event_error.text = "Enter a Call ID." if event_id.is_empty() else "That Call already exists."
+func _confirm_call() -> void:
+	var call_id := _call_name.text.strip_edges()
+	_call_error.text = RuleConnections.new_call_error(_data, call_id)
+	if _call_error.text.is_empty() and add_call_name(call_id):
+		_call_dialog.hide()
 
-func add_call_name(event_id: String) -> bool:
-	event_id = event_id.strip_edges()
-	if not _editable or event_id.is_empty() or _data["external_calls"].has(event_id):
+func add_call_name(call_id: String) -> bool:
+	call_id = call_id.strip_edges()
+	if not _editable or not RuleConnections.new_call_error(_data, call_id).is_empty():
 		return false
-	_data["external_calls"].append(event_id)
+	_data["external_calls"].append(call_id)
 	_changed(_selected)
 	_on_rule_selected(_selected)
 	return true
 
 func _setup_connections_panel() -> void:
-	_connections_panel = _connections_ui.setup(self, _button("+ Call", _open_event_dialog),
+	_connections_panel = _connections_ui.setup(self, _button("+ Call", _open_call_dialog),
 		_layout_overlays, rename_connection, delete_connection, _show_connection_error, fire_live_call)
 
-func fire_live_call(event_id: String) -> void:
+func fire_live_call(call_id: String) -> void:
 	if _live == null or not is_instance_valid(_live) or _live.engine == null:
 		return
-	_live.fire(StringName(event_id))
+	_live.fire(StringName(call_id))
 
 func _refresh_connections(preferred := "") -> void:
 	_connections_ui.refresh(_data, _editable, preferred)

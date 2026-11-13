@@ -90,42 +90,42 @@ func _dispatch(r: Rule, event: StringName, ctx: Dictionary, gen: int) -> void:
 	if gen == _gen:
 		_active.erase(r)
 
-func _run(r: Rule, event: StringName, ctx: Dictionary, gen: int) -> void:
+func _run(rule: Rule, event: StringName, payload: Dictionary, generation: int) -> void:
 	# Non-blocking steps can outlive a successful run, so keep cancellation
 	# on the run itself even after the rule leaves the active table.
 	var run := {"cancelled": false}
-	_active[r]["run"] = run
-	if r.one_shot:
-		fired[r.latch_key()] = true
-	_emit_trace("rule_started", r.id, event)
-	rule_fired.emit(r.id, event)
-	if not alive(r, gen):
-		run["cancelled"] = true
-		run_cancelled.emit(r.id)
-		_emit_trace("rule_cancelled", r.id, event)
+	_active[rule]["run"] = run
+	if rule.one_shot:
+		fired[rule.latch_key()] = true
+	_emit_trace("rule_started", rule.id, event)
+	rule_fired.emit(rule.id, event)
+	if not alive(rule, generation):
+		_cancel_run(run, rule.id, event)
 		return
-	var c := ctx.merged({"_rule": r, "_run": run}, true)
-	for i in r.steps.size():
-		var s: Step = r.steps[i]
-		if s.delay > 0.0:
-			_emit_trace("delay_started", r.id, event, i, s, "%0.2fs" % s.delay)
-			await interruptible(wait_tracked(s.delay, r.id, "step delay"))
-			if not alive(r, gen):
-				run["cancelled"] = true
-				run_cancelled.emit(r.id)
-				_emit_trace("rule_cancelled", r.id, event, i, s)
+	var step_payload := payload.merged({"_rule": rule, "_run": run}, true)
+	for step_index in rule.steps.size():
+		var step := rule.steps[step_index]
+		if step.delay > 0.0:
+			_emit_trace("delay_started", rule.id, event, step_index, step, "%0.2fs" % step.delay)
+			await interruptible(wait_tracked(step.delay, rule.id, "step delay"))
+			if not alive(rule, generation):
+				_cancel_run(run, rule.id, event, step_index, step)
 				return
-		_emit_trace("step_started", r.id, event, i, s)
-		await s.fn.call(c)
-		if not alive(r, gen):
-			run["cancelled"] = true
-			run_cancelled.emit(r.id)
-			_emit_trace("rule_cancelled", r.id, event, i, s)
+		_emit_trace("step_started", rule.id, event, step_index, step)
+		await step.fn.call(step_payload)
+		if not alive(rule, generation):
+			_cancel_run(run, rule.id, event, step_index, step)
 			return
-		_emit_trace("step_completed", r.id, event, i, s)
-	if r.emits != &"":
-		fire("relay:" + r.emits, ctx)
-	_emit_trace("rule_completed", r.id, event)
+		_emit_trace("step_completed", rule.id, event, step_index, step)
+	if not rule.emits.is_empty():
+		fire("relay:" + rule.emits, payload)
+	_emit_trace("rule_completed", rule.id, event)
+
+func _cancel_run(run: Dictionary, rule_id: StringName, event: StringName,
+		step_index := -1, step: Step = null) -> void:
+	run["cancelled"] = true
+	run_cancelled.emit(rule_id)
+	_emit_trace("rule_cancelled", rule_id, event, step_index, step)
 
 ## Returns the engine's configured wait signal and publishes it to live diagnostics.
 func wait_tracked(seconds: float, rule_id: StringName, label: String) -> Signal:

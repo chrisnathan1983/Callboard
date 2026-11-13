@@ -90,7 +90,7 @@ func _test_authored_resource_graph() -> bool:
 	ok = _check("compact cards show emitted relay names beside the summary icons",
 		compact_relay_label != null and compact_relay_label.text == "calm_guard") and ok
 	ok = _check("compact mode keeps external Call nodes at their normal size and layout",
-		compact_call.title == "External Call" and compact_call.custom_minimum_size.x == 174.0
+		compact_call.title == "Call" and compact_call.custom_minimum_size.x == 174.0
 		and compact_call.get_child_count() == 1
 		and (compact_call.get_child(0) as Label).text == "deliver") and ok
 	gv.set_minimized(false)
@@ -137,8 +137,9 @@ func _test_board_editing() -> bool:
 	board.view._rule_nodes["z1_bark"].position_offset = Vector2(555, 77)
 
 	var nr: Dictionary = board.add_rule()
-	ok = _check("add rule: count increments, id unique, flagged as doing nothing",
-		d["rules"].size() == definition.rules.size() + 1 and d["notes"].any(func(p): return "'new_rule' does nothing" in p)) and ok
+	ok = _check("adding an empty rule creates a unique ID and reports its missing steps and relay",
+		d["rules"].size() == definition.rules.size() + 1
+		and d["notes"].any(func(note): return "'new_rule' has no steps or completion relay" in note)) and ok
 	ok = _check("card move synced into model", d["rules"][1]["pos"] == Vector2(555, 77)) and ok
 	nr["requires"] = ["guard_calmed"]
 	nr["steps"].append(VerbCatalog.new_step(d, "score"))
@@ -210,7 +211,10 @@ func _test_save_and_history() -> bool:
 	var d2: Dictionary = b2._data
 	ok = _check("adding an event creates a wireable event card",
 		b2.add_call_name("  doorbell  ") and b2.view._event_nodes.has("doorbell")) and ok
-	ok = _check("duplicate and blank event names rejected", not b2.add_call_name("doorbell") and not b2.add_call_name(" ")) and ok
+	ok = _check("invalid Call IDs are rejected without editing the graph",
+		not b2.add_call_name("doorbell") and not b2.add_call_name(" ")
+		and not b2.add_call_name("relay:doorbell") and not b2.add_call_name('door"bell')
+		and not b2.view._event_nodes.has("relay:doorbell")) and ok
 	b2._undo_button.pressed.emit()
 	ok = _check("undo event returns to clean state", not b2.view._event_nodes.has("doorbell") and not b2._dirty) and ok
 	b2._redo_button.pressed.emit()

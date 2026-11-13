@@ -1,21 +1,21 @@
 @tool
 class_name Rule extends RefCounted
-## "When <trigger> fires and the fire-time guards pass, run <steps>, then emit <emits>."
-## Plain properties, so a graph editor and a code generator can read and write them directly.
+## Runtime rule compiled from a RuleData resource. Runs its steps in order and
+## emits its completion relay when they finish.
 
 enum ReentryPolicy { IGNORE = 0, RESTART = 1, QUEUE = 2 }
 
 var id: StringName
-var state_key: StringName                 # optional stable key for the once latch
-var trigger: StringName                  # &"arrive", &"deliver", &"relay:calm_guard"
-var requires: Array[StringName] = []     # fire-time guard: keys that must be truthy
-var forbids: Array[StringName] = []      # fire-time guard: keys that must be falsy
-var cancel_if: Array[StringName] = []    # mid-flight guard: abort if any becomes truthy
-var one_shot := false                    # latched in Stage.fired on first run
+var state_key: StringName  # Stable storage key for the one-shot latch.
+var trigger: StringName  # Call ID or relay event ID, such as &"relay:calm_guard".
+var requires: Array[StringName] = []  # Every guard must pass before starting.
+var forbids: Array[StringName] = []  # Any passing guard blocks the start.
+var cancel_if: Array[StringName] = []  # Any passing guard cancels at a cancellation check.
+var one_shot := false  # Latches in Stage.fired on start.
 var reentry := ReentryPolicy.IGNORE
-var allow_overlap := false              # suppress shared-trigger overlap warnings
+var allow_overlap := false  # Suppresses shared-trigger overlap warnings.
 var steps: Array[Step] = []
-var emits: StringName = &""              # optional relay fired when all steps finish
+var emits: StringName = &""  # Bare completion relay name.
 
 func _init(p_id: StringName, p_trigger: StringName) -> void:
 	id = p_id
