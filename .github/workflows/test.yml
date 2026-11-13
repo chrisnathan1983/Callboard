@@ -64,9 +64,10 @@ jobs:
         if: matrix.suite.script == 'smoke.gd'
         run: |
           temp_project="$RUNNER_TEMP/callboard-runtime-check"
-          mkdir -p "$temp_project"
-          cp -R addons/callboard/core tests scripts stages game.tscn project.godot "$temp_project/"
-          rm -rf "$temp_project/addons/callboard/editor" "$temp_project/addons/callboard/model"
+          mkdir -p "$temp_project/addons/callboard" "$temp_project/tests"
+          cp -R addons/callboard/core "$temp_project/addons/callboard/"
+          cp -R scripts stages game.tscn project.godot "$temp_project/"
+          cp tests/smoke.gd tests/smoke.gd.uid "$temp_project/tests/"
           python3 - "$temp_project/project.godot" <<'PY'
           from pathlib import Path
           import sys

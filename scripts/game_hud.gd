@@ -1,6 +1,8 @@
 class_name GameHud extends CanvasLayer
 ## Runtime HUD and keyboard controls for the demo harness.
 
+const BOARD_SCRIPT_PATH := "res://addons/callboard/editor/callboard.gd"
+
 var manager: GameManager
 var hud: Label
 var board: Control
@@ -12,20 +14,19 @@ func _ready() -> void:
 	hud.add_theme_font_size_override("font_size", 15)
 	add_child(hud)
 
-	if OS.is_debug_build():
+	if not OS.is_debug_build() or not ResourceLoader.exists(BOARD_SCRIPT_PATH, "Script"):
+		return
+	var board_script := load(BOARD_SCRIPT_PATH) as Script
+	if board_script:
 		board_panel = PanelContainer.new()
 		board_panel.anchor_left = 0.0
 		board_panel.anchor_right = 1.0
 		board_panel.anchor_top = 0.42
 		board_panel.anchor_bottom = 1.0
 		board_panel.visible = false
-		var board_script := load("res://addons/callboard/editor/callboard.gd") as Script
-		if board_script:
-			board = board_script.new() as Control
-			board_panel.add_child(board)
-			add_child(board_panel)
-		else:
-			board_panel = null
+		board = board_script.new() as Control
+		board_panel.add_child(board)
+		add_child(board_panel)
 
 func bind_stage(stage: Stage) -> void:
 	if board:

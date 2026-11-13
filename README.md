@@ -29,13 +29,13 @@ Open [project.godot](project.godot) in Godot **4.7** and press **F5**. The plugi
 
 ```mermaid
 flowchart LR
-    offer["Offer decoy"] --> calm["Calm guard"]
-    treat["Release treat"] --> calm
-    calm --> off["Turn lamp off"]
-    call["Deliver at the doorway"] --> delivery{"Lamp on at delivery?"}
-    off -.->|Updates lamp state| delivery
-    delivery -->|Yes| caught["Stun player"]
-    delivery -->|No| reward["Award 200 points once"]
+	offer["Offer decoy"] --> calm["Calm guard"]
+	treat["Release treat"] --> calm
+	calm --> off["Turn lamp off"]
+	call["Deliver at the doorway"] --> delivery{"Lamp on at delivery?"}
+	off -.->|Updates lamp state| delivery
+	delivery -->|Yes| caught["Stun player"]
+	delivery -->|No| reward["Award 200 points once"]
 ```
 
 The two calming paths emit the same `calm_guard` relay. The two delivery rules share the `deliver` Call and use opposite checks on `lamp_on`.
@@ -70,8 +70,8 @@ A **Stage** is a `Node3D` scene with a **StageDefinition** resource. The resourc
 
 ```gdscript
 func on_door_interacted(stage: Stage) -> void:
-    stage.fire(&"open_door")
-    print(stage.get_var(&"door_open"))  # true
+	stage.fire(&"open_door")
+	print(stage.get_var(&"door_open"))  # true
 ```
 
 Add a `show_node` or `move_to` step to make a scene prop respond. Step arguments can reference typed Stage props and script constants. The API reference includes [a custom verb you can add to the picker](docs/api.md#custom-verbs).
@@ -107,13 +107,13 @@ To see a cancellation, start with a fresh Stage, wait for a guard tick, then off
 
 ```mermaid
 flowchart TD
-    editor["Callboard editor"] --> definition["StageDefinition resource"]
-    definition --> stage["Stage scene"]
-    gameplay["Gameplay scripts and triggers"] -->|Calls| stage
-    stage --> engine["RuleEngine"]
-    engine <-->|Guards and writes| bb["Blackboard"]
-    engine -->|Executes| steps["Verb steps"]
-    steps -->|Relays| engine
+	editor["Callboard editor"] --> definition["StageDefinition resource"]
+	definition --> stage["Stage scene"]
+	gameplay["Gameplay scripts and triggers"] -->|Calls| stage
+	stage --> engine["RuleEngine"]
+	engine <-->|Guards and writes| bb["Blackboard"]
+	engine -->|Executes| steps["Verb steps"]
+	steps -->|Relays| engine
 ```
 
 The editor writes a `.tres` file that the Stage compiles into runtime rules. The export plugin strips the editor and authoring model from release exports. The demo HUD loads the live board only in debug builds. See the [API reference](docs/api.md) for Stage lifecycle, persistence, signals, built-in verbs, and runtime diagnostics.

@@ -76,7 +76,7 @@ func _test_player_and_bump(stage: Stage, fired: Array[StringName]) -> bool:
 		player._reach.overlaps_area(nearest) and player._reach.overlaps_area(farther)
 		and player._reach.overlaps_area(enter_only)) and ok
 	var interact_key := InputEventKey.new()
-	interact_key.keycode = KEY_E
+	interact_key.physical_keycode = KEY_E
 	interact_key.pressed = true
 	player._unhandled_input(interact_key)
 	ok = _check("E interacts only with the nearest eligible area", interactions == [&"near"]) and ok

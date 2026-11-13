@@ -125,24 +125,26 @@ func _initialize() -> void:
 		latched_at_start and not latch_state["ran"] and not latch_engine.passes(latch_rule)) and ok
 
 	engine_bb.define(&"lamp_on", &"local", false)
-	var light_engine := RuleEngine.new(engine_bb, {}, fake_wait)
+	var light_timer := create_timer(2.0)
+	var light_engine := RuleEngine.new(engine_bb, {}, func(seconds: float) -> Signal:
+		return light_timer.timeout if seconds == 2.0 else clock_tick)
 	var light_factory := StagingVerbs.new(StepContext.new(engine_bb, light_engine, null, Callable()))
 	var light_rule := Rule.new(&"timed_light", &"light")
 	light_rule.cancel_if = [&"stop_latched"]
 	var light_node := Node3D.new()
+	light_node.hide()
 	var light_step := light_factory.light(light_node, true, 2.0, &"lamp_on")
 	light_rule.steps.append(light_step)
+	light_rule.steps.append(Step.new(func(_ctx: Dictionary) -> void: pass).after(1.0))
 	light_engine.rules.append(light_rule)
-	light_engine.fire(&"light")
-	var light_started := light_node.visible
 	engine_bb.write(&"stop_latched", false)
-	engine_bb.write(&"lamp_on", false)
 	light_engine.fire(&"light")
+	var light_started := light_node.visible and engine_bb.is_set(&"lamp_on")
 	engine_bb.write(&"stop_latched", true)
 	clock_tick.emit()
-	await process_frame
-	ok = _check("cancelled timed light cannot apply its delayed off change",
-		light_started and light_node.visible) and ok
+	ok = _check("rule cancellation switches the light and Blackboard key off before timeout",
+		light_started and not light_node.visible and not engine_bb.is_set(&"lamp_on")) and ok
+	light_timer.timeout.emit()
 	light_node.free()
 	wait_requests.clear()
 	var state := {"step_ran": false}
@@ -242,11 +244,18 @@ func _test_light_from_restarted_run() -> bool:
 	rule.steps.append(Step.new(func(_ctx: Dictionary) -> void: pass).after(1.0))
 	engine.rules.append(rule)
 	engine.fire(&"light", {"turn_on": true})
+	var light_started := lamp.visible and bb.is_set(&"lamp_on")
 	engine.fire(&"light", {"turn_on": false})
 	clock_tick.emit()
+	var ok := _check("restarting a rule turns off its timed light before the replacement skips light",
+		light_started and starts == [true, false] and not lamp.visible and not bb.is_set(&"lamp_on"))
+	var lamp_writes: Array[bool] = []
+	bb.changed.connect(func(key: StringName, value: Variant) -> void:
+		if key == &"lamp_on":
+			lamp_writes.append(value))
 	light_timer.timeout.emit()
-	var ok := _check("a restarted run invalidates its old light timeout even when the replacement skips light",
-		starts == [true, false] and lamp.visible and bb.is_set(&"lamp_on"))
+	ok = _check("the cancelled run's timeout does not write the light key again",
+		lamp_writes.is_empty()) and ok
 	clock_tick.emit()
 	lamp.free()
 	return ok
