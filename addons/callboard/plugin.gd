@@ -5,6 +5,7 @@ extends EditorPlugin
 
 const STAGES_DIR := "res://stages/"
 const MENU_ITEM := "Create New Stage..."
+const ExportPlugin := preload("res://addons/callboard/editor/export_plugin.gd")
 
 var board: Callboard
 var _opened := false
@@ -13,6 +14,7 @@ var _stage_line_edit: LineEdit
 var _stage_preview: Label
 var _stage_error: Label
 var _pending_navigate_path := ""
+var _export_plugin: EditorExportPlugin
 
 func _enter_tree() -> void:
 	board = Callboard.new()
@@ -22,6 +24,8 @@ func _enter_tree() -> void:
 	EditorInterface.get_editor_main_screen().add_child(board)
 	_make_visible(false)
 	add_tool_menu_item(MENU_ITEM, _on_create_stage_pressed)
+	_export_plugin = ExportPlugin.new()
+	add_export_plugin(_export_plugin)
 	_setup_dialog()
 
 func _exit_tree() -> void:
@@ -31,6 +35,9 @@ func _exit_tree() -> void:
 	if is_instance_valid(board):
 		board.queue_free()
 	remove_tool_menu_item(MENU_ITEM)
+	if _export_plugin:
+		remove_export_plugin(_export_plugin)
+		_export_plugin = null
 	if is_instance_valid(_stage_dialog):
 		_stage_dialog.queue_free()
 

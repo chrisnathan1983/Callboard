@@ -16,10 +16,14 @@ Priorities: **P1** correctness or things that block other work, **P2** worthwhil
 
 ## Data model and architecture
 
-- [ ] **P1: Replace dictionaries with typed resources.** Rules, steps, variables, and groups are untyped dictionaries with magic string keys. Introduce `RuleData`, `StepData`, `VariableData`, and `GroupData` resources for inspector support, cleaner `.tres` diffs, fewer runtime typos, and cheaper schema changes. Undo snapshots can keep using `duplicate(true)`. Preserve `StageDefinition.format_version` and `_migrate()` during the conversion.
-- [ ] **P2: Break the circular layering.** `core/` currently depends on `model/` (`StageDefinition` uses `step_text` and `VerbCatalog`), and the runtime HUD instantiates the editor's `Callboard`. Split the addon into runtime (`Stage`, `Blackboard`, `RuleEngine`, `Rule`, `Step`, verbs, definition) and editor (`Callboard`, graph view, inspector, plugin), so exports can strip editor code.
-- [ ] **P2: Make the F1 live overlay debug-only.** It is now guarded with `OS.is_debug_build()`; confirm editor addon code is excluded from release exports as part of the runtime/editor split.
-- [ ] **P2: Split `Callboard` (~900 lines).** Extract the undo/redo history, the connections panel, the context menu, and overlay layout into their own classes. History in particular can be unit tested in isolation.
+- [x] **P1: Replace dictionaries with typed resources.** Authored rules, steps, variables, and groups now serialize as `RuleData`, `StepData`, `VariableData`, and `GroupData`. `_migrate()` converts legacy dictionaries and advances `format_version` to 3; Callboard history continues to snapshot its edit dictionaries.
+- [x] **P2: Break the circular layering.** Runtime catalog and expression helpers now live in `core/`; authoring helpers remain in `model/` and `editor/`. The demo HUD uses a late-bound debug overlay, and the export plugin strips editor/model/plugin files from release builds.
+- [x] **P2: Make the F1 live overlay debug-only.** The HUD loads the live Callboard only in debug builds; the export filter excludes editor code from release exports.
+- [ ] **P2: Split `Callboard` (~900 lines).**
+  - [x] Extract undo/redo snapshot management into `CallboardHistory`.
+  - [ ] Extract the connections panel.
+  - [ ] Extract the context menu.
+  - [ ] Extract overlay layout.
 
 ## Runtime behavior
 
@@ -58,4 +62,4 @@ Priorities: **P1** correctness or things that block other work, **P2** worthwhil
 ## Docs
 
 - [x] **P2: Document runtime semantics in the README:** one-shot latching, cancellation, re-entry, and the relay/Call distinction.
-- [ ] **P3: Add an architecture section** (runtime vs. editor split, data flow from `.tres` to engine) once the layering work is done.
+- [x] **P3: Add an architecture section** describing the runtime/editor split and typed `.tres` data flow to the engine.

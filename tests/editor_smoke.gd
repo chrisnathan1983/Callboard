@@ -4,10 +4,12 @@ extends SceneTree
 const STAGE_PATH := "res://stages/stage_01/stage_01.gd"
 const DEFINITION_PATH := "res://stages/stage_01/stage_01.tres"
 const TMP_PATH := "res://.godot/stage_tmp.tres"
+const ExportFilter := preload("res://addons/callboard/editor/export_plugin.gd")
 
 func _initialize() -> void:
 	var ok := _test_factory()
 	ok = (await _test_scene_assigned_props()) and ok
+	ok = _test_layer_export_filter() and ok
 	ok = _test_rename_saved_state() and ok
 
 	# --- Authored resource ----------------------------------------------------------
@@ -17,7 +19,9 @@ func _initialize() -> void:
 	ok = _check("resource stores events, variables, rules and groups",
 		definition.external_calls.size() == 4 and definition.variables.size() == 3
 		and not definition.rules.is_empty() and definition.rules.size() == data["rules"].size()
-		and definition.groups.size() == 3) and ok
+		and definition.groups.size() == 3 and definition.variables[0] is VariableData
+		and definition.rules[0] is RuleData and definition.rules[0].steps[0] is StepData
+		and definition.groups[0] is GroupData) and ok
 	ok = _check("reader: compiles with no problems", data["compiles"] and data["notes"].is_empty()) and ok
 	ok = _check("reader: every rule has a saved position", data["rules"].all(func(r): return r["has_pos"])) and ok
 	ok = _check("reader: step text keeps source expressions", ExprText.step_text(data["rules"][1]["steps"][1]) == "light(lamp, true, 3.5).after(0.25)") and ok
@@ -75,7 +79,7 @@ func _initialize() -> void:
 	# Blackboard editing
 	board.blackboard._on_add(0)
 	ok = _check("add variable (bool, local)", d["vars"].size() == 4 and d["vars"][3]["key"] == "new_var" and d["vars"][3]["scope"] == "local") and ok
-	ok = _check("added variable is generated", RuleGraphReader.make_definition(d).variables[3]["default"] == false) and ok
+	ok = _check("added variable is generated", RuleGraphReader.make_definition(d).variables[3].default_value == false) and ok
 	AuthoredData.rename_key(d, "lamp_on", "alarm_on")
 	board._changed("")
 	ok = _check("rename key updates guards", _rule(d, "z1_caught")["requires"] == ["alarm_on"]) and ok
@@ -219,6 +223,14 @@ func _test_scene_assigned_props() -> bool:
 		instance.free()
 	return result
 
+func _test_layer_export_filter() -> bool:
+	return _check("release exports strip Callboard authoring scripts only",
+		ExportFilter.should_strip("res://addons/callboard/editor/callboard.gd", false)
+		and ExportFilter.should_strip("res://addons/callboard/model/rule_graph_reader.gd", false)
+		and ExportFilter.should_strip("res://addons/callboard/plugin.gd", false)
+		and not ExportFilter.should_strip("res://addons/callboard/core/stage.gd", false)
+		and not ExportFilter.should_strip("res://addons/callboard/editor/callboard.gd", true))
+
 func _test_canvas_actions() -> bool:
 	var board := Callboard.new()
 	root.add_child(board)
@@ -347,9 +359,9 @@ func _test_event_and_relay_edits() -> bool:
 	var reloaded := RuleGraphReader.inspect_definition(TMP_PATH)
 	var tick: Dictionary = _rule(reloaded, "z1_standoff")["steps"][0]
 	var saved: StageDefinition = reloaded["definition"]
-	ok = _check("save and reload preserve relay edits and rederive step metadata",
+	ok = _check("save and reload preserve typed data and rederive step metadata",
 		reloaded["compiles"] and tick["emits"] == "guard_tick" and tick["emit_arg"] == 1
-		and not saved.rules[0]["steps"][0].has("emit_arg")) and ok
+		and saved.rules[0] is RuleData and saved.rules[0].steps[0] is StepData) and ok
 
 	var affected := RuleConnections.impact(board._data, "relay:guard_tick")
 	ok = _check("relay deletion lists its emitting step and receiving trigger",
@@ -533,7 +545,7 @@ func _build_blackboard() -> void:
 	stage.engine.rules.clear()
 	stage.free()
 
-	spec["args"] = ["null", "MESSAGE"]
+	definition.rules[0].steps[0].args = PackedStringArray(["null", "MESSAGE"])
 	stage = definition.instantiate()
 	stage.build()
 	ok = _check("validator still reports null props with compiler-generated metadata",

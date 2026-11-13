@@ -11,15 +11,18 @@ func _initialize() -> void:
 		var legacy_stage := legacy_definition.instantiate()
 		if legacy_stage:
 			legacy_stage.build()
+			var legacy_rule := legacy_definition.rules[0] as RuleData
 			ok = _check("legacy resource fields and rule keys migrate cleanly",
 				legacy_definition.external_calls == PackedStringArray(["arrive", "deliver"])
-				and legacy_definition.rules[0]["one_shot"]
-				and not legacy_definition.rules[0].has("once")
-				and legacy_definition.rules[0].has_all(["emit", "state_key", "requires", "forbids", "cancel_if"])
+				and legacy_rule.one_shot
+				and legacy_rule.steps[0] is StepData
+				and legacy_rule.state_key == &"legacy_rule"
 				and legacy_definition.format_version == StageDefinition.CURRENT_FORMAT_VERSION
 				and legacy_stage.graph_errors.is_empty() and legacy_stage.check().is_empty()) and ok
 			legacy_stage.engine.rules.clear()
 			legacy_stage.free()
+		else:
+			ok = _check("legacy resource fixture builds after migration", false) and ok
 	else:
 		ok = _check("legacy resource fixture loads and migrates", false) and ok
 

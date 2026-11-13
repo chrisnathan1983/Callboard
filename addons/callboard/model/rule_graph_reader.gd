@@ -10,8 +10,9 @@ static func read(stage: Stage) -> Dictionary:
 		return {"error": "This stage has no StageDefinition assigned."}
 	var data := {
 		"path": definition.resource_path, "definition": definition,
-		"vars": definition.variables.duplicate(true),
-		"rules": definition.rules.duplicate(true), "groups": definition.groups.duplicate(true),
+		"vars": definition.variables.map(func(v: VariableData) -> Dictionary: return v.to_dictionary()),
+		"rules": definition.rules.map(func(r: RuleData) -> Dictionary: return r.to_dictionary()),
+		"groups": definition.groups.map(func(g: GroupData) -> Dictionary: return g.to_dictionary()),
 		"catalog": VerbCatalog.from_factory(stage.verbs), "props": VerbCatalog.props_of(stage),
 		"external_calls": Array(stage.external_calls).map(func(e): return String(e)),
 	}
@@ -41,14 +42,10 @@ static func make_definition(data: Dictionary) -> StageDefinition:
 	draft.set_meta("_analysis_scene_source", original.get_meta("_analysis_scene_source", original.resource_path))
 	draft.external_calls = PackedStringArray(data["external_calls"])
 	draft.external_vars = original.external_vars
-	draft.variables = data["vars"].duplicate(true)
-	draft.rules = data["rules"].duplicate(true)
-	draft.groups = data["groups"].duplicate(true)
-	for rule in draft.rules:
-		for step in rule["steps"]:
-			step.erase("emits")
-			step.erase("emit_arg")
-			step.erase("sets")
+	draft.variables = data["vars"].map(func(v: Dictionary) -> VariableData: return VariableData.from_dictionary(v))
+	draft.rules = data["rules"].map(func(r: Dictionary) -> RuleData: return RuleData.from_dictionary(r))
+	draft.groups = data["groups"].map(func(g: Dictionary) -> GroupData: return GroupData.from_dictionary(g))
+	draft._migrate()
 	return draft
 
 static func inspect_definition(path: String) -> Dictionary:

@@ -3,7 +3,7 @@ class_name GameHud extends CanvasLayer
 
 var manager: GameManager
 var hud: Label
-var board: Callboard
+var board: Control
 var board_panel: PanelContainer
 
 func _ready() -> void:
@@ -19,13 +19,17 @@ func _ready() -> void:
 		board_panel.anchor_top = 0.42
 		board_panel.anchor_bottom = 1.0
 		board_panel.visible = false
-		board = Callboard.new()
-		board_panel.add_child(board)
-		add_child(board_panel)
+		var board_script := load("res://addons/callboard/editor/callboard.gd") as Script
+		if board_script:
+			board = board_script.new() as Control
+			board_panel.add_child(board)
+			add_child(board_panel)
+		else:
+			board_panel = null
 
 func bind_stage(stage: Stage) -> void:
 	if board:
-		board.bind_live(stage)
+		board.call("bind_live", stage)
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:

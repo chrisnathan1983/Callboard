@@ -2,7 +2,7 @@
 class_name StageDefinition extends Resource
 ## Authored data shared by the runtime and the Callboard.
 
-const CURRENT_FORMAT_VERSION := 2
+const CURRENT_FORMAT_VERSION := 3
 static var _string_token_pattern: RegEx
 
 @export var stage_script: GDScript
@@ -14,7 +14,7 @@ var _rules: Array = []
 	get:
 		return _rules
 	set(value):
-		_rules = _normalize_rules(value)
+		_rules = value
 @export var groups: Array = []
 @export var format_version := 0
 
@@ -36,22 +36,35 @@ func _migrate() -> void:
 	if external_calls.is_empty():
 		external_calls = PackedStringArray(["arrive"])
 	_rules = _normalize_rules(_rules)
+	variables = _normalize_variables(variables)
+	groups = _normalize_groups(groups)
 	format_version = maxi(format_version, CURRENT_FORMAT_VERSION)
 
 static func _normalize_rules(source: Array) -> Array:
-	var normalized: Array = source
-	for entry in normalized:
-		if not entry is Dictionary:
-			continue
-		if not entry.has("one_shot"):
-			entry["one_shot"] = entry.get("once", false)
-		entry.erase("once")
-		entry["emit"] = entry.get("emit", "")
-		entry["state_key"] = entry.get("state_key", entry.get("id", ""))
-		entry["requires"] = entry.get("requires", [])
-		entry["forbids"] = entry.get("forbids", [])
-		entry["cancel_if"] = entry.get("cancel_if", [])
-		entry["allow_overlap"] = entry.get("allow_overlap", false)
+	var normalized: Array = []
+	for entry in source:
+		if entry is RuleData:
+			normalized.append(entry)
+		elif entry is Dictionary:
+			normalized.append(RuleData.from_dictionary(entry))
+	return normalized
+
+static func _normalize_variables(source: Array) -> Array:
+	var normalized: Array = []
+	for entry in source:
+		if entry is VariableData:
+			normalized.append(entry)
+		elif entry is Dictionary:
+			normalized.append(VariableData.from_dictionary(entry))
+	return normalized
+
+static func _normalize_groups(source: Array) -> Array:
+	var normalized: Array = []
+	for entry in source:
+		if entry is GroupData:
+			normalized.append(entry)
+		elif entry is Dictionary:
+			normalized.append(GroupData.from_dictionary(entry))
 	return normalized
 
 func instantiate() -> Stage:
@@ -90,35 +103,33 @@ func apply_blackboard(stage: Stage) -> void:
 	_migrate()
 	stage.external_calls.assign(external_calls)
 	stage.external_vars.assign(external_vars)
-	for variable in variables:
-		var key := StringName(variable["key"])
-		var state_key := StringName(variable.get("state_key", ""))
-		if variable["scope"] == "saved":
-			stage.define_saved(key, variable["default"], state_key)
+	for variable: VariableData in variables:
+		if variable.scope == "saved":
+			stage.define_saved(variable.key, variable.default_value, variable.state_key)
 		else:
-			stage.define_local(key, variable["default"], state_key)
+			stage.define_local(variable.key, variable.default_value, variable.state_key)
 
 func apply_graph(stage: Stage) -> Array[String]:
 	_migrate()
 	var problems: Array[String] = []
 	var built: Array[Rule] = []
-	var catalog := VerbCatalog.from_factory(stage.verbs)
+	var catalog := RuntimeVerbCatalog.from_factory(stage.verbs)
 	var inputs := {}
 	var script: Script = stage.get_script()
 	while script:
 		inputs.merge(script.get_script_constant_map())
 		script = script.get_base_script()
-	for prop in VerbCatalog.props_of(stage):
+	for prop in RuntimeVerbCatalog.props_of(stage):
 		inputs[prop["name"]] = stage.get(prop["name"])
-	for entry in rules:
-		var rule := Rule.new(StringName(entry["id"]), StringName(entry["trigger"]))
-		rule.state_key = StringName(entry.get("state_key", ""))
-		rule.requires.assign(entry["requires"])
-		rule.forbids.assign(entry["forbids"])
-		rule.cancel_if.assign(entry["cancel_if"])
-		rule.one_shot = entry["one_shot"]
-		rule.allow_overlap = entry["allow_overlap"]
-		var reentry: Variant = entry.get("reentry", Rule.ReentryPolicy.IGNORE)
+	for entry: RuleData in rules:
+		var rule := Rule.new(entry.id, entry.trigger)
+		rule.state_key = entry.state_key
+		rule.requires.assign(entry.requires)
+		rule.forbids.assign(entry.forbids)
+		rule.cancel_if.assign(entry.cancel_if)
+		rule.one_shot = entry.one_shot
+		rule.allow_overlap = entry.allow_overlap
+		var reentry: Variant = entry.reentry
 		if not (reentry is int and Rule.ReentryPolicy.values().has(reentry)):
 			problems.append("rule '%s' has an invalid re-entry policy: %s" % [rule.id, reentry])
 			continue
@@ -126,11 +137,11 @@ func apply_graph(stage: Stage) -> Array[String]:
 		if rule.one_shot and rule.reentry != Rule.ReentryPolicy.IGNORE:
 			problems.append("rule '%s' is one-shot and must use Ignore re-entry" % rule.id)
 			continue
-		rule.emits = StringName(entry["emit"])
-		for spec in entry["steps"]:
+		rule.emits = entry.emit
+		for spec: StepData in entry.steps:
 			var step := _build_step(stage.verbs, spec, catalog, inputs)
 			if step == null:
-				problems.append("rule '%s' has an invalid step: %s" % [rule.id, ExprText.step_text(spec)])
+				problems.append("rule '%s' has an invalid step: %s" % [rule.id, ExprText.step_text(spec.to_dictionary())])
 			else:
 				rule.steps.append(step)
 		built.append(rule)
@@ -138,12 +149,12 @@ func apply_graph(stage: Stage) -> Array[String]:
 		stage.engine.rules.append_array(built)
 	return problems
 
-func _build_step(factory: CoreVerbs, spec: Dictionary, catalog: Array, inputs: Dictionary) -> Step:
-	var verb: String = spec["verb"]
-	if VerbCatalog.find(catalog, verb).is_empty():
+func _build_step(factory: CoreVerbs, spec: StepData, catalog: Array, inputs: Dictionary) -> Step:
+	var verb := String(spec.verb)
+	if RuntimeVerbCatalog.find(catalog, verb).is_empty():
 		return null
-	var delay: String = spec.get("delay", "")
-	var source := "[[%s], %s]" % [", ".join(spec["args"]), delay if not delay.is_empty() else "0.0"]
+	var delay := spec.delay
+	var source := "[[%s], %s]" % [", ".join(spec.args), delay if not delay.is_empty() else "0.0"]
 	# Expression accepts the StringName constructor in place of GDScript's &"..." literals.
 	if _string_token_pattern == null:
 		_string_token_pattern = RegEx.create_from_string('(&?)("(?:[^"\\\\]|\\\\.)*")')

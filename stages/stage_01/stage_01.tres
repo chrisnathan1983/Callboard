@@ -1,186 +1,230 @@
 [gd_resource type="Resource" script_class="StageDefinition" format=3 uid="uid://0uk26v3bjmdh"]
 
-[ext_resource type="Script" uid="uid://2ni1lurvrvvs" path="res://addons/callboard/core/stage_definition.gd" id="1_6haco"]
-[ext_resource type="Script" uid="uid://erywf5nq7fp6" path="res://stages/stage_01/stage_01.gd" id="2_nih50"]
+[ext_resource type="Script" path="res://addons/callboard/core/group_data.gd" id="1_1e1bh"]
+[ext_resource type="Script" path="res://addons/callboard/core/stage_definition.gd" id="1_6haco"]
+[ext_resource type="Script" path="res://stages/stage_01/stage_01.gd" id="2_nih50"]
+[ext_resource type="Script" path="res://addons/callboard/core/rule_data.gd" id="2_sw6iv"]
+[ext_resource type="Script" path="res://addons/callboard/core/step_data.gd" id="3_udjpu"]
+[ext_resource type="Script" path="res://addons/callboard/core/variable_data.gd" id="6_orrc7"]
+
+[sub_resource type="Resource" id="Resource_vfx20"]
+script = ExtResource("1_1e1bh")
+name = "Guard Standoff"
+rect = Rect2(40, 20, 628, 324)
+
+[sub_resource type="Resource" id="Resource_i1ktp"]
+script = ExtResource("1_1e1bh")
+name = "Calming Paths"
+rect = Rect2(40, 360, 628, 470)
+
+[sub_resource type="Resource" id="Resource_flrfs"]
+script = ExtResource("1_1e1bh")
+name = "Delivery"
+rect = Rect2(960, 39, 344, 567)
+
+[sub_resource type="Resource" id="Resource_aufdn"]
+script = ExtResource("3_udjpu")
+verb = &"repeat_emit"
+args = PackedStringArray("3.5", "&\"standoff_tick\"")
+
+[sub_resource type="Resource" id="Resource_psjj3"]
+script = ExtResource("2_sw6iv")
+id = &"z1_standoff"
+trigger = &"arrive"
+requires = PackedStringArray()
+forbids = PackedStringArray("guard_calmed")
+cancel_if = PackedStringArray("guard_calmed")
+state_key = &"z1_standoff"
+steps = Array[ExtResource("3_udjpu")]([SubResource("Resource_aufdn")])
+group = "Guard Standoff"
+pos = Vector2(80, 70)
+has_pos = true
+
+[sub_resource type="Resource" id="Resource_nbgaa"]
+script = ExtResource("3_udjpu")
+verb = &"say"
+args = PackedStringArray("guard", "\"WOOF!\"")
+
+[sub_resource type="Resource" id="Resource_mvmhf"]
+script = ExtResource("3_udjpu")
+verb = &"light"
+args = PackedStringArray("lamp", "true", "3.5")
+delay = "0.25"
+
+[sub_resource type="Resource" id="Resource_cb21q"]
+script = ExtResource("2_sw6iv")
+id = &"z1_bark"
+trigger = &"relay:standoff_tick"
+requires = PackedStringArray()
+forbids = PackedStringArray("guard_calmed")
+cancel_if = PackedStringArray("guard_calmed")
+state_key = &"z1_bark"
+steps = Array[ExtResource("3_udjpu")]([SubResource("Resource_nbgaa"), SubResource("Resource_mvmhf")])
+group = "Guard Standoff"
+pos = Vector2(380, 80)
+has_pos = true
+
+[sub_resource type="Resource" id="Resource_u48eb"]
+script = ExtResource("3_udjpu")
+verb = &"show_node"
+args = PackedStringArray("treat")
+delay = "0.2"
+
+[sub_resource type="Resource" id="Resource_1j7w5"]
+script = ExtResource("3_udjpu")
+verb = &"pop"
+args = PackedStringArray("treat")
+
+[sub_resource type="Resource" id="Resource_kjgy8"]
+script = ExtResource("2_sw6iv")
+id = &"z1_treat"
+trigger = &"relay:treat_out"
+requires = PackedStringArray()
+forbids = PackedStringArray()
+cancel_if = PackedStringArray()
+emit = &"calm_guard"
+state_key = &"z1_treat"
+steps = Array[ExtResource("3_udjpu")]([SubResource("Resource_u48eb"), SubResource("Resource_1j7w5")])
+group = "Calming Paths"
+pos = Vector2(80, 410)
+has_pos = true
+
+[sub_resource type="Resource" id="Resource_3bcfj"]
+script = ExtResource("3_udjpu")
+verb = &"show_node"
+args = PackedStringArray("decoy")
+
+[sub_resource type="Resource" id="Resource_qhhos"]
+script = ExtResource("3_udjpu")
+verb = &"score"
+args = PackedStringArray("100")
+
+[sub_resource type="Resource" id="Resource_otopj"]
+script = ExtResource("2_sw6iv")
+id = &"z1_decoy"
+trigger = &"offer:decoy"
+requires = PackedStringArray()
+forbids = PackedStringArray("guard_calmed")
+cancel_if = PackedStringArray()
+emit = &"calm_guard"
+state_key = &"z1_decoy"
+steps = Array[ExtResource("3_udjpu")]([SubResource("Resource_3bcfj"), SubResource("Resource_qhhos")])
+group = "Calming Paths"
+pos = Vector2(80, 600)
+has_pos = true
+
+[sub_resource type="Resource" id="Resource_v1rt1"]
+script = ExtResource("3_udjpu")
+verb = &"set_var"
+args = PackedStringArray("&\"guard_calmed\"", "true")
+
+[sub_resource type="Resource" id="Resource_lx6rc"]
+script = ExtResource("3_udjpu")
+verb = &"light"
+args = PackedStringArray("lamp", "false")
+delay = "0.4"
+
+[sub_resource type="Resource" id="Resource_34swd"]
+script = ExtResource("3_udjpu")
+verb = &"say"
+args = PackedStringArray("guard", "\"zzz...\"", "1.5")
+
+[sub_resource type="Resource" id="Resource_2r6fl"]
+script = ExtResource("3_udjpu")
+verb = &"move_to"
+args = PackedStringArray("guard", "shelter", "GUARD_REST_OFFSET")
+
+[sub_resource type="Resource" id="Resource_7ytkh"]
+script = ExtResource("2_sw6iv")
+id = &"z1_calm"
+trigger = &"relay:calm_guard"
+requires = PackedStringArray()
+forbids = PackedStringArray("guard_calmed")
+cancel_if = PackedStringArray()
+one_shot = true
+state_key = &"z1_calm"
+steps = Array[ExtResource("3_udjpu")]([SubResource("Resource_v1rt1"), SubResource("Resource_lx6rc"), SubResource("Resource_34swd"), SubResource("Resource_2r6fl")])
+group = "Calming Paths"
+pos = Vector2(380, 450)
+has_pos = true
+
+[sub_resource type="Resource" id="Resource_7q5td"]
+script = ExtResource("3_udjpu")
+verb = &"stun_player"
+args = PackedStringArray("1.5")
+
+[sub_resource type="Resource" id="Resource_nxwam"]
+script = ExtResource("3_udjpu")
+verb = &"flash"
+args = PackedStringArray("window")
+
+[sub_resource type="Resource" id="Resource_m7mg4"]
+script = ExtResource("2_sw6iv")
+id = &"z1_caught"
+trigger = &"deliver"
+requires = PackedStringArray("lamp_on")
+forbids = PackedStringArray()
+cancel_if = PackedStringArray()
+state_key = &"z1_caught"
+steps = Array[ExtResource("3_udjpu")]([SubResource("Resource_7q5td"), SubResource("Resource_nxwam")])
+group = "Delivery"
+pos = Vector2(1000, 80)
+has_pos = true
+
+[sub_resource type="Resource" id="Resource_wee1b"]
+script = ExtResource("3_udjpu")
+verb = &"show_node"
+args = PackedStringArray("reward")
+
+[sub_resource type="Resource" id="Resource_8wti7"]
+script = ExtResource("3_udjpu")
+verb = &"jump"
+args = PackedStringArray("window")
+
+[sub_resource type="Resource" id="Resource_rnncq"]
+script = ExtResource("3_udjpu")
+verb = &"score"
+args = PackedStringArray("200")
+
+[sub_resource type="Resource" id="Resource_ia7o4"]
+script = ExtResource("2_sw6iv")
+id = &"z1_delivered"
+trigger = &"deliver"
+requires = PackedStringArray()
+forbids = PackedStringArray("lamp_on")
+cancel_if = PackedStringArray()
+one_shot = true
+state_key = &"z1_delivered"
+steps = Array[ExtResource("3_udjpu")]([SubResource("Resource_wee1b"), SubResource("Resource_8wti7"), SubResource("Resource_rnncq")])
+group = "Delivery"
+pos = Vector2(1000, 300)
+has_pos = true
+
+[sub_resource type="Resource" id="Resource_i23g0"]
+script = ExtResource("6_orrc7")
+key = &"guard_calmed"
+scope = "saved"
+note = "survives unloads"
+state_key = &"guard_calmed"
+
+[sub_resource type="Resource" id="Resource_0mpv0"]
+script = ExtResource("6_orrc7")
+key = &"lamp_on"
+note = "resets on unload"
+state_key = &"lamp_on"
+
+[sub_resource type="Resource" id="Resource_a1q52"]
+script = ExtResource("6_orrc7")
+key = &"treat_out"
+note = "latched by the BumpProp prefab"
+state_key = &"treat_out"
 
 [resource]
 script = ExtResource("1_6haco")
 stage_script = ExtResource("2_nih50")
-format_version = 2
 external_calls = PackedStringArray("arrive", "deliver", "offer:decoy", "relay:treat_out")
 external_vars = PackedStringArray("treat_out")
-variables = [{
-"default": false,
-"key": "guard_calmed",
-"note": "survives unloads",
-"scope": "saved"
-}, {
-"default": false,
-"key": "lamp_on",
-"note": "resets on unload",
-"scope": "local"
-}, {
-"default": false,
-"key": "treat_out",
-"note": "latched by the BumpProp prefab",
-"scope": "local"
-}]
-rules = [{
-"cancel_if": ["guard_calmed"],
-"emit": "",
-"forbids": ["guard_calmed"],
-"group": "Guard Standoff",
-"has_pos": true,
-"id": "z1_standoff",
-"one_shot": false,
-"pos": Vector2(80, 70),
-"requires": [],
-"steps": [{
-"args": ["3.5", "&\"standoff_tick\""],
-"delay": "",
-"verb": "repeat_emit"
-}],
-"trigger": "arrive"
-}, {
-"cancel_if": ["guard_calmed"],
-"emit": "",
-"forbids": ["guard_calmed"],
-"group": "Guard Standoff",
-"has_pos": true,
-"id": "z1_bark",
-"one_shot": false,
-"pos": Vector2(380, 80),
-"requires": [],
-"steps": [{
-"args": ["guard", "\"WOOF!\""],
-"delay": "",
-"verb": "say"
-}, {
-"args": ["lamp", "true", "3.5"],
-"delay": "0.25",
-"verb": "light"
-}],
-"trigger": "relay:standoff_tick"
-}, {
-"cancel_if": [],
-"emit": "calm_guard",
-"forbids": [],
-"group": "Calming Paths",
-"has_pos": true,
-"id": "z1_treat",
-"one_shot": false,
-"pos": Vector2(80, 410),
-"requires": [],
-"steps": [{
-"args": ["treat"],
-"delay": "0.2",
-"verb": "show_node"
-}, {
-"args": ["treat"],
-"delay": "",
-"verb": "pop"
-}],
-"trigger": "relay:treat_out"
-}, {
-"cancel_if": [],
-"emit": "calm_guard",
-"forbids": ["guard_calmed"],
-"group": "Calming Paths",
-"has_pos": true,
-"id": "z1_decoy",
-"one_shot": false,
-"pos": Vector2(80, 600),
-"requires": [],
-"steps": [{
-"args": ["decoy"],
-"delay": "",
-"verb": "show_node"
-}, {
-"args": ["100"],
-"delay": "",
-"verb": "score"
-}],
-"trigger": "offer:decoy"
-}, {
-"cancel_if": [],
-"emit": "",
-"forbids": ["guard_calmed"],
-"group": "Calming Paths",
-"has_pos": true,
-"id": "z1_calm",
-"one_shot": true,
-"pos": Vector2(380, 450),
-"requires": [],
-"steps": [{
-"args": ["&\"guard_calmed\"", "true"],
-"delay": "",
-"verb": "set_var"
-}, {
-"args": ["lamp", "false"],
-"delay": "0.4",
-"verb": "light"
-}, {
-"args": ["guard", "\"zzz...\"", "1.5"],
-"delay": "",
-"verb": "say"
-}, {
-"args": ["guard", "shelter", "GUARD_REST_OFFSET"],
-"delay": "",
-"verb": "move_to"
-}],
-"trigger": "relay:calm_guard"
-}, {
-"cancel_if": [],
-"emit": "",
-"forbids": [],
-"group": "Delivery",
-"has_pos": true,
-"id": "z1_caught",
-"one_shot": false,
-"pos": Vector2(1000, 80),
-"requires": ["lamp_on"],
-"steps": [{
-"args": ["1.5"],
-"delay": "",
-"verb": "stun_player"
-}, {
-"args": ["window"],
-"delay": "",
-"verb": "flash"
-}],
-"trigger": "deliver"
-}, {
-"cancel_if": [],
-"emit": "",
-"forbids": ["lamp_on"],
-"group": "Delivery",
-"has_pos": true,
-"id": "z1_delivered",
-"one_shot": true,
-"pos": Vector2(1000, 300),
-"requires": [],
-"steps": [{
-"args": ["reward"],
-"delay": "",
-"verb": "show_node"
-}, {
-"args": ["window"],
-"delay": "",
-"verb": "jump"
-}, {
-"args": ["200"],
-"delay": "",
-"verb": "score"
-}],
-"trigger": "deliver"
-}]
-groups = [{
-"name": "Guard Standoff",
-"rect": Rect2(40, 20, 628, 324)
-}, {
-"name": "Calming Paths",
-"rect": Rect2(40, 360, 628, 470)
-}, {
-"name": "Delivery",
-"rect": Rect2(960, 39, 344, 567)
-}]
+variables = [SubResource("Resource_i23g0"), SubResource("Resource_0mpv0"), SubResource("Resource_a1q52")]
+rules = [SubResource("Resource_psjj3"), SubResource("Resource_cb21q"), SubResource("Resource_kjgy8"), SubResource("Resource_otopj"), SubResource("Resource_7ytkh"), SubResource("Resource_m7mg4"), SubResource("Resource_ia7o4")]
+groups = [SubResource("Resource_vfx20"), SubResource("Resource_i1ktp"), SubResource("Resource_flrfs")]
+format_version = 3

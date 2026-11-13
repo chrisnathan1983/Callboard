@@ -30,6 +30,12 @@ The **Callboard** tab is enabled in the Godot editor. Use it to edit a Stage def
 - Undo and redo are available from the toolbar and **Ctrl/Cmd+Z**, **Ctrl/Cmd+Shift+Z**, or **Ctrl/Cmd+Y**. A held numeric field creates one undo entry per gesture.
 - Create a Stage with **Project > Tools > Create New Stage...**.
 
+Stage definitions store rules, steps, Blackboard variables, and graph groups as typed Resources. Existing dictionary-based `.tres` files are converted by `StageDefinition._migrate()` and retain their saved state keys; the current format version is 3.
+
+## Runtime and editor boundary
+
+`addons/callboard/core/` contains runtime resources and execution code. The Callboard UI and graph-authoring helpers live under `editor/` and `model/`; the editor plugin registers an export filter that removes those files from release exports while retaining them in debug exports. The sample HUD late-loads the live Callboard only in debug builds. Stage definitions compile through the runtime-safe `RuntimeVerbCatalog` and do not depend on editor authoring code.
+
 ## Glossary
 
 | Term | Meaning |

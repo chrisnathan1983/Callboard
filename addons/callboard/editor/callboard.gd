@@ -8,7 +8,6 @@ class_name Callboard extends Control
 signal layout_saved(path: String)
 
 const STAGES_DIR := "res://stages"
-const HISTORY_LIMIT := 100
 const EDIT_FIELDS := ["external_calls", "vars", "rules", "groups"]
 const Style := preload("res://addons/callboard/editor/board_style.gd")
 const GUTTER := 12.0
@@ -18,6 +17,7 @@ enum ContextAction { EDIT = 10, DUPLICATE, DELETE }
 var view := RuleGraphView.new()
 var blackboard := BlackboardPanel.new()
 var inspector := RuleInspector.new()
+var _history := CallboardHistory.new()
 var _picker := OptionButton.new()
 var _status := Label.new()
 var _status_note_cursor := 0
@@ -47,14 +47,9 @@ var _connection_cards := {}
 var _expanded_connections := {}
 var _delete_connection_dialog := ConfirmationDialog.new()
 var _pending_connection_delete := ""
-var _undo_stack: Array[Dictionary] = []
-var _redo_stack: Array[Dictionary] = []
-var _current_edit := {}
-var _saved_edit := {}
 var _restoring := false
 var _spin_drag_active := false
 var _spin_refresh_pending := false
-var _last_spin_edit := 0
 var _selecting_after_edit := false
 var _reveal_pending := false
 var _file_tools: PanelContainer
@@ -368,8 +363,8 @@ func _show(data: Dictionary, editable: bool) -> void:
 
 func _update_status() -> void:
 	_save_button.disabled = not _editable or _path.is_empty()
-	_undo_button.disabled = not _editable or _undo_stack.is_empty()
-	_redo_button.disabled = not _editable or _redo_stack.is_empty()
+	_undo_button.disabled = not _editable or not _history.can_undo()
+	_redo_button.disabled = not _editable or not _history.can_redo()
 	_event_button.disabled = not _editable
 	_connections_button.disabled = not _editable
 	var variable_count: int = _data["vars"].size()
@@ -416,31 +411,15 @@ func _snapshot() -> Dictionary:
 	return state
 
 func _reset_history() -> void:
-	_last_spin_edit = 0
-	_undo_stack.clear()
-	_redo_stack.clear()
 	if _editable:
 		_sync_layout()
-	_current_edit = _snapshot()
-	_saved_edit = _current_edit
+	_history.reset(_snapshot())
 	_dirty = false
+	_update_status()
 
 func _record_edit(spin: SpinBox = null) -> void:
 	var spin_id := spin.get_instance_id() if spin and _spin_drag_active else 0
-	var state := _snapshot()
-	if state != _current_edit:
-		if spin_id == 0 or spin_id != _last_spin_edit:
-			_undo_stack.append(_current_edit)
-			if _undo_stack.size() > HISTORY_LIMIT:
-				_undo_stack.pop_front()
-		elif not _undo_stack.is_empty() and _undo_stack.back() == state:
-			# Returning to the starting value during a drag is a no-op.
-			_undo_stack.pop_back()
-			spin_id = 0
-		_redo_stack.clear()
-		_current_edit = state
-	_last_spin_edit = spin_id
-	_dirty = _current_edit != _saved_edit
+	_dirty = _history.record(_snapshot(), spin_id)
 	_update_status()
 
 func _layout_changed() -> void:
@@ -449,19 +428,16 @@ func _layout_changed() -> void:
 		_record_edit()
 
 func undo() -> void:
-	if not _editable or _undo_stack.is_empty():
+	if not _editable or not _history.can_undo():
 		return
-	_redo_stack.append(_current_edit)
-	_restore_edit(_undo_stack.pop_back())
+	_restore_edit(_history.undo(_snapshot()))
 
 func redo() -> void:
-	if not _editable or _redo_stack.is_empty():
+	if not _editable or not _history.can_redo():
 		return
-	_undo_stack.append(_current_edit)
-	_restore_edit(_redo_stack.pop_back())
+	_restore_edit(_history.redo(_snapshot()))
 
 func _restore_edit(state: Dictionary) -> void:
-	_last_spin_edit = 0
 	_restoring = true
 	# Release the old inspector controls before swapping in new model dictionaries.
 	inspector.clear()
@@ -478,13 +454,12 @@ func _restore_edit(state: Dictionary) -> void:
 	else:
 		_clear_selection()
 	_restoring = false
-	_current_edit = state
-	_dirty = state != _saved_edit
+	_history.restore(state)
+	_dirty = _history.is_dirty()
 	_update_status()
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
-		_last_spin_edit = 0
 		if event.button_index == MOUSE_BUTTON_LEFT:
 			_spin_drag_active = event.pressed
 			if not event.pressed and _spin_refresh_pending:
@@ -494,7 +469,7 @@ func _input(event: InputEvent) -> void:
 				_reveal_selected_rule.call_deferred()
 
 func is_dirty() -> bool:
-	return _dirty
+	return _history.is_dirty()
 
 func _shortcut_input(event: InputEvent) -> void:
 	if not _editable or not is_visible_in_tree() or _event_dialog.visible or _delete_connection_dialog.visible or _create_menu.visible:
@@ -962,7 +937,7 @@ func save() -> void:
 		return
 	_data["definition"] = draft
 	_record_edit()
-	_saved_edit = _current_edit
+	_history.mark_saved(_snapshot())
 	_dirty = false
 	_update_status()
 	_status.text = "Saved %s.  %s" % [_path.get_file(), _status.text]
