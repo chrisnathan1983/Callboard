@@ -94,6 +94,18 @@ func _test_player_and_bump(stage: Stage, fired: Array[StringName]) -> bool:
 	ok = _check("overlapping stuns keep the longest remaining duration and block interaction",
 		player.stunned and player._stun_timer == timer and timer.time_left == 5.0
 		and interactions.size() == 1) and ok
+	var stage_wait := stage._wait(0.05)
+	var stage_timer := stage_wait.get_object() as SceneTreeTimer
+	var stage_timeouts: Array[bool] = []
+	stage_wait.connect(func() -> void: stage_timeouts.append(true))
+	paused = true
+	await create_timer(0.1).timeout
+	ok = _check("stage waits and player stuns freeze while the tree is paused",
+		is_equal_approx(stage_timer.time_left, 0.05) and is_equal_approx(timer.time_left, 5.0)
+		and stage_timeouts.is_empty() and player.stunned) and ok
+	paused = false
+	await create_timer(0.1).timeout
+	ok = _check("stage waits resume when the tree unpauses", stage_timeouts == [true]) and ok
 	timer.time_left = 0.0
 	await timer.timeout
 	ok = _check("the stun ends when its extended timer expires", not player.stunned) and ok

@@ -33,6 +33,10 @@ func unload_stage() -> void:
 
 Call `load_stage()` from a parent already in the scene tree. Keep a pair of dictionaries per Stage if your game loads several Stages. Both dictionaries are shared by reference. Serialize and restore them in your save system if they should survive a game restart. See the [demo manager](../scripts/game_manager.gd) for signal wiring and reload behavior.
 
+Preserve Variant types when saving these dictionaries. For example, use `var_to_str()` and `str_to_var()`. JSON reads numbers as floats, so a JSON save layer needs to restore declared integer values to `int` before assigning `saved_vars`.
+
+When `SceneTree.paused` is true, rule delays, repeat ticks, timed lights, and the demo player's stun timer stop counting down. They resume with their remaining time when the tree unpauses. Staging tweens follow the host node's pause behavior. A direct `fire()` call still dispatches rules while paused.
+
 | Method | Contract |
 | --- | --- |
 | `activate() -> void` | Fires `arrive` after setup. Graph compilation errors block activation. Each call can dispatch `arrive` again. |
@@ -50,7 +54,7 @@ Call `load_stage()` from a parent already in the scene tree. Keep a pair of dict
 | Signal | When it fires |
 | --- | --- |
 | `rule_fired(rule_id: StringName, event: StringName)` | A rule starts, or `fire_relay_once()` reports the supplied source. |
-| `var_changed(key: StringName, value: Variant)` | An accepted Blackboard write. The key uses its current name. |
+| `var_changed(key: StringName, value: Variant)` | An accepted write that changes the stored Blackboard value. The key uses its current name. |
 | `scored(points: int)` | A scoring step emits a score delta. The game owns the total. |
 
 ### Stage hooks

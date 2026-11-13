@@ -73,7 +73,7 @@ func stun(seconds: float) -> void:
 		return
 	stunned = true
 	_mat.albedo_color = Color(0.5, 0.5, 0.9)
-	_stun_timer = get_tree().create_timer(seconds)
+	_stun_timer = get_tree().create_timer(seconds, false)
 	_stun_timer.timeout.connect(_end_stun)
 
 func _end_stun() -> void:

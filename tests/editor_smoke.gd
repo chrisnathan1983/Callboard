@@ -10,6 +10,7 @@ func _initialize() -> void:
 	var ok := _test_authored_resource_graph()
 	ok = _test_board_editing() and ok
 	ok = _test_save_and_history() and ok
+	ok = (await _test_debounced_history()) and ok
 	ok = (await _test_numeric_undo()) and ok
 	ok = (await _test_event_and_relay_edits()) and ok
 	ok = (await _test_canvas_actions()) and ok
@@ -232,6 +233,44 @@ func _test_save_and_history() -> bool:
 
 	return ok
 
+
+func _test_debounced_history() -> bool:
+	var definition := load(DEFINITION_PATH) as StageDefinition
+	if not _check("debounce fixture saved", ResourceSaver.save(definition, TMP_PATH) == OK):
+		return false
+	var board := Callboard.new()
+	board._debounce_edits = true
+	root.add_child(board)
+	await process_frame
+	board.open_script(TMP_PATH)
+	var id := "z1_standoff"
+	var step: Dictionary = _rule(board._data, id)["steps"][0]
+	step["args"][1] = '&"updated_tick"'
+	board.inspector.changed.emit(id)
+	var ok := _check("scheduled edit records immediately and defers analysis",
+		board.is_dirty() and step["emits"] == "standoff_tick" and not board._analysis_debounce.is_stopped())
+	await create_timer(0.15).timeout
+	ok = _check("debounced analysis updates relay metadata", step["emits"] == "updated_tick") and ok
+	board.undo()
+	step = _rule(board._data, id)["steps"][0]
+	ok = _check("one undo restores the authored relay and its metadata",
+		step["args"][1] == '&"standoff_tick"' and step["emits"] == "standoff_tick"
+		and not board.is_dirty() and not board._history.can_undo()) and ok
+	board.redo()
+	step = _rule(board._data, id)["steps"][0]
+	ok = _check("one redo reapplies the authored relay and its metadata",
+		step["args"][1] == '&"updated_tick"' and step["emits"] == "updated_tick") and ok
+
+	var previous_card: GraphNode = board.view._rule_nodes[id]
+	step["args"][1] = '&"standoff_tick"'
+	board.inspector.changed.emit(id)
+	board.save()
+	ok = _check("saving during debounce refreshes the changed graph card",
+		board._analysis_debounce.is_stopped() and step["emits"] == "standoff_tick"
+		and board.view._rule_nodes[id] != previous_card and not board.is_dirty()) and ok
+	board.free()
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(TMP_PATH))
+	return ok
 
 func _test_scene_assigned_props() -> bool:
 	var definition := StageDefinition.new()
@@ -485,7 +524,10 @@ func _test_rename_saved_state() -> bool:
 	board._data["vars"].back()["scope"] = "saved"
 	var reused_stage := RuleGraphReader.make_definition(board._data).instantiate()
 	reused_stage.saved_vars = {&"guard_calmed": true}
+	reused_stage.fired = {&"z1_delivered": true}
 	reused_stage.build()
+	ok = _check("has_fired checks each current rule's own latch after an ID is reused",
+		reused_stage.has_fired(&"parcel_delivered") and not reused_stage.has_fired(&"z1_delivered")) and ok
 	ok = _check("a new saved variable can reuse the old name with its own default",
 		reused_stage.get_var(&"guard_relaxed") == true and reused_stage.get_var(&"guard_calmed") == false) and ok
 	reused_stage.free()

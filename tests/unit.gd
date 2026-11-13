@@ -39,6 +39,7 @@ func _initialize() -> void:
 			speed_changes.append(value))
 	bb.define(&"speed", &"saved", 0.0)
 	bb.write(&"speed", 1)
+	bb.write(&"speed", 1.0)
 	ok = _check("integer writes to float Blackboard keys store and emit a float",
 		typeof(bb.saved[&"speed"]) == TYPE_FLOAT and bb.saved[&"speed"] == 1.0
 		and speed_changes.size() == 1 and typeof(speed_changes[0]) == TYPE_FLOAT) and ok

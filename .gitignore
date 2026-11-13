@@ -1,5 +1,6 @@
 # Godot editor cache (includes export credentials)
 /.godot/
+/.codex/
 
 # Local editor temporary files and backups
 *.tmp

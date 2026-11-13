@@ -44,10 +44,13 @@ func write(key: StringName, value: Variant) -> void:
 	if typeof(value) != entry["type"]:
 		push_warning("Blackboard write to '%s' rejected: expected type %d, got %d." % [key, entry["type"], typeof(value)])
 		return
-	if entry.get("scope") == &"saved":
-		saved[entry["state_key"]] = value
-	else:
-		local[key] = value
+	var is_saved: bool = entry["scope"] == &"saved"
+	var values := saved if is_saved else local
+	var storage_key: StringName = entry["state_key"] if is_saved else key
+	var previous: Variant = values.get(storage_key)
+	if values.has(storage_key) and typeof(previous) == typeof(value) and previous == value:
+		return
+	values[storage_key] = value
 	changed.emit(key, value)
 
 ## Let gameplay code using an original saved name continue to access a renamed key.

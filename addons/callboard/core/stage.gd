@@ -89,7 +89,7 @@ func _exit_tree() -> void:
 		deactivate()
 
 func _wait(seconds: float) -> Signal:
-	return get_tree().create_timer(seconds).timeout
+	return get_tree().create_timer(seconds, false).timeout
 
 func define_saved(key: StringName, default_val: Variant = false, state_key: StringName = &"") -> void:
 	bb.define(key, &"saved", default_val, state_key)
@@ -109,7 +109,7 @@ func is_set(key: StringName) -> bool:
 func has_fired(rule_id: StringName) -> bool:
 	for rule: Rule in engine.rules:
 		if rule.id == rule_id:
-			return fired.has(rule.latch_key()) or fired.has(rule.id)
+			return fired.has(rule.latch_key())
 	return fired.has(rule_id)
 
 func fire(event: StringName, ctx := {}) -> void:

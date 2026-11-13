@@ -32,6 +32,7 @@ var _live: Stage
 var _analysis_stage: Stage
 var _analysis_source_key := ""
 var _analysis_debounce := Timer.new()
+var _debounce_edits := Engine.is_editor_hint()
 var _pending_selection := ""
 var _accum := 0.0
 var _save_button: Button
@@ -450,6 +451,12 @@ func _snapshot() -> Dictionary:
 	var state := {}
 	for field in EDIT_FIELDS:
 		state[field] = _data[field].duplicate(true)
+	# Analysis rebuilds this metadata from the authored step arguments.
+	for rule in state["rules"]:
+		for step in rule["steps"]:
+			step.erase("emits")
+			step.erase("emit_arg")
+			step.erase("sets")
 	return state
 
 func _reset_history() -> void:
@@ -707,7 +714,7 @@ func _changed(select_id: String, spin: SpinBox = null) -> void:
 func _schedule_change(select_id: String) -> void:
 	if not _editable or _restoring:
 		return
-	if not Engine.is_editor_hint():
+	if not _debounce_edits:
 		_changed(select_id)
 		return
 	_sync_layout()
@@ -836,8 +843,11 @@ func _all_relays() -> Array:
 func save() -> void:
 	if not _editable or _path == "":
 		return
-	_sync_layout()
-	_analyze_data()
+	if not _analysis_debounce.is_stopped():
+		_flush_debounced_change()
+	else:
+		_sync_layout()
+		_analyze_data()
 	if not _data["compiles"]:
 		_status.text = "Not saved: check invalid steps or script errors."
 		Style.tint(_status, Style.WARNING)
