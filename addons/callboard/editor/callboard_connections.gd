@@ -49,7 +49,7 @@ func setup(parent: Node, create_call_button: Button, layout_changed: Callable,
 func clear_expanded() -> void:
 	expanded.clear()
 
-func refresh(data: Dictionary, editable: bool, preferred := "") -> void:
+func refresh(data: GraphDraft, editable: bool, preferred := "") -> void:
 	for card in rows.get_children():
 		rows.remove_child(card)
 		card.queue_free()
@@ -69,7 +69,7 @@ func refresh(data: Dictionary, editable: bool, preferred := "") -> void:
 	if cards.has(preferred):
 		_reveal.call_deferred(preferred)
 
-func confirm_delete(data: Dictionary, editable: bool, id: String) -> void:
+func confirm_delete(data: GraphDraft, editable: bool, id: String) -> void:
 	if not editable or not RuleConnections.edit_error(data, id).is_empty():
 		return
 	_pending_delete = id
@@ -88,7 +88,7 @@ func _reveal(id: String) -> void:
 	if card != null and panel.is_visible_in_tree():
 		_scroll.ensure_control_visible(card)
 
-func _make_card(data: Dictionary, editable: bool, id: String) -> PanelContainer:
+func _make_card(data: GraphDraft, editable: bool, id: String) -> PanelContainer:
 	var card := VBoxContainer.new()
 	card.add_theme_constant_override("separation", 6)
 	var is_relay := id.begins_with(RuleConnections.RELAY_PREFIX)
@@ -133,7 +133,7 @@ func _make_card(data: Dictionary, editable: bool, id: String) -> PanelContainer:
 	var details_text := "\n".join(affected) if not affected.is_empty() else "No rule connections."
 	if id == "arrive":
 		details_text += "\n\nThe Stage lifecycle fires this built-in Call."
-	elif data["external_calls"].has(id):
+	elif data.external_calls.has(id):
 		details_text += "\n\nUpdate any gameplay code or scene triggers that fire this ID."
 	var details := Style.label(details_text, Style.TEXT, 13)
 	details.name = "ConnectionDetails"

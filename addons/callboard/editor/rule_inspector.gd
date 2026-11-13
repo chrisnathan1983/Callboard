@@ -17,9 +17,9 @@ signal content_size_changed
 const Style := preload("res://addons/callboard/editor/board_style.gd")
 const GuardExpression := preload("res://addons/callboard/core/guard_expression.gd")
 
-var _data: Dictionary
-var _rule: Dictionary
-var _group: Dictionary
+var _data: GraphDraft
+var _rule: RuleData
+var _group: GroupData
 var _read_only := false
 var _box := VBoxContainer.new()
 
@@ -40,36 +40,36 @@ func content_height() -> float:
 
 func clear() -> void:
 	_clear()
-	_rule = {}
-	_group = {}
+	_rule = null
+	_group = null
 
-func show_rule(rule: Dictionary, data: Dictionary, read_only := false) -> void:
+func show_rule(rule: RuleData, data: GraphDraft, read_only := false) -> void:
 	if not is_same(_rule, rule):
 		scroll_vertical = 0
 	_rule = rule
-	_group = {}
+	_group = null
 	_data = data
 	_read_only = read_only
 	_build_rule()
 
-func show_group(group: Dictionary, data: Dictionary, read_only := false) -> void:
+func show_group(group: GroupData, data: GraphDraft, read_only := false) -> void:
 	if not is_same(_group, group):
 		scroll_vertical = 0
 	_group = group
-	_rule = {}
+	_rule = null
 	_data = data
 	_read_only = read_only
 	_clear()
 	_title("Group")
 	var name_edit := LineEdit.new()
-	name_edit.text = group["name"]
+	name_edit.text = group.name
 	var apply := func(_t := "") -> void: _rename_group(name_edit)
 	name_edit.text_submitted.connect(apply)
 	name_edit.focus_exited.connect(apply)
 	_box.add_child(name_edit)
 	var del := Button.new()
 	del.text = "Delete group (keeps its rules)"
-	del.pressed.connect(func() -> void: group_delete_requested.emit(group["name"]))
+	del.pressed.connect(func() -> void: group_delete_requested.emit(group.name))
 	_box.add_child(del)
 	if read_only:
 		_lock(_box)
@@ -85,23 +85,17 @@ func _rebuild_later() -> void:
 # --- Rule form --------------------------------------------------------------------
 
 func _build_rule() -> void:
-	if _rule.is_empty():
+	if _rule == null:
 		return
 	_clear()
 	var r := _rule
-	var rule_notes: Array = _data.get("notes", []).filter(func(note: String) -> bool:
-		return ("'%s'" % r["id"]) in note)
-	if not rule_notes.is_empty():
-		_box.add_child(Style.label("Notes", Style.WARNING, 13))
-		for note in rule_notes:
-			var note_label := Style.label(note, Style.WARNING, 13)
-			note_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-			_box.add_child(note_label)
-	_line("ID", r["id"], func(t: String) -> void: _set_id(t))
+	_add_diagnostics(_data.errors_for(r), "Errors", Style.ERROR)
+	_add_diagnostics(_data.warnings_for(r), "Warnings", Style.WARNING)
+	_line("ID", r.id, func(t: String) -> void: _set_id(t))
 
 	var trig := HBoxContainer.new()
 	var trig_edit := LineEdit.new()
-	trig_edit.text = r["trigger"]
+	trig_edit.text = r.trigger
 	trig_edit.tooltip_text = trig_edit.text
 	trig_edit.placeholder_text = "trigger"
 	trig_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -133,16 +127,16 @@ func _build_rule() -> void:
 	var one_shot := CheckBox.new()
 	one_shot.text = "One-shot"
 	one_shot.tooltip_text = "Latch when the rule starts. Reuse the Stage's fired dictionary to preserve the latch across loads."
-	one_shot.button_pressed = r[AuthoredData.FIELD_ONE_SHOT]
+	one_shot.button_pressed = r.one_shot
 	one_shot.toggled.connect(func(on: bool) -> void:
-		r[AuthoredData.FIELD_ONE_SHOT] = on
-		if on and r.get(AuthoredData.FIELD_REENTRY, Rule.ReentryPolicy.IGNORE) != Rule.ReentryPolicy.IGNORE:
-			r[AuthoredData.FIELD_REENTRY] = Rule.ReentryPolicy.IGNORE
+		r.one_shot = on
+		if on and r.reentry != Rule.ReentryPolicy.IGNORE:
+			r.reentry = Rule.ReentryPolicy.IGNORE
 			policy.select(policy.get_item_index(Rule.ReentryPolicy.IGNORE))
 		for incompatible_policy in [Rule.ReentryPolicy.RESTART, Rule.ReentryPolicy.QUEUE]:
 			policy.get_popup().set_item_disabled(
 				policy.get_item_index(incompatible_policy), on)
-		changed.emit(r["id"]))
+		changed.emit(r.id))
 	_box.add_child(one_shot)
 
 	var reentry := HBoxContainer.new()
@@ -157,30 +151,30 @@ func _build_rule() -> void:
 	menu.set_item_tooltip(1, "Stop at the next cancellation check and use the latest trigger. Unavailable for one-shot rules.")
 	menu.set_item_tooltip(2, "Run pending triggers in order once the active run ends. Unavailable for one-shot rules.")
 	for incompatible_policy in [Rule.ReentryPolicy.RESTART, Rule.ReentryPolicy.QUEUE]:
-		menu.set_item_disabled(policy.get_item_index(incompatible_policy), bool(r.get(AuthoredData.FIELD_ONE_SHOT, false)))
-	if bool(r.get(AuthoredData.FIELD_ONE_SHOT, false)) and r.get(AuthoredData.FIELD_REENTRY, Rule.ReentryPolicy.IGNORE) != Rule.ReentryPolicy.IGNORE:
-		r[AuthoredData.FIELD_REENTRY] = Rule.ReentryPolicy.IGNORE
-	policy.select(policy.get_item_index(r.get(AuthoredData.FIELD_REENTRY, Rule.ReentryPolicy.IGNORE)))
+		menu.set_item_disabled(policy.get_item_index(incompatible_policy), r.one_shot)
+	if r.one_shot and r.reentry != Rule.ReentryPolicy.IGNORE:
+		r.reentry = Rule.ReentryPolicy.IGNORE
+	policy.select(policy.get_item_index(r.reentry))
 	policy.item_selected.connect(func(i: int) -> void:
-		if bool(r.get(AuthoredData.FIELD_ONE_SHOT, false)) and policy.get_item_id(i) != Rule.ReentryPolicy.IGNORE:
+		if r.one_shot and policy.get_item_id(i) != Rule.ReentryPolicy.IGNORE:
 			policy.select(policy.get_item_index(Rule.ReentryPolicy.IGNORE))
 			return
-		r[AuthoredData.FIELD_REENTRY] = policy.get_item_id(i)
-		changed.emit(r["id"]))
+		r.reentry = policy.get_item_id(i)
+		changed.emit(r.id))
 	reentry.add_child(policy)
 	_box.add_child(reentry)
 	var overlap := CheckBox.new()
 	overlap.text = "Expect shared-trigger overlap"
 	overlap.tooltip_text = "Suppress shared-trigger overlap warnings for this rule. Use when concurrent runs are intentional."
-	overlap.button_pressed = bool(r.get(AuthoredData.FIELD_ALLOW_OVERLAP, false))
+	overlap.button_pressed = r.allow_overlap
 	overlap.toggled.connect(func(on: bool) -> void:
-		r[AuthoredData.FIELD_ALLOW_OVERLAP] = on
-		changed.emit(r["id"]))
+		r.allow_overlap = on
+		changed.emit(r.id))
 	_box.add_child(overlap)
 
-	_line("Emits relay", r["emit"], func(t: String) -> void:
-		r["emit"] = t
-		changed.emit(r["id"]))
+	_line("Emits relay", r.emit, func(t: String) -> void:
+		r.emit = t
+		changed.emit(r.id))
 
 	var grp := HBoxContainer.new()
 	grp.add_child(_name_label("Group"))
@@ -190,45 +184,54 @@ func _build_rule() -> void:
 	ob.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	ob.add_item("(none)")
 	var sel := 0
-	for i in _data["groups"].size():
-		ob.add_item(_data["groups"][i]["name"])
-		if _data["groups"][i]["name"] == r["group"]:
+	for i in _data.groups.size():
+		ob.add_item(_data.groups[i].name)
+		if _data.groups[i].name == r.group:
 			sel = i + 1
 	ob.select(sel)
 	ob.item_selected.connect(func(i: int) -> void:
-		r["group"] = "" if i == 0 else _data["groups"][i - 1]["name"]
-		changed.emit(r["id"]))
+		r.group = "" if i == 0 else _data.groups[i - 1].name
+		changed.emit(r.id))
 	grp.add_child(ob)
 	_box.add_child(grp)
 
 	_title("Steps")
-	for i in r["steps"].size():
+	for i in r.steps.size():
 		_box.add_child(_step_panel(i))
 	var add := MenuButton.new()
 	add.text = "+ Add step"
 	add.flat = false
-	var verbs: Array = _data["catalog"].map(func(v: Dictionary) -> String: return v["name"])
+	var verbs: Array = _data.catalog.map(func(v: Dictionary) -> String: return v["name"])
 	for v in verbs:
 		add.get_popup().add_item(v)
 	add.get_popup().index_pressed.connect(func(i: int) -> void:
-		r["steps"].append(VerbCatalog.new_step(_data, verbs[i]))
-		changed.emit(r["id"])
+		r.steps.append(VerbCatalog.new_step(_data, verbs[i]))
+		changed.emit(r.id)
 		_rebuild_later())
 	_box.add_child(add)
 
 	var buttons := HBoxContainer.new()
 	var dup := Button.new()
 	dup.text = "Duplicate"
-	dup.pressed.connect(func() -> void: duplicate_requested.emit(r["id"]))
+	dup.pressed.connect(func() -> void: duplicate_requested.emit(r.id))
 	buttons.add_child(dup)
 	var del := Button.new()
 	del.text = "Delete rule"
-	del.pressed.connect(func() -> void: delete_requested.emit(r["id"]))
+	del.pressed.connect(func() -> void: delete_requested.emit(r.id))
 	buttons.add_child(del)
 	_box.add_child(buttons)
 
 	if _read_only:
 		_lock(_box)
+
+func _add_diagnostics(messages: Array[String], heading: String, color: Color) -> void:
+	if messages.is_empty():
+		return
+	_box.add_child(Style.label(heading, color, 13))
+	for message in messages:
+		var label := Style.label(message, color, 12)
+		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		_box.add_child(label)
 
 func _title(text: String) -> void:
 	_box.add_child(Style.label(text, Style.EVENT, 13))
@@ -257,26 +260,27 @@ func _line(label: String, value: String, on_commit: Callable) -> void:
 	_box.add_child(row)
 
 func _set_id(t: String) -> void:
-	if t == _rule["id"]:
+	if t == _rule.id:
 		return
 	if t == "" or AuthoredData.rule_ids(_data).has(t) or not t.is_valid_identifier():
 		_rebuild_later()   # reject: restore the old text
 		return
-	_rule[AuthoredData.FIELD_STATE_KEY] = _rule.get(AuthoredData.FIELD_STATE_KEY, _rule["id"])
-	_rule["id"] = t
+	if _rule.state_key.is_empty():
+		_rule.state_key = _rule.id
+	_rule.id = t
 	changed.emit(t)
 
 func _set_trigger(t: String) -> void:
-	if t == _rule["trigger"]:
+	if t == _rule.trigger:
 		return
-	_rule["trigger"] = t
-	changed.emit(_rule["id"])
+	_rule.trigger = t
+	changed.emit(_rule.id)
 
 ## Declared external events plus every relay some rule emits.
 func _trigger_options() -> Array:
-	var out: Array = _data["external_calls"].duplicate()
-	for rd in _data["rules"]:
-		for relay in RuleGraphView.output_relays(rd):
+	var out := _data.external_calls.duplicate()
+	for rd in _data.rules:
+		for relay in RuleGraphView.output_relays(rd, _data):
 			if relay != "" and not out.has("relay:" + relay):
 				out.append("relay:" + relay)
 	return out
@@ -288,25 +292,31 @@ func _guard_menu(field: String) -> Control:
 	mb.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	var popup := mb.get_popup()
 	popup.hide_on_checkable_item_selection = false
-	var keys: Array = _data["vars"].map(func(v: Dictionary) -> String: return v["key"])
-	for k in _rule[field]:   # keep dangling keys visible so they can be unchecked
+	var keys: Array = _data.variables.map(func(v: VariableData) -> String: return String(v.key))
+	var initial_guards: PackedStringArray = _rule.get(field)
+	for k in initial_guards:   # keep dangling keys visible so they can be unchecked
 		if not keys.has(k):
 			keys.append(k)
 	var refresh_text := func() -> void:
-		mb.text = "%s: %s" % [field.capitalize(), ", ".join(_rule[field]) if not _rule[field].is_empty() else "None"]
+		var guards: PackedStringArray = _rule.get(field)
+		mb.text = "%s: %s" % [field.capitalize(), ", ".join(guards) if not guards.is_empty() else "None"]
 		mb.tooltip_text = mb.text
 	for i in keys.size():
 		popup.add_check_item(keys[i])
-		popup.set_item_checked(i, _rule[field].has(keys[i]))
+		popup.set_item_checked(i, initial_guards.has(keys[i]))
 	popup.index_pressed.connect(func(i: int) -> void:
+		var guards: PackedStringArray = _rule.get(field)
 		var on := not popup.is_item_checked(i)
 		popup.set_item_checked(i, on)
-		if on and not _rule[field].has(keys[i]):
-			_rule[field].append(keys[i])
+		if on and not guards.has(keys[i]):
+			guards.append(keys[i])
 		elif not on:
-			_rule[field].erase(keys[i])
+			var index := guards.find(keys[i])
+			if index >= 0:
+				guards.remove_at(index)
+		_rule.set(field, guards)
 		refresh_text.call()
-		changed.emit(_rule["id"]))
+		changed.emit(_rule.id))
 	refresh_text.call()
 	var section := VBoxContainer.new()
 	section.add_child(mb)
@@ -325,24 +335,26 @@ func _guard_menu(field: String) -> Control:
 		if not parsed["ok"] or not parsed["comparison"]:
 			comparison_edit.tooltip_text = "Enter a comparison such as score >= 10."
 			return
-		var variable: Dictionary = {}
-		for item in _data["vars"]:
-			if item["key"] == String(parsed["key"]):
+		var variable: VariableData
+		for item in _data.variables:
+			if item.key == String(parsed["key"]):
 				variable = item
 				break
-		if variable.is_empty() or typeof(variable["default"]) not in [TYPE_INT, TYPE_FLOAT]:
+		if variable == null or typeof(variable.default_value) not in [TYPE_INT, TYPE_FLOAT]:
 			comparison_edit.tooltip_text = "Comparisons require a declared int or float Blackboard key."
 			return
 		var expression := "%s %s %s" % [parsed["key"], parsed["operator"], parsed["literal"]]
-		if not _rule[field].has(expression):
-			_rule[field].append(expression)
+		var guards: PackedStringArray = _rule.get(field)
+		if not guards.has(expression):
+			guards.append(expression)
+			_rule.set(field, guards)
 			keys.append(expression)
 			popup.add_check_item(expression)
 			popup.set_item_checked(keys.size() - 1, true)
 		refresh_text.call()
 		comparison_edit.clear()
 		comparison_edit.tooltip_text = "Add an int/float comparison; operators: >, >=, <, <=, ==, !="
-		changed.emit(_rule["id"]))
+		changed.emit(_rule.id))
 	comparison_row.add_child(add_comparison)
 	section.add_child(comparison_row)
 	return section
@@ -350,8 +362,8 @@ func _guard_menu(field: String) -> Control:
 # --- Steps ------------------------------------------------------------------------
 
 func _step_panel(idx: int) -> Control:
-	var step: Dictionary = _rule["steps"][idx]
-	var verb := VerbCatalog.find(_data["catalog"], step["verb"])
+	var step: StepData = _rule.steps[idx]
+	var verb := VerbCatalog.find(_data.catalog, step.verb)
 	var params: Array = verb.get("args", [])
 	var vb := VBoxContainer.new()
 	vb.add_theme_constant_override("separation", 6)
@@ -361,20 +373,20 @@ func _step_panel(idx: int) -> Control:
 	var num := Style.label("%02d" % (idx + 1), Style.EVENT, 12)
 	head.add_child(num)
 	var ob := OptionButton.new()
-	var names: Array = _data["catalog"].map(func(v: Dictionary) -> String: return v["name"])
-	if not names.has(step["verb"]):
-		names.append(step["verb"])
+	var names: Array = _data.catalog.map(func(v: Dictionary) -> String: return v["name"])
+	if not names.has(step.verb):
+		names.append(step.verb)
 	for n in names:
 		ob.add_item(n)
-	ob.select(names.find(step["verb"]))
+	ob.select(names.find(step.verb))
 	ob.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	ob.fit_to_longest_item = false
 	ob.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	ob.item_selected.connect(func(i: int) -> void:
 		var fresh := VerbCatalog.new_step(_data, names[i])
-		step["verb"] = fresh["verb"]
-		step["args"] = fresh["args"]
-		changed.emit(_rule["id"])
+		step.verb = fresh.verb
+		step.args = fresh.args
+		changed.emit(_rule.id)
 		_rebuild_later())
 	head.add_child(ob)
 	for offset in [-1, 1]:
@@ -382,12 +394,12 @@ func _step_panel(idx: int) -> Control:
 		Style.button_icon(b, &"MoveUp" if offset < 0 else &"MoveDown", "↑" if offset < 0 else "↓")
 		b.tooltip_text = "Move step up" if offset < 0 else "Move step down"
 		b.accessibility_name = b.tooltip_text
-		b.disabled = idx + offset < 0 or idx + offset >= _rule["steps"].size()
+		b.disabled = idx + offset < 0 or idx + offset >= _rule.steps.size()
 		b.pressed.connect(func() -> void:
-			var steps: Array = _rule["steps"]
+			var steps: Array = _rule.steps
 			steps.remove_at(idx)
 			steps.insert(idx + offset, step)
-			changed.emit(_rule["id"])
+			changed.emit(_rule.id)
 			_rebuild_later())
 		head.add_child(b)
 	var rm := Button.new()
@@ -395,8 +407,8 @@ func _step_panel(idx: int) -> Control:
 	rm.tooltip_text = "Remove step"
 	rm.accessibility_name = rm.tooltip_text
 	rm.pressed.connect(func() -> void:
-		_rule["steps"].remove_at(idx)
-		changed.emit(_rule["id"])
+		_rule.steps.remove_at(idx)
+		changed.emit(_rule.id)
 		_rebuild_later())
 	head.add_child(rm)
 	vb.add_child(head)
@@ -415,35 +427,35 @@ func _step_panel(idx: int) -> Control:
 	sp.min_value = 0.0
 	sp.max_value = 60.0
 	sp.step = 0.05
-	sp.value = step["delay"].to_float()
+	sp.value = step.delay.to_float()
 	sp.value_changed.connect(func(v: float) -> void:
-		step["delay"] = "" if v <= 0.0 else str(snappedf(v, 0.01))
-		numeric_changed.emit(_rule["id"], sp))
+		step.delay = "" if v <= 0.0 else str(snappedf(v, 0.01))
+		numeric_changed.emit(_rule.id, sp))
 	delay_row.add_child(sp)
 	vb.add_child(delay_row)
 	return panel
 
-func _current(step: Dictionary, i: int, param: Dictionary) -> String:
-	if i < step["args"].size():
-		return step["args"][i]
+func _current(step: StepData, i: int, param: Dictionary) -> String:
+	if i < step.args.size():
+		return step.args[i]
 	return param["default"] if param["default"] != "" else VerbCatalog.fallback(param, _data)
 
 ## Writes `expr` into argument i, filling any skipped earlier optional arguments with defaults.
-func _set_arg(step: Dictionary, i: int, expr: String, spin: SpinBox = null) -> void:
+func _set_arg(step: StepData, i: int, expr: String, spin: SpinBox = null) -> void:
 	VerbCatalog.set_arg(_data, step, i, expr)
 	if spin:
-		numeric_changed.emit(_rule["id"], spin)
+		numeric_changed.emit(_rule.id, spin)
 	else:
-		changed.emit(_rule["id"])
+		changed.emit(_rule.id)
 
-func _arg_widget(step: Dictionary, i: int, param: Dictionary) -> Control:
+func _arg_widget(step: StepData, i: int, param: Dictionary) -> Control:
 	var cur := _current(step, i, param)
 	var lit := ExprText.parse_literal(cur)
 	match param["type"]:
 		TYPE_OBJECT:
 			var ob := OptionButton.new()
 			var names: Array = []
-			for p in _data["props"]:
+			for p in _data.props:
 				if VerbCatalog.prop_fits(p["class"], param["class"]):
 					names.append(p["name"])
 			if not names.has(cur):
@@ -476,7 +488,7 @@ func _arg_widget(step: Dictionary, i: int, param: Dictionary) -> Control:
 		TYPE_STRING_NAME:
 			if param["name"] == "key":
 				var ob := OptionButton.new()
-				var keys: Array = _data["vars"].map(func(v: Dictionary) -> String: return v["key"])
+				var keys: Array = _data.variables.map(func(v: VariableData) -> String: return String(v.key))
 				var cur_key: String = String(lit["value"]) if lit["ok"] else ""
 				if not keys.has(cur_key):
 					keys.append(cur_key)
@@ -501,7 +513,7 @@ func _arg_widget(step: Dictionary, i: int, param: Dictionary) -> Control:
 	raw.focus_exited.connect(apply)
 	return raw
 
-func _text_arg(step: Dictionary, i: int, text: String, to_expr: Callable) -> Control:
+func _text_arg(step: StepData, i: int, text: String, to_expr: Callable) -> Control:
 	var e := LineEdit.new()
 	e.text = text
 	var shown := [to_expr.call(text)]
@@ -516,16 +528,16 @@ func _text_arg(step: Dictionary, i: int, text: String, to_expr: Callable) -> Con
 
 func _rename_group(edit: LineEdit) -> void:
 	var new_name := edit.text.strip_edges()
-	if new_name == _group["name"]:
+	if new_name == _group.name:
 		return
-	var taken: bool = _data["groups"].any(func(g: Dictionary) -> bool: return g["name"] == new_name)
+	var taken: bool = _data.groups.any(func(g: GroupData) -> bool: return g.name == new_name)
 	if new_name == "" or taken or '"' in new_name:
-		edit.text = _group["name"]
+		edit.text = _group.name
 		return
-	for rd in _data["rules"]:
-		if rd["group"] == _group["name"]:
-			rd["group"] = new_name
-	_group["name"] = new_name
+	for rd in _data.rules:
+		if rd.group == _group.name:
+			rd.group = new_name
+	_group.name = new_name
 	group_edited.emit(new_name)
 
 func _lock(node: Node) -> void:

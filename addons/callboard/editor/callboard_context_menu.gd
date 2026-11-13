@@ -5,7 +5,7 @@ class_name CallboardContextMenu extends PopupMenu
 var context_target: Dictionary = {}
 var create_position := Vector2.ZERO
 
-func open_for(data: Dictionary, graph: RuleGraphView, pointer: Vector2, event_disabled: bool,
+func open_for(data: GraphDraft, graph: RuleGraphView, pointer: Vector2, event_disabled: bool,
 		create_event: int, create_rule: int, create_group: int,
 		edit_target: int, duplicate_rule: int, delete_target: int) -> void:
 	create_position = (pointer + graph.scroll_offset) / graph.zoom

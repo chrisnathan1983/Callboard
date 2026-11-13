@@ -40,7 +40,7 @@ When `SceneTree.paused` is true, rule delays, repeat ticks, timed lights, and th
 | Method | Contract |
 | --- | --- |
 | `activate() -> void` | Fires `arrive` after setup. Graph compilation errors block activation. Each call can dispatch `arrive` again. |
-| `deactivate() -> void` | Cancels the current engine runs and clears pending work from diagnostics. Stage exit also cancels runs. |
+| `deactivate() -> void` | Cancels current runs and queued triggers, releases waits registered with `RuleEngine.interruptible()`, and clears pending diagnostics. Stage exit also cancels runs. |
 | `fire(event: StringName, ctx := {}) -> void` | Dispatches a Call ID such as `deliver` or a relay event ID such as `relay:calm_guard`. The optional `ctx` dictionary is the payload available to steps. The engine runs any asynchronous work. |
 | `get_var(key: StringName) -> Variant` | Reads the resolved Blackboard value. An unknown key returns `null`. |
 | `write_var(key: StringName, value: Variant) -> void` | Writes a declared key using its Variant type. Integer inputs to float keys are converted to floats. |
@@ -124,6 +124,19 @@ The default factory is [`StagingVerbs`](../addons/callboard/core/staging_verbs.g
 
 When `move_to` and `jump` overlap on the same node, the latest step controls its position. Earlier steps finish on their original schedule so their rules can continue.
 
+### Built-in cancellation behavior
+
+The engine checks **Cancel If** before the first step and after each step or delay. **Restart** replaces an active run at its next cancellation check. A cancelled run skips its remaining steps and completion relay. One-shot latches record the start and stay set after cancellation.
+
+| Verb | Effect after cancellation |
+| --- | --- |
+| `set_var`, `score`, `show_node` | Completed writes, score changes, and visibility changes stay applied. |
+| `repeat_emit` | Checks before each tick and stops emitting when cancelled. Deactivation releases its timer wait immediately. |
+| `pop`, `bounce`, `move_to` | The tween finishes while the Stage remains in the tree. Deactivation immediately releases the rule's wait. |
+| `flash`, `jump` | The animation finishes while the Stage remains in the tree. The current tint restores its base color and the current jump returns to its base height. Deactivation immediately releases the rule's wait. |
+| `say` | The label expires on its own timer. A later `say` on the same node replaces it and starts a new timer. |
+| `_light` | A timed activation turns off on timeout, cancellation of its run, or Stage deactivation. A newer activation owns the light. Untimed visibility and Blackboard changes stay applied. |
+
 The demo's [`Stage01Verbs`](../demo/stages/stage_01/stage_01_verbs.gd) supplies `light(n, on, duration = 0.0)`, which updates its `lamp_on` key, and `stun_player(seconds)`. It is selected by `Stage01._make_verbs()`; other games can define their own methods and actor lookup without inheriting demo group names. To build a key-agnostic light action, call the protected-by-convention `StagingVerbs._light(n, on, duration, key)` helper from your own verb method.
 
 ## Custom verbs
@@ -160,7 +173,7 @@ Declare a Boolean Blackboard key `door_open` and assign a typed `Node3D` propert
 - `Step.sets` lists Blackboard keys written by the step. `Step.emits` names a relay the callable sends. These fields describe the step for validation and graph display.
 - A step sends a relay by dispatching `relay:<name>` through the engine. Set `Step.emit_arg` to the zero-based argument index when that argument supplies the name so Callboard can rewrite it during a relay rename.
 - A step callable accepts a payload dictionary and can await work or return a signal. `Step.after(seconds)` adds a delay before execution.
-- For a custom step that awaits internally, capture `engine.token()` on entry and check `engine.alive(payload["_rule"], token)` after each await before applying more effects. Resolve the engine through `context.engine_ref` and release the strong reference before awaiting. See [`repeat_emit`](../addons/callboard/core/core_verbs.gd) for the pattern.
+- For a custom step that awaits internally, capture `engine.token()` on entry and check `engine.alive(payload["_rule"], token)` after each await before applying more effects. Wrap a signal with `engine.interruptible(signal)` to resume the wait on deactivation, then perform the same cancellation check. Resolve the engine through `context.engine_ref` and release the strong reference before awaiting. See [`repeat_emit`](../addons/callboard/core/core_verbs.gd) for the pattern.
 
 [`StepContext`](../addons/callboard/core/step_context.gd) supplies `bb`, the Stage `host`, a weak `engine_ref`, and the `score` callable. Treat underscore-prefixed payload fields as engine-owned.
 
@@ -171,6 +184,7 @@ Declare a Boolean Blackboard key `door_open` and assign a typed `Node3D` propert
 | API | Purpose |
 | --- | --- |
 | `token()`, `alive(rule, token)` | Check whether a run can continue after asynchronous work. |
+| `interruptible(source)` | Return a signal that completes when the source emits or the engine deactivates. The caller checks cancellation before continuing its work. |
 | `wait_tracked(seconds, rule_id, label)` | Use the configured clock and surface the wait in the live debugger. Returns the wait signal. |
 | `track_signal(signal_to_track, rule_id, label, seconds = -1.0)` | Show a pending operation until its signal fires. A negative duration means the remaining time is unknown. |
 | `active_snapshot()`, `pending_snapshot()` | Read active rules and queued counts, or pending waits and their remaining times. |
@@ -179,7 +193,7 @@ Declare a Boolean Blackboard key `door_open` and assign a typed `Node3D` propert
 
 The rule engine dispatches matching rules in authored order. A rule's steps run in order and await their completion when applicable. A rule's own relay fires after its final step completes. Different rules can overlap. The re-entry policy governs repeated triggers of the same rule.
 
-Graph compilation errors block `activate()`. `Stage.check()` reports validation findings such as relay cycles and shared-trigger overlap. In a debug build, `activate()` logs those findings and still dispatches `arrive` if compilation succeeded. A direct call to `fire()` dispatches without running `activate()`.
+Graph compilation errors block editor saves and runtime `activate()`. `Stage.check()` reports advisory findings such as relay cycles and shared-trigger overlap. In a debug build, `activate()` logs those findings as warnings and still dispatches `arrive` if compilation succeeded. A direct call to `fire()` dispatches without running `activate()`.
 
 The [unit suite](../addons/callboard/tests/unit.gd) exercises guards, re-entry, cancellation, and migration. The [demo runtime smoke test](../demo/tests/smoke.gd) shows how to drive a Stage through the same calls the game uses.
 

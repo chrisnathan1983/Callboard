@@ -44,7 +44,7 @@ var _icon_material: ShaderMaterial
 var _minimap_control: Control
 var _compact_button: Button
 var _minimized := false
-var _last_data: Dictionary = {}
+var _last_data: GraphDraft
 
 func _init() -> void:
 	minimap_enabled = true
@@ -98,7 +98,7 @@ func set_minimized(on: bool) -> void:
 	_minimized = on
 	if is_instance_valid(_compact_button):
 		_compact_button.set_pressed_no_signal(on)
-	if not _last_data.is_empty():
+	if _last_data != null:
 		show_data(_last_data)
 		if not selected_rule.is_empty():
 			select_rule(selected_rule)
@@ -196,21 +196,20 @@ func clear_view() -> void:
 	_frames.clear()
 	_rule_signatures.clear()
 
-func show_data(data: Dictionary) -> void:
+func show_data(data: GraphDraft) -> void:
 	_last_data = data
 	clear_view()
-	var rules: Array = data["rules"]
-	var problems: Array = data["notes"]
+	var rules: Array[RuleData] = data.rules
 	if not _has_position_data(data):
 		_auto_layout(rules, true)
 
-	for g in data["groups"]:
+	for g in data.groups:
 		var f := GraphFrame.new()
-		f.name = "frame_" + _safe(g["name"])
-		f.set_meta("group_name", g["name"])
-		f.title = g["name"]
-		f.position_offset = g["rect"].position
-		f.size = g["rect"].size
+		f.name = "frame_" + _safe(g.name)
+		f.set_meta("group_name", g.name)
+		f.title = g.name
+		f.position_offset = g.rect.position
+		f.size = g.rect.size
 		f.autoshrink_enabled = false
 		f.autoshrink_margin = 24
 		f.resizable = _editable
@@ -222,49 +221,48 @@ func show_data(data: Dictionary) -> void:
 			if not _resizing_frame:
 				layout_changed.emit())
 		add_child(f)
-		_frames[g["name"]] = f
+		_frames[g.name] = f
 
 	for rd in rules:
-		var n := _make_rule_node(rd, problems)
+		var n := _make_rule_node(rd, data)
 		add_child(n)
-		_rule_nodes[rd["id"]] = n
-		if rd["group"] != "" and _frames.has(rd["group"]):
-			attach_graph_element_to_frame(n.name, _frames[rd["group"]].name)
+		_rule_nodes[rd.id] = n
+		if rd.group != "" and _frames.has(rd.group):
+			attach_graph_element_to_frame(n.name, _frames[rd.group].name)
 
-	_make_event_nodes(data["external_calls"], rules, data.get("call_positions", {}))
+	_make_event_nodes(data.external_calls, rules, data.call_positions)
 	_connect_all(rules)
-	_cache_rule_signatures(rules, problems)
+	_cache_rule_signatures(rules, data)
 
 ## Updates stable graph structures in place. A structural change falls back to a full build;
 ## otherwise only rule cards whose rendered content changed are recreated.
-func update_data(data: Dictionary) -> void:
+func update_data(data: GraphDraft) -> void:
 	_last_data = data
-	var rules: Array = data["rules"]
-	var problems: Array = data["notes"]
-	if (not _same_ids(_rule_nodes, rules.map(func(rd: Dictionary) -> String: return rd["id"]))
-		or not _same_ids(_event_nodes, data["external_calls"])
-		or not _same_ids(_frames, data["groups"].map(func(group: Dictionary) -> String: return group["name"]))):
+	var rules: Array[RuleData] = data.rules
+	if (not _same_ids(_rule_nodes, rules.map(func(rd: RuleData) -> String: return String(rd.id)))
+		or not _same_ids(_event_nodes, data.external_calls)
+		or not _same_ids(_frames, data.groups.map(func(group: GroupData) -> String: return group.name))):
 		show_data(data)
 		return
 
 	clear_connections()
-	for group in data["groups"]:
-		var frame: GraphFrame = _frames[group["name"]]
-		frame.position_offset = group["rect"].position
-		frame.size = group["rect"].size
+	for group in data.groups:
+		var frame: GraphFrame = _frames[group.name]
+		frame.position_offset = group.rect.position
+		frame.size = group.rect.size
 
 	for rd in rules:
-		var id: String = rd["id"]
-		var signature := _rule_signature(rd, problems)
+		var id: String = rd.id
+		var signature := _rule_signature(rd, data)
 		var node: GraphNode = _rule_nodes[id]
 		if _rule_signatures.get(id) != signature:
 			_retire_element(node)
-			node = _make_rule_node(rd, problems)
+			node = _make_rule_node(rd, data)
 			add_child(node)
 			_rule_nodes[id] = node
 		else:
-			node.position_offset = rd["pos"]
-		var frame: GraphFrame = _frames.get(rd["group"])
+			node.position_offset = rd.pos
+		var frame: GraphFrame = _frames.get(rd.group)
 		var current_frame := get_element_frame(node.name)
 		if frame != current_frame:
 			if current_frame != null:
@@ -273,7 +271,7 @@ func update_data(data: Dictionary) -> void:
 				attach_graph_element_to_frame(node.name, frame.name)
 		_rule_signatures[id] = signature
 
-	var event_positions := _event_positions(data["external_calls"], rules, data.get("call_positions", {}))
+	var event_positions := _event_positions(data.external_calls, rules, data.call_positions)
 	for event_id in _event_nodes:
 		(_event_nodes[event_id] as GraphNode).position_offset = event_positions[event_id]
 	_connect_all(rules)
@@ -287,21 +285,23 @@ func _same_ids(nodes: Dictionary, ids: Array) -> bool:
 			return false
 	return true
 
-func _rule_signature(rd: Dictionary, problems: Array) -> Dictionary:
-	var content := rd.duplicate(true)
+func _rule_signature(rd: RuleData, data: GraphDraft) -> Dictionary:
+	var content := rd.to_dictionary()
 	content.erase("pos")
-	content.erase(AuthoredData.FIELD_HAS_POS)
+	content.erase("has_pos")
 	content.erase("group")
 	return {
 		"content": content,
-		"warned": problems.any(func(problem: String) -> bool: return ("'%s'" % rd["id"]) in problem),
+		"errors": data.errors_for(rd),
+		"warnings": data.warnings_for(rd),
+		"relays": output_relays(rd, data),
 		"editable": _editable,
 	}
 
-func _cache_rule_signatures(rules: Array, problems: Array) -> void:
+func _cache_rule_signatures(rules: Array[RuleData], data: GraphDraft) -> void:
 	_rule_signatures.clear()
 	for rd in rules:
-		_rule_signatures[rd["id"]] = _rule_signature(rd, problems)
+		_rule_signatures[rd.id] = _rule_signature(rd, data)
 
 func _retire_element(element: GraphElement) -> void:
 	if _inspected_node == element:
@@ -421,12 +421,13 @@ func _apply_wire_focus(focused: StringName) -> void:
 		set_connection_activity(wire["from_node"], wire["from_port"], wire["to_node"], wire["to_port"], 0.65 if unrelated else 0.0)
 
 ## Port layout of a rule card: relays fired by its steps, then the rule's own `emits`.
-static func output_relays(rd: Dictionary) -> Array:
+static func output_relays(rd: RuleData, data: GraphDraft) -> Array:
 	var relays: Array = []
-	for s in rd["steps"]:
-		if s["emits"] != "" and not relays.has(s["emits"]):
-			relays.append(s["emits"])
-	relays.append(rd["emit"])   # last port always exists so a wire can be dragged from it
+	for s in rd.steps:
+		var relay := data.relay_for(s)
+		if not relay.is_empty() and not relays.has(relay):
+			relays.append(relay)
+	relays.append(String(rd.emit))   # last port always exists so a wire can be dragged from it
 	return relays
 
 # --- Live highlighting ------------------------------------------------------------
@@ -504,10 +505,9 @@ func _on_connection_request(from_node: StringName, from_port: int, to_node: Stri
 			wire_added.emit({"rule": source_id, "port": from_port}, target_id)
 
 func _request_compact_wire(source_id: String, target_id: String) -> void:
-	var source_rule: Dictionary = _last_data["rules"].filter(
-		func(rule: Dictionary) -> bool: return rule["id"] == source_id).front()
+	var source_rule := _last_data.find_rule(source_id)
 	var choices: Array[String] = []
-	for relay in output_relays(source_rule):
+	for relay in output_relays(source_rule, _last_data):
 		if not choices.has(relay):
 			choices.append(relay)
 	if choices.size() <= 1:
@@ -555,25 +555,25 @@ func _safe(s: String) -> String:
 		s = s.replace(ch, "_")
 	return s
 
-func _has_position_data(data: Dictionary) -> bool:
-	if not data.get("call_positions", {}).is_empty():
+func _has_position_data(data: GraphDraft) -> bool:
+	if not data.call_positions.is_empty():
 		return true
-	for rd in data["rules"]:
-		if rd.get(AuthoredData.FIELD_HAS_POS, false):
+	for rd in data.rules:
+		if rd.has_pos:
 			return true
 	return false
 
 func auto_arrange() -> void:
-	if _last_data.is_empty() or not _editable:
+	if _last_data == null or not _editable:
 		return
-	var rules: Array = _last_data["rules"]
+	var rules: Array[RuleData] = _last_data.rules
 	_auto_layout(rules, true)
 	for rd in rules:
-		rd[AuthoredData.FIELD_HAS_POS] = true
-		var node: GraphNode = _rule_nodes.get(rd["id"])
+		rd.has_pos = true
+		var node: GraphNode = _rule_nodes.get(rd.id)
 		if node:
-			node.position_offset = rd["pos"]
-	var call_positions := _event_positions(_last_data["external_calls"], rules, {}, true)
+			node.position_offset = rd.pos
+	var call_positions := _event_positions(_last_data.external_calls, rules, {}, true)
 	for id in _event_nodes:
 		(_event_nodes[id] as GraphNode).position_offset = call_positions[id]
 	layout_changed.emit()
@@ -581,27 +581,27 @@ func auto_arrange() -> void:
 
 ## Rules without saved positions are placed by relay depth. Force is reserved for
 ## first-open layouts and the explicit Arrange command.
-func _auto_layout(rules: Array, force := false) -> void:
+func _auto_layout(rules: Array[RuleData], force := false) -> void:
 	var node_width := COMPACT_CARD_WIDTH if _minimized else CARD_WIDTH
 	var row_spacing := 88.0 if _minimized else 220.0
 	var depth := {}
 	for rd in rules:
-		depth[rd["id"]] = 0
+		depth[rd.id] = 0
 	for _i in rules.size():
 		for a in rules:
-			for relay in output_relays(a):
+			for relay in output_relays(a, _last_data):
 				if relay == "":
 					continue
 				for b in rules:
-					if b["trigger"] == "relay:" + relay and b["id"] != a["id"]:
-						depth[b["id"]] = maxi(depth[b["id"]], depth[a["id"]] + 1)
+					if b.trigger == "relay:" + relay and b.id != a.id:
+						depth[b.id] = maxi(depth[b.id], depth[a.id] + 1)
 	var col_y := {}
 	for rd in rules:
-		if not force and rd[AuthoredData.FIELD_HAS_POS]:
+		if not force and rd.has_pos:
 			continue
-		var d: int = depth[rd["id"]]
+		var d: int = depth[rd.id]
 		var y: float = col_y.get(d, 40.0)
-		rd["pos"] = Vector2(40 + d * (node_width + 42.0), y)
+		rd.pos = Vector2(40 + d * (node_width + 42.0), y)
 		col_y[d] = y + row_spacing
 
 # --- Cards ------------------------------------------------------------------------
@@ -720,23 +720,36 @@ func _scale_card_padding(card: GraphElement, type: StringName) -> void:
 	card.ready.connect(refresh)
 	card.theme_changed.connect(refresh, CONNECT_DEFERRED)
 
-func _make_rule_node(rd: Dictionary, problems: Array) -> GraphNode:
+func _make_rule_node(rd: RuleData, data: GraphDraft) -> GraphNode:
 	var n := GraphNode.new()
-	n.name = _safe(rd["id"])
-	n.set_meta("rule_id", rd["id"])
-	var warned := problems.any(func(p: String) -> bool: return ("'%s'" % rd["id"]) in p)
-	n.title = ("⚠ " if warned and not Engine.is_editor_hint() else "") + rd["id"]
-	n.tooltip_text = rd["id"]
-	n.position_offset = rd["pos"]
+	n.name = _safe(rd.id)
+	n.set_meta("rule_id", rd.id)
+	var errors := data.errors_for(rd)
+	var warnings := data.warnings_for(rd)
+	var title_color := Style.TEXT
+	var title_icon := &"GraphNode"
+	n.title = String(rd.id)
+	n.tooltip_text = String(rd.id)
+	if not errors.is_empty():
+		n.title = "Error · " + n.title
+		n.tooltip_text = "\n".join(errors)
+		title_color = Style.ERROR
+		title_icon = &"StatusError"
+	elif not warnings.is_empty():
+		n.title = "Warning · " + n.title
+		n.tooltip_text = "\n".join(warnings)
+		title_color = Style.WARNING
+		title_icon = &"NodeWarning"
+	n.position_offset = rd.pos
 	_style_card(n, COMPACT_CARD_WIDTH if _minimized else CARD_WIDTH,
-		Style.WARNING if warned else Style.TEXT, &"NodeWarning" if warned else &"GraphNode")
+		title_color, title_icon)
 
 	# Each row is one slot: [control, left_port, right_port, color, optional_right_color].
 	var rows: Array = []
-	var trigger: String = rd["trigger"]
+	var trigger: String = rd.trigger
 	var trigger_text := "On  " + trigger if not trigger.is_empty() else "Connect a trigger"
 	var trigger_color := COL_RELAY if trigger.begins_with("relay:") else COL_EVENT
-	var relays := output_relays(rd)
+	var relays := output_relays(rd, _last_data)
 	if _minimized:
 		var compact_row := HBoxContainer.new()
 		compact_row.custom_minimum_size = Vector2(0, 22)
@@ -749,21 +762,21 @@ func _make_rule_node(rd: Dictionary, problems: Array) -> GraphNode:
 		_add_card_rows(n, rows)
 		return n
 	rows.append([_row(trigger_text, trigger_color, &"Signal"), true, false, trigger_color])
-	if not rd["requires"].is_empty():
-		rows.append([_row("requires: " + ", ".join(rd["requires"]), COL_REQ, &"✓"), false, false, COL_DIM])
-	if not rd["forbids"].is_empty():
-		rows.append([_row("forbids: " + ", ".join(rd["forbids"]), COL_FORBID, &"GuiClose"), false, false, COL_DIM])
-	if not rd["cancel_if"].is_empty():
-		rows.append([_row("cancel_if: " + ", ".join(rd["cancel_if"]), COL_CANCEL, &"Stop"), false, false, COL_DIM])
-	if rd[AuthoredData.FIELD_ONE_SHOT]:
+	if not rd.requires.is_empty():
+		rows.append([_row("requires: " + ", ".join(rd.requires), COL_REQ, &"✓"), false, false, COL_DIM])
+	if not rd.forbids.is_empty():
+		rows.append([_row("forbids: " + ", ".join(rd.forbids), COL_FORBID, &"GuiClose"), false, false, COL_DIM])
+	if not rd.cancel_if.is_empty():
+		rows.append([_row("cancel_if: " + ", ".join(rd.cancel_if), COL_CANCEL, &"Stop"), false, false, COL_DIM])
+	if rd.one_shot:
 		rows.append([_row("One-shot", COL_DIM, &"Lock"), false, false, COL_DIM])
 	var i := 1
-	for s in rd["steps"]:
+	for s in rd.steps:
 		var prefix := "%d. " % i
-		if s["delay"] != "":
-			prefix += "+%ss  " % s["delay"]
-		var step_icon := &"Timer" if s["delay"] != "" else &"Play"
-		rows.append([_row(prefix + "%s(%s)" % [s["verb"], ", ".join(PackedStringArray(s["args"]))], Style.TEXT, step_icon), false, false, COL_DIM])
+		if s.delay != "":
+			prefix += "+%ss  " % s.delay
+		var step_icon := &"Timer" if s.delay != "" else &"Play"
+		rows.append([_row(prefix + "%s(%s)" % [s.verb, ", ".join(PackedStringArray(s.args))], Style.TEXT, step_icon), false, false, COL_DIM])
 		i += 1
 	for p in relays.size():
 		var last := p == relays.size() - 1
@@ -781,30 +794,30 @@ func _make_rule_node(rd: Dictionary, problems: Array) -> GraphNode:
 	_add_card_rows(n, rows)
 	return n
 
-func _add_compact_title_icons(row: HBoxContainer, rd: Dictionary) -> void:
-	if not rd["requires"].is_empty():
+func _add_compact_title_icons(row: HBoxContainer, rd: RuleData) -> void:
+	if not rd.requires.is_empty():
 		_add_title_icon(row, &"", "✓", COL_REQ,
-			"Requires: " + ", ".join(rd["requires"]))
-	if not rd["forbids"].is_empty():
+			"Requires: " + ", ".join(rd.requires))
+	if not rd.forbids.is_empty():
 		_add_title_icon(row, &"GuiClose", "×", COL_FORBID,
-			"Forbids: " + ", ".join(rd["forbids"]))
-	if not rd["cancel_if"].is_empty():
+			"Forbids: " + ", ".join(rd.forbids))
+	if not rd.cancel_if.is_empty():
 		_add_title_icon(row, &"Stop", "■", COL_CANCEL,
-			"Cancel if: " + ", ".join(rd["cancel_if"]))
-	if not rd["steps"].is_empty():
+			"Cancel if: " + ", ".join(rd.cancel_if))
+	if not rd.steps.is_empty():
 		var action_names: Array[String] = []
-		for step in rd["steps"]:
-			action_names.append(step["verb"])
+		for step in rd.steps:
+			action_names.append(step.verb)
 		_add_title_icon(row, &"Play", "▶", Style.TEXT,
 			"Steps: " + ", ".join(action_names))
-		var delayed: Array = rd["steps"].filter(func(step: Dictionary) -> bool: return step["delay"] != "")
+		var delayed: Array = rd.steps.filter(func(step: StepData) -> bool: return step.delay != "")
 		if not delayed.is_empty():
 			var delay_details: Array[String] = []
 			for step in delayed:
-				delay_details.append(step["delay"] + "s")
+				delay_details.append(step.delay + "s")
 			_add_title_icon(row, &"Timer", "◷", Style.EVENT,
 				"Step delays: " + ", ".join(delay_details))
-	if rd[AuthoredData.FIELD_ONE_SHOT]:
+	if rd.one_shot:
 		_add_title_icon(row, &"Lock", "●", COL_DIM, "One-shot")
 
 func _add_compact_relay_label(row: HBoxContainer, relays: Array) -> void:
@@ -856,7 +869,7 @@ func _add_card_rows(node: GraphNode, rows: Array) -> void:
 				if row[2]:
 					node.set_slot_color_right(i, Style.resolve_color(node, right_color)))
 
-func _make_event_nodes(events: Array, rules: Array, saved_positions: Dictionary) -> void:
+func _make_event_nodes(events: Array, rules: Array[RuleData], saved_positions: Dictionary) -> void:
 	var positions := _event_positions(events, rules, saved_positions)
 	for event_id in events:
 		var n := GraphNode.new()
@@ -870,18 +883,18 @@ func _make_event_nodes(events: Array, rules: Array, saved_positions: Dictionary)
 		add_child(n)
 		_event_nodes[event_id] = n
 
-func _event_positions(events: Array, rules: Array, saved_positions: Dictionary = {}, force := false) -> Dictionary:
+func _event_positions(events: Array, rules: Array[RuleData], saved_positions: Dictionary = {}, force := false) -> Dictionary:
 	var min_x := INF
 	for rd in rules:
-		min_x = minf(min_x, rd["pos"].x)
+		min_x = minf(min_x, rd.pos.x)
 	if min_x == INF:
 		min_x = 0.0
 	var entries: Array = []
 	for e in events:
 		var y := 1e9
 		for rd in rules:
-			if rd["trigger"] == e:
-				y = minf(y, rd["pos"].y)
+			if rd.trigger == e:
+				y = minf(y, rd.pos.y)
 		entries.append({"event": e, "y": y if y < 1e9 else 0.0})
 	entries.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a["y"] < b["y"])
 	var prev_y := -1e9
@@ -898,19 +911,19 @@ func _event_positions(events: Array, rules: Array, saved_positions: Dictionary =
 		positions[event_id] = Vector2(min_x - CALL_WIDTH - CALL_GAP, y)
 	return positions
 
-func _connect_all(rules: Array) -> void:
+func _connect_all(rules: Array[RuleData]) -> void:
 	for ev in _event_nodes:
 		for b in rules:
-			if b["trigger"] == ev:
-				_wire(_event_nodes[ev].name, 0, _rule_nodes[b["id"]].name)
+			if b.trigger == ev:
+				_wire(_event_nodes[ev].name, 0, _rule_nodes[b.id].name)
 	for a in rules:
-		var relays := output_relays(a)
+		var relays := output_relays(a, _last_data)
 		for port in relays.size():
 			if relays[port] == "":
 				continue
 			for b in rules:
-				if b["trigger"] == "relay:" + relays[port] and b["id"] != a["id"]:
-					_wire(_rule_nodes[a["id"]].name, 0 if _minimized else port, _rule_nodes[b["id"]].name)
+				if b.trigger == "relay:" + relays[port] and b.id != a.id:
+					_wire(_rule_nodes[a.id].name, 0 if _minimized else port, _rule_nodes[b.id].name)
 
 func _wire(from_node: StringName, from_port: int, to_node: StringName) -> void:
 	var err := connect_node(from_node, from_port, to_node, 0)

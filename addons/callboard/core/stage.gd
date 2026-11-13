@@ -78,7 +78,7 @@ func activate() -> void:
 		return
 	if OS.is_debug_build():
 		for problem in check():
-			push_error("[%s] %s" % [name, problem])
+			push_warning("[%s] %s" % [name, problem])
 	fire(&"arrive")
 
 func deactivate() -> void:

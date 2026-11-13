@@ -14,4 +14,4 @@ static func from_dictionary(source: Dictionary) -> StepData:
 	return data
 
 func to_dictionary() -> Dictionary:
-	return {"verb": String(verb), "args": Array(args), "delay": delay, "emits": "", "sets": []}
+	return {"verb": String(verb), "args": Array(args), "delay": delay}

@@ -7,7 +7,6 @@ class_name Callboard extends Control
 
 signal layout_saved(path: String)
 
-const EDIT_FIELDS := ["external_calls", "call_positions", "external_vars", "vars", "rules", "groups"]
 const Style := preload("res://addons/callboard/editor/board_style.gd")
 const Settings := preload("res://addons/callboard/core/callboard_settings.gd")
 enum CreateAction { EVENT, RULE, GROUP }
@@ -24,7 +23,7 @@ var _notes_button := MenuButton.new()
 var _reload_dialog := ConfirmationDialog.new()
 var _settings_title: Label
 var _edit_buttons: Array[Button] = []
-var _data := {}
+var _data := GraphDraft.new()
 var _path := ""
 var _selected := ""
 var _selected_group := ""
@@ -121,7 +120,7 @@ func _init() -> void:
 	status_row.add_child(_status)
 	_notes_button.flat = false
 	_notes_button.focus_mode = Control.FOCUS_ALL
-	_notes_button.tooltip_text = "Show validation notes"
+	_notes_button.tooltip_text = "Show graph errors and warnings"
 	Style.button_icon(_notes_button, &"NodeWarning", "", true)
 	_notes_button.get_popup().index_pressed.connect(_on_note_selected)
 	_notes_button.hide()
@@ -147,9 +146,9 @@ func _init() -> void:
 	view.wire_removed.connect(func(to: String) -> void: disconnect_wire(to))
 	view.rules_delete_requested.connect(_delete_rules)
 	view.rules_linked_to_group.connect(func(ids: Array, g: String) -> void:
-		for rd in _data["rules"]:
-			if ids.has(rd["id"]):
-				rd["group"] = g
+		for rd in _data.rules:
+			if ids.has(rd.id):
+				rd.group = g
 		_changed(_selected))
 	view.layout_changed.connect(_layout_changed)
 	blackboard.changed.connect(func() -> void: _schedule_change(_selected))
@@ -289,7 +288,7 @@ func refresh() -> void:
 		_path = ""
 		_picker.text = "No stages"
 		_picker.disabled = true
-		_show({"error": "No stage definitions in: " + ", ".join(Settings.stage_directories())}, false)
+		_show(GraphDraft.load_error("No stage definitions in: " + ", ".join(Settings.stage_directories())), false)
 		return
 	_picker.disabled = false
 	var idx := 0
@@ -369,7 +368,7 @@ func _on_picker(i: int) -> void:
 
 func bind_live(stage: Stage) -> void:
 	_clear_analysis_stage()
-	var same_definition: bool = stage.definition != null and _data.get("definition") == stage.definition
+	var same_definition: bool = stage.definition != null and _data.definition == stage.definition
 	if _live and is_instance_valid(_live) and _live.rule_fired.is_connected(_on_live_rule_fired):
 		_live.rule_fired.disconnect(_on_live_rule_fired)
 	_live = stage
@@ -406,7 +405,7 @@ func _exit_tree() -> void:
 func _analyze_data() -> void:
 	_analysis_debounce.stop()
 	_pending_selection = ""
-	var definition: StageDefinition = _data["definition"]
+	var definition: StageDefinition = _data.definition
 	var scene_source := definition.analysis_scene_path()
 	var script_path := definition.stage_script.resource_path if definition.stage_script else ""
 	var source_key := scene_source + "|" + script_path
@@ -425,12 +424,8 @@ func _clear_analysis_stage() -> void:
 	_analysis_stage = null
 	_analysis_source_key = ""
 
-func _show(data: Dictionary, editable: bool, live := false, reuse_graph := false) -> void:
-	if data.has("error"):
-		_show({"rules": [], "groups": [], "vars": [], "external_calls": [], "call_positions": {},
-			"external_vars": [], "notes": [data["error"]]}, false)
-		_set_status(data["error"], Style.ERROR)
-		return
+func _show(data: GraphDraft, editable: bool, live := false, reuse_graph := false) -> void:
+	editable = editable and not data.load_failed
 	_data = data
 	_analysis_debounce.stop()
 	_pending_selection = ""
@@ -463,7 +458,7 @@ func _update_status() -> void:
 	_redo_button.disabled = not _editable or not _history.can_redo()
 	_create_call_button.disabled = not _editable
 	_connections_button.disabled = false
-	var variable_count: int = _data["vars"].size()
+	var variable_count: int = _data.variables.size()
 	var connection_count := RuleConnections.ids(_data).size()
 	_blackboard_button.text = "Blackboard %d" % variable_count
 	_blackboard_button.tooltip_text = "Blackboard (%d)" % variable_count
@@ -471,25 +466,33 @@ func _update_status() -> void:
 	_connections_button.tooltip_text = "Calls & relays (%d)" % connection_count
 	if _connections_panel.visible:
 		_refresh_connections()
-	var rules: int = _data["rules"].size()
+	var rules: int = _data.rules.size()
 	var t := "%d %s" % [rules, "rule" if rules == 1 else "rules"]
 	if _dirty:
 		t = "Unsaved · " + t
 	if is_instance_valid(_live):
 		t = "Live · " + t
 	_set_status(t, Style.WARNING if _dirty else Style.MUTED)
-	var notes: Array = _data["notes"]
-	_notes_button.visible = not notes.is_empty()
-	_notes_button.text = "%d %s" % [notes.size(), "note" if notes.size() == 1 else "notes"]
-	Style.tint(_notes_button, Style.WARNING)
+	var counts := PackedStringArray()
+	if not _data.errors.is_empty():
+		counts.append("%d %s" % [_data.errors.size(), "error" if _data.errors.size() == 1 else "errors"])
+	if not _data.warnings.is_empty():
+		counts.append("%d %s" % [_data.warnings.size(), "warning" if _data.warnings.size() == 1 else "warnings"])
+	_notes_button.visible = not counts.is_empty()
+	_notes_button.text = ", ".join(counts)
+	Style.tint(_notes_button, Style.WARNING if _data.errors.is_empty() else Style.ERROR)
 	var popup := _notes_button.get_popup()
 	popup.clear()
-	for note: String in notes:
-		var preview := note.get_slice("\n", 0)
-		if preview != note or preview.length() > 84:
+	_add_diagnostic_items(popup, _data.errors, "Error")
+	_add_diagnostic_items(popup, _data.warnings, "Warning")
+
+func _add_diagnostic_items(popup: PopupMenu, messages: Array[String], severity: String) -> void:
+	for message in messages:
+		var preview := message.get_slice("\n", 0)
+		if preview != message or preview.length() > 84:
 			preview = preview.left(83) + "…"
-		popup.add_item(preview)
-		popup.set_item_tooltip(popup.item_count - 1, note)
+		popup.add_item("%s: %s" % [severity, preview])
+		popup.set_item_tooltip(popup.item_count - 1, message)
 
 func _set_status(message: String, color: Color) -> void:
 	_status.text = message
@@ -497,13 +500,14 @@ func _set_status(message: String, color: Color) -> void:
 	Style.tint(_status, color)
 
 func _on_note_selected(index: int) -> void:
-	var notes: Array = _data.get("notes", [])
-	if index < 0 or index >= notes.size():
+	var messages := _data.errors + _data.warnings
+	if index < 0 or index >= messages.size():
 		return
-	_set_status(notes[index], Style.WARNING)
-	for rule in _data.get("rules", []):
-		var id: String = rule.get("id", "")
-		if not id.is_empty() and ("'%s'" % id) in notes[index]:
+	var message := messages[index]
+	_set_status(message, Style.ERROR if index < _data.errors.size() else Style.WARNING)
+	for rule in _data.rules:
+		var id := String(rule.id)
+		if not id.is_empty() and ("'%s'" % id) in message:
 			view.select_rule(id)
 			view.reveal_rule_in_canvas.call_deferred(id)
 			return
@@ -511,16 +515,7 @@ func _on_note_selected(index: int) -> void:
 # --- History ----------------------------------------------------------------------
 
 func _snapshot() -> Dictionary:
-	var state := {}
-	for field in EDIT_FIELDS:
-		state[field] = _data[field].duplicate(true)
-	# Analysis rebuilds this metadata from the authored step arguments.
-	for rule in state["rules"]:
-		for step in rule["steps"]:
-			step.erase("emits")
-			step.erase("emit_arg")
-			step.erase("sets")
-	return state
+	return _data.snapshot()
 
 func _reset_history() -> void:
 	if _editable:
@@ -553,14 +548,13 @@ func _restore_edit(state: Dictionary) -> void:
 	_analysis_debounce.stop()
 	_pending_selection = ""
 	_restoring = true
-	# Release the old inspector controls before swapping in new model dictionaries.
+	# Release the old inspector controls before replacing the draft resources.
 	inspector.clear()
-	for field in EDIT_FIELDS:
-		_data[field] = state[field].duplicate(true)
+	_data.restore(state)
 	_analyze_data()
 	blackboard.show_data(_data, true, false)
 	view.update_data(_data)
-	if not _find_rule(_selected).is_empty():
+	if _data.find_rule(_selected) != null:
 		view.select_rule(_selected)
 		_on_rule_selected(_selected)
 	elif view.select_group(_selected_group):
@@ -686,7 +680,7 @@ func add_call_name(call_id: String) -> bool:
 	call_id = call_id.strip_edges()
 	if not _editable or not RuleConnections.new_call_error(_data, call_id).is_empty():
 		return false
-	_data["external_calls"].append(call_id)
+	_data.external_calls.append(call_id)
 	_changed(_selected)
 	_on_rule_selected(_selected)
 	return true
@@ -713,9 +707,9 @@ func rename_connection(id: String, new_name: String) -> String:
 		return "The graph is read-only."
 	var error := RuleConnections.rename(_data, id, new_name)
 	if error.is_empty():
-		if not id.begins_with(RuleConnections.RELAY_PREFIX) and _data["call_positions"].has(id):
-			_data["call_positions"][new_name.strip_edges()] = _data["call_positions"].get(id)
-			_data["call_positions"].erase(id)
+		if not id.begins_with(RuleConnections.RELAY_PREFIX) and _data.call_positions.has(id):
+			_data.call_positions[new_name.strip_edges()] = _data.call_positions.get(id)
+			_data.call_positions.erase(id)
 		_changed(_selected)
 		_on_rule_selected(_selected)
 	return error
@@ -726,7 +720,7 @@ func delete_connection(id: String) -> String:
 	var error := RuleConnections.remove(_data, id)
 	if error.is_empty():
 		if not id.begins_with(RuleConnections.RELAY_PREFIX):
-			_data["call_positions"].erase(id)
+			_data.call_positions.erase(id)
 		_changed(_selected)
 		_on_rule_selected(_selected)
 	return error
@@ -736,24 +730,24 @@ func delete_connection(id: String) -> String:
 ## Pull card positions and frame rects off the canvas into the model.
 func _sync_layout() -> void:
 	var pos := view.get_positions()
-	for rd in _data["rules"]:
-		if pos.has(rd["id"]):
-			rd["pos"] = pos[rd["id"]].round()
-			rd[AuthoredData.FIELD_HAS_POS] = true
-	var call_positions: Dictionary = _data.get("call_positions", {}).duplicate(true)
+	for rd in _data.rules:
+		if pos.has(rd.id):
+			rd.pos = pos[rd.id].round()
+			rd.has_pos = true
+	var call_positions: Dictionary = _data.call_positions.duplicate(true)
 	var visible_call_positions := view.get_call_positions()
 	for id in visible_call_positions:
-		if _data["external_calls"].has(id):
+		if _data.external_calls.has(id):
 			call_positions[id] = visible_call_positions[id].round()
 	for id in call_positions.keys():
-		if not _data["external_calls"].has(id):
+		if not _data.external_calls.has(id):
 			call_positions.erase(id)
-	_data["call_positions"] = call_positions
+	_data.call_positions = call_positions
 	var rects := view.get_group_rects()
-	for g in _data["groups"]:
-		if rects.has(g["name"]):
-			var rect: Rect2 = rects[g["name"]]
-			g["rect"] = Rect2(rect.position.round(), rect.size.round())
+	for g in _data.groups:
+		if rects.has(g.name):
+			var rect: Rect2 = rects[g.name]
+			g.rect = Rect2(rect.position.round(), rect.size.round())
 
 func _changed(select_id: String, spin: SpinBox = null) -> void:
 	_analysis_debounce.stop()
@@ -768,7 +762,7 @@ func _changed(select_id: String, spin: SpinBox = null) -> void:
 	_analyze_data()
 	view.update_data(_data)
 	_selected = select_id
-	if _find_rule(select_id).is_empty():
+	if _data.find_rule(select_id) == null:
 		_selected = ""
 		if not _selected_group.is_empty():
 			_selecting_after_edit = true
@@ -801,42 +795,35 @@ func _flush_debounced_change() -> void:
 	_pending_selection = ""
 	_changed(select_id)
 
-func _find_rule(id: String) -> Dictionary:
-	for rd in _data["rules"]:
-		if rd["id"] == id:
-			return rd
-	return {}
-
-func add_rule(at := Vector2.INF) -> Dictionary:
+func add_rule(at := Vector2.INF) -> RuleData:
 	if not _editable:
-		return {}
+		return null
 	_sync_layout()
 	var id := AuthoredData.unique_name(AuthoredData.rule_ids(_data), "new_rule")
-	var trigger: String = _data["external_calls"][0] if not _data["external_calls"].is_empty() else "arrive"
+	var trigger: String = _data.external_calls[0] if not _data.external_calls.is_empty() else "arrive"
 	var rd := AuthoredData.new_rule(id, trigger)
-	rd[AuthoredData.FIELD_STATE_KEY] = AuthoredData.new_state_key()
-	rd["pos"] = (view.view_center() - Vector2(125, 60) if at == Vector2.INF else at).round()
-	rd[AuthoredData.FIELD_HAS_POS] = true
-	_data["rules"].append(rd)
-	_changed(rd["id"])
-	_on_rule_selected(rd["id"])
+	rd.pos = (view.view_center() - Vector2(125, 60) if at == Vector2.INF else at).round()
+	rd.has_pos = true
+	_data.rules.append(rd)
+	_changed(rd.id)
+	_on_rule_selected(rd.id)
 	return rd
 
 func duplicate_rule(id: String) -> void:
 	if not _editable:
 		return
 	_sync_layout()
-	var src := _find_rule(id)
-	if src.is_empty():
+	var src := _data.find_rule(id)
+	if src == null:
 		return
-	var rd: Dictionary = src.duplicate(true)
-	rd["id"] = AuthoredData.unique_name(AuthoredData.rule_ids(_data), id + "_copy")
-	rd[AuthoredData.FIELD_STATE_KEY] = AuthoredData.new_state_key()
-	rd["pos"] = src["pos"] + Vector2(30, 30)
-	rd[AuthoredData.FIELD_HAS_POS] = true
-	_data["rules"].append(rd)
-	_changed(rd["id"])
-	_on_rule_selected(rd["id"])
+	var rd: RuleData = src.duplicate(true)
+	rd.id = AuthoredData.unique_name(AuthoredData.rule_ids(_data), id + "_copy")
+	rd.state_key = AuthoredData.new_state_key()
+	rd.pos = src.pos + Vector2(30, 30)
+	rd.has_pos = true
+	_data.rules.append(rd)
+	_changed(rd.id)
+	_on_rule_selected(rd.id)
 
 func delete_rule(id: String) -> void:
 	_delete_rules([id])
@@ -845,9 +832,9 @@ func _delete_rules(ids: Array) -> void:
 	if not _editable:
 		return
 	_sync_layout()
-	var previous_count: int = _data["rules"].size()
-	_data["rules"] = _data["rules"].filter(func(rd: Dictionary) -> bool: return not ids.has(rd["id"]))
-	if _data["rules"].size() == previous_count:
+	var previous_count: int = _data.rules.size()
+	_data.rules = _data.rules.filter(func(rd: RuleData) -> bool: return not ids.has(rd.id))
+	if _data.rules.size() == previous_count:
 		return
 	_changed("")
 
@@ -855,22 +842,25 @@ func add_group(at := Vector2.INF) -> void:
 	if not _editable:
 		return
 	_sync_layout()
-	var names: Array = _data["groups"].map(func(g: Dictionary) -> String: return g["name"])
+	var names: Array = _data.groups.map(func(g: GroupData) -> String: return g.name)
 	var origin := view.view_center() - Vector2(150, 100) if at == Vector2.INF else at
-	_data["groups"].append({"name": AuthoredData.unique_name(names, "Group"), "rect": Rect2(origin.round(), Vector2(300, 200))})
+	var group := GroupData.new()
+	group.name = AuthoredData.unique_name(names, "Group")
+	group.rect = Rect2(origin.round(), Vector2(300, 200))
+	_data.groups.append(group)
 	_changed(_selected)
 
 func delete_group(group_name: String) -> void:
 	if not _editable:
 		return
 	_sync_layout()
-	for g in _data["groups"]:
-		if g["name"] == group_name:
-			_data["groups"].erase(g)
+	for g in _data.groups:
+		if g.name == group_name:
+			_data.groups.erase(g)
 			break
-	for rd in _data["rules"]:
-		if rd["group"] == group_name:
-			rd["group"] = ""
+	for rd in _data.rules:
+		if rd.group == group_name:
+			rd.group = ""
 	_changed("")
 
 ## Dragging output -> input makes the target rule listen to what the source fires.
@@ -878,36 +868,36 @@ func delete_group(group_name: String) -> void:
 func connect_wire(source: Dictionary, to_id: String) -> void:
 	if not _editable:
 		return
-	var target := _find_rule(to_id)
-	if target.is_empty():
+	var target := _data.find_rule(to_id)
+	if target == null:
 		return
 	if source.has("event"):
-		target["trigger"] = source["event"]
+		target.trigger = source["event"]
 	else:
-		var from := _find_rule(source["rule"])
-		if from.is_empty():
+		var from := _data.find_rule(source["rule"])
+		if from == null:
 			return
 		var relay: String
 		if source.has("relay"):
 			relay = source["relay"]
 		else:
-			var relays := RuleGraphView.output_relays(from)
+			var relays := RuleGraphView.output_relays(from, _data)
 			relay = relays[clampi(source["port"], 0, relays.size() - 1)]
 		if relay == "":
 			# The unnamed rule-level port: name it after the rule.
-			relay = AuthoredData.unique_name(_all_relays(), from["id"] + "_done")
-			from["emit"] = relay
-		target["trigger"] = "relay:" + relay
+			relay = AuthoredData.unique_name(_all_relays(), from.id + "_done")
+			from.emit = relay
+		target.trigger = "relay:" + relay
 	_changed(to_id)
 	_on_rule_selected(to_id)
 
 func disconnect_wire(to_id: String) -> void:
 	if not _editable:
 		return
-	var target := _find_rule(to_id)
-	if target.is_empty():
+	var target := _data.find_rule(to_id)
+	if target == null:
 		return
-	target["trigger"] = ""
+	target.trigger = ""
 	_changed(to_id)
 	_on_rule_selected(to_id)
 
@@ -926,8 +916,8 @@ func save() -> void:
 	else:
 		_sync_layout()
 		_analyze_data()
-	if not _data["compiles"]:
-		_set_status("Fix invalid steps or script errors before saving.", Style.WARNING)
+	if not _data.errors.is_empty():
+		_set_status("Fix graph errors before saving.", Style.ERROR)
 		return
 	var draft := RuleGraphReader.make_definition(_data)
 	var previous_uid := ResourceLoader.get_resource_uid(_path)
@@ -942,7 +932,7 @@ func save() -> void:
 			push_warning("Saved %s but could not preserve its resource UID (error %d)." % [_path, uid_error])
 	# CACHE_MODE_REPLACE refreshes cached resources in place when their types match.
 	var reloaded := ResourceLoader.load(_path, "", ResourceLoader.CACHE_MODE_REPLACE) as StageDefinition
-	_data["definition"] = reloaded if reloaded != null else draft
+	_data.definition = reloaded if reloaded != null else draft
 	_record_edit()
 	_history.mark_saved(_snapshot())
 	_dirty = false
@@ -955,8 +945,8 @@ func save() -> void:
 func _on_rule_selected(rule_id: String) -> void:
 	if _selecting_after_edit or not _editable:
 		return
-	var rd := _find_rule(rule_id)
-	if rd.is_empty():
+	var rd := _data.find_rule(rule_id)
+	if rd == null:
 		return
 	_selected = rule_id
 	_selected_group = ""
@@ -977,8 +967,8 @@ func _reveal_selected_rule() -> void:
 func _on_group_selected(group_name: String) -> void:
 	if _selecting_after_edit or not _editable:
 		return
-	for g in _data["groups"]:
-		if g["name"] == group_name:
+	for g in _data.groups:
+		if g.name == group_name:
 			_selected = ""
 			_selected_group = group_name
 			_settings_title.text = "Group Settings"

@@ -13,7 +13,7 @@ const COL_SAVED := Style.RELAY
 const COL_LOCAL := Style.EVENT
 const TYPES := {"bool": false, "int": 0, "float": 0.0, "String": ""}
 
-var _data: Dictionary
+var _data: GraphDraft
 var _editable := true
 var _live_mode := false
 var _rows := VBoxContainer.new()
@@ -51,7 +51,7 @@ func _init() -> void:
 func rows_height() -> float:
 	return _rows.get_combined_minimum_size().y
 
-func show_data(data: Dictionary, editable := true, live := false) -> void:
+func show_data(data: GraphDraft, editable := true, live := false) -> void:
 	_data = data
 	_editable = editable
 	_live_mode = live
@@ -65,22 +65,22 @@ func _rebuild() -> void:
 		c.queue_free()
 	_live_labels.clear()
 	_latched.text = ""
-	if _data["vars"].is_empty():
+	if _data.variables.is_empty():
 		_rows.add_child(Style.label("No variables declared.", Style.MUTED, 13))
-	for v in _data["vars"]:
+	for v in _data.variables:
 		_rows.add_child(_make_row(v))
 
-func _make_row(v: Dictionary) -> Control:
+func _make_row(v: VariableData) -> Control:
 	var card := VBoxContainer.new()
 	card.add_theme_constant_override("separation", 6)
 	var head := HBoxContainer.new()
 	card.add_child(head)
 	var key := LineEdit.new()
-	key.text = v["key"]
+	key.text = v.key
 	key.accessibility_name = "Variable name"
 	key.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	key.editable = _editable
-	key.tooltip_text = v["key"]
+	key.tooltip_text = v.key
 	var commit_key := func(_t := "") -> void: _rename(v, key)
 	key.text_submitted.connect(commit_key)
 	key.focus_exited.connect(commit_key)
@@ -91,7 +91,7 @@ func _make_row(v: Dictionary) -> Control:
 		del.accessibility_name = "Delete variable"
 		del.tooltip_text = "Delete variable (rules that use it will show a warning)"
 		del.pressed.connect(func() -> void:
-			_data["vars"].erase(v)
+			_data.variables.erase(v)
 			_rebuild()
 			changed.emit())
 		head.add_child(del)
@@ -104,11 +104,11 @@ func _make_row(v: Dictionary) -> Control:
 	scope.add_item("Local")
 	scope.get_popup().set_item_tooltip(0, "Keep this variable in saved Stage state.")
 	scope.get_popup().set_item_tooltip(1, "Reset this variable when the Stage is restored.")
-	scope.select(0 if v["scope"] == "saved" else 1)
+	scope.select(0 if v.scope == "saved" else 1)
 	scope.disabled = not _editable
-	Style.tint(scope, COL_SAVED if v["scope"] == "saved" else COL_LOCAL)
+	Style.tint(scope, COL_SAVED if v.scope == "saved" else COL_LOCAL)
 	scope.item_selected.connect(func(i: int) -> void:
-		v["scope"] = "saved" if i == 0 else "local"
+		v.scope = "saved" if i == 0 else "local"
 		Style.tint(scope, COL_SAVED if i == 0 else COL_LOCAL)
 		changed.emit())
 	row.add_child(scope)
@@ -123,22 +123,22 @@ func _make_row(v: Dictionary) -> Control:
 		var live := Label.new()
 		live.text = "-"
 		live.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-		_live_labels[v["key"]] = live
+		_live_labels[v.key] = live
 		card.add_child(live)
 	return Style.entry(card)
 
 ## The control matches the value's type: CheckBox, SpinBox (int / float), or LineEdit.
-func _default_editor(v: Dictionary) -> Control:
+func _default_editor(v: VariableData) -> Control:
 	var set_default := func(value: Variant, spin: SpinBox = null) -> void:
-		v["default"] = value
+		v.default_value = value
 		if spin:
 			numeric_changed.emit(spin)
 		else:
 			changed.emit()
-	match typeof(v["default"]):
+	match typeof(v.default_value):
 		TYPE_BOOL:
 			var c := CheckBox.new()
-			c.button_pressed = v["default"]
+			c.button_pressed = v.default_value
 			c.disabled = not _editable
 			c.tooltip_text = "default"
 			c.toggled.connect(func(on: bool) -> void: set_default.call(on))
@@ -147,41 +147,43 @@ func _default_editor(v: Dictionary) -> Control:
 			var s := SpinBox.new()
 			s.allow_greater = true
 			s.allow_lesser = true
-			s.step = 1.0 if typeof(v["default"]) == TYPE_INT else 0.01
-			s.value = v["default"]
+			s.step = 1.0 if typeof(v.default_value) == TYPE_INT else 0.01
+			s.value = v.default_value
 			s.editable = _editable
 			s.custom_minimum_size = Vector2(80, 0)
-			var is_int := typeof(v["default"]) == TYPE_INT
+			var is_int := typeof(v.default_value) == TYPE_INT
 			s.value_changed.connect(func(x: float) -> void: set_default.call(int(x) if is_int else x, s))
 			return s
 	var l := LineEdit.new()
-	l.text = str(v["default"])
+	l.text = str(v.default_value)
 	l.editable = _editable
 	l.custom_minimum_size = Vector2(80, 0)
-	var is_name := typeof(v["default"]) == TYPE_STRING_NAME
+	var is_name := typeof(v.default_value) == TYPE_STRING_NAME
 	l.text_submitted.connect(func(t: String) -> void: set_default.call(StringName(t) if is_name else t))
 	l.focus_exited.connect(func() -> void: set_default.call(StringName(l.text) if is_name else l.text))
 	return l
 
-func _rename(v: Dictionary, edit: LineEdit) -> void:
+func _rename(v: VariableData, edit: LineEdit) -> void:
 	var new_key := edit.text.strip_edges()
-	if new_key == v["key"]:
+	if new_key == v.key:
 		return
-	var taken: bool = _data["vars"].any(func(o: Dictionary) -> bool: return o != v and o["key"] == new_key)
+	var taken: bool = _data.variables.any(func(o: VariableData) -> bool: return o != v and o.key == new_key)
 	if not new_key.is_valid_identifier() or taken:
-		edit.text = v["key"]
+		edit.text = v.key
 		return
-	AuthoredData.rename_key(_data, v["key"], new_key)
+	AuthoredData.rename_key(_data, v.key, new_key)
 	edit.tooltip_text = new_key
 	changed.emit()
 
 func _on_add(index: int) -> void:
 	var type_name: String = _add.get_popup().get_item_text(index)
-	var keys: Array = _data["vars"].map(func(x: Dictionary) -> String: return x["key"])
+	var keys: Array = _data.variables.map(func(x: VariableData) -> String: return String(x.key))
 	var value: Variant = TYPES[type_name]
-	var variable := AuthoredData.new_variable(AuthoredData.unique_name(keys, "new_var"), "local", value)
-	variable[AuthoredData.FIELD_STATE_KEY] = AuthoredData.new_state_key()
-	_data["vars"].append(variable)
+	var variable := VariableData.new()
+	variable.key = AuthoredData.unique_name(keys, "new_var")
+	variable.default_value = value
+	variable.state_key = AuthoredData.new_state_key()
+	_data.variables.append(variable)
 	_rebuild()
 	changed.emit()
 

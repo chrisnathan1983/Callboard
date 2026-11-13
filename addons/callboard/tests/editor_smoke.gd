@@ -34,18 +34,18 @@ func _test_scene_assigned_props() -> bool:
 	root.add_child(board)
 	board.open_script(TMP_PATH)
 	var ok := _check("Callboard resolves exported and @onready props from a differently named preview scene",
-		board._data.get("compiles", false) and board._data["notes"].is_empty())
+		board._data.errors.is_empty() and board._data.warnings.is_empty())
 	if ok:
 		board.add_call_name("preview_fixture_call")
 		board.save()
 		ok = _check("Callboard saves omit the transient analysis source",
 			not "metadata/_analysis_scene_source" in FileAccess.get_file_as_string(TMP_PATH)) and ok
 		board.open_script(TMP_PATH)
-		var reloaded: StageDefinition = board._data.get("definition")
+		var reloaded: StageDefinition = board._data.definition
 		ok = _check("Callboard save preserves the explicit preview scene",
 			reloaded != null and reloaded.preview_scene_path == definition.preview_scene_path
 			and reloaded.external_calls.has("preview_fixture_call")
-			and board._data["compiles"] and board._data["notes"].is_empty()) and ok
+			and board._data.errors.is_empty() and board._data.warnings.is_empty()) and ok
 	board.free()
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(TMP_PATH))
 	return ok

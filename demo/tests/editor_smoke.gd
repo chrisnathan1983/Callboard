@@ -28,16 +28,16 @@ func _test_authored_resource_graph() -> bool:
 	var data := RuleGraphReader.inspect_definition(DEFINITION_PATH)
 	ok = _check("resource stores events, variables, rules and groups",
 		definition.external_calls.size() == 4 and definition.variables.size() == 3
-		and not definition.rules.is_empty() and definition.rules.size() == data["rules"].size()
+		and not definition.rules.is_empty() and definition.rules.size() == data.rules.size()
 		and definition.groups.size() == 3 and definition.variables[0] is VariableData
 		and definition.rules[0] is RuleData and definition.rules[0].steps[0] is StepData
 		and definition.groups[0] is GroupData) and ok
-	ok = _check("reader: compiles with no problems", data["compiles"] and data["notes"].is_empty()) and ok
-	ok = _check("reader: every rule has a saved position", data["rules"].all(func(r): return r["has_pos"])) and ok
-	ok = _check("reader: step text keeps source expressions", ExprText.step_text(data["rules"][1]["steps"][1]) == "light(lamp, true, 3.5).after(0.25)") and ok
-	ok = _check("reader: step emits come from runtime Steps", data["rules"][0]["steps"][0]["emits"] == "standoff_tick") and ok
-	ok = _check("catalog: 12 verbs incl. typed params", data["catalog"].size() == 12 and VerbCatalog.find(data["catalog"], "move_to")["args"][2]["type"] == TYPE_VECTOR3) and ok
-	var prop_names: Array = data["props"].map(func(prop: Dictionary) -> String: return prop["name"])
+	ok = _check("reader: compiles with no problems", data.errors.is_empty() and data.warnings.is_empty()) and ok
+	ok = _check("reader: every rule has a saved position", data.rules.all(func(rule: RuleData) -> bool: return rule.has_pos)) and ok
+	ok = _check("reader: step text keeps source expressions", ExprText.step_text(data.rules[1].steps[1].to_dictionary()) == "light(lamp, true, 3.5).after(0.25)") and ok
+	ok = _check("reader: step emits come from runtime Steps", data.relay_for(data.rules[0].steps[0]) == "standoff_tick") and ok
+	ok = _check("catalog: 12 verbs incl. typed params", data.catalog.size() == 12 and VerbCatalog.find(data.catalog, "move_to")["args"][2]["type"] == TYPE_VECTOR3) and ok
+	var prop_names: Array = data.props.map(func(prop: Dictionary) -> String: return prop["name"])
 	ok = _check("Callboard discovers exported, onready, and scripted props",
 		["guard", "lamp", "window", "shelter", "reward", "treat", "decoy"].all(
 			func(prop: String) -> bool: return prop in prop_names)) and ok
@@ -46,17 +46,17 @@ func _test_authored_resource_graph() -> bool:
 	root.add_child(gv)
 	gv.show_data(data)
 	ok = _check("graph: rule nodes and wires built",
-		gv._rule_nodes.size() == data["rules"].size() and not gv.get_connection_list().is_empty()) and ok
+		gv._rule_nodes.size() == data.rules.size() and not gv.get_connection_list().is_empty()) and ok
 	var min_rule_x: float = INF
-	for rule in data["rules"]:
-		min_rule_x = minf(min_rule_x, rule["pos"].x)
+	for rule in data.rules:
+		min_rule_x = minf(min_rule_x, rule.pos.x)
 	ok = _check("external Calls are arranged close to the rule column",
 		is_equal_approx(gv._event_nodes["deliver"].position_offset.x + RuleGraphView.CALL_WIDTH,
 			min_rule_x - RuleGraphView.CALL_GAP)) and ok
-	var fresh_data := data.duplicate(true)
-	fresh_data["call_positions"] = {}
-	for rule in fresh_data["rules"]:
-		rule[AuthoredData.FIELD_HAS_POS] = false
+	var fresh_data := _copy_draft(data)
+	fresh_data.call_positions = {}
+	for rule in fresh_data.rules:
+		rule.has_pos = false
 	var fresh_graph := RuleGraphView.new()
 	root.add_child(fresh_graph)
 	fresh_graph.show_data(fresh_data)
@@ -67,11 +67,11 @@ func _test_authored_resource_graph() -> bool:
 	var kept_rule_node: GraphNode = gv._rule_nodes["z1_caught"]
 	var updated_rule_node: GraphNode = gv._rule_nodes["z1_bark"]
 	var kept_event_node: GraphNode = gv._event_nodes["deliver"]
-	var graph_edit := data.duplicate(true)
-	var edited_rule: Dictionary = graph_edit["rules"].filter(func(rule: Dictionary) -> bool: return rule["id"] == "z1_bark")[0]
-	edited_rule["one_shot"] = true
-	edited_rule["pos"] = Vector2(555, 77)
-	edited_rule[AuthoredData.FIELD_HAS_POS] = false
+	var graph_edit := _copy_draft(data)
+	var edited_rule := graph_edit.find_rule("z1_bark")
+	edited_rule.one_shot = true
+	edited_rule.pos = Vector2(555, 77)
+	edited_rule.has_pos = false
 	gv.update_data(graph_edit)
 	ok = _check("incremental graph refresh replaces only the changed rule card",
 		gv._rule_nodes["z1_bark"] != updated_rule_node and gv._rule_nodes["z1_caught"] == kept_rule_node
@@ -133,20 +133,20 @@ func _test_board_editing() -> bool:
 	ok = _check("board: discovers the demo stage from the project settings",
 		stage_paths.has(DEFINITION_PATH)) and ok
 	board.open_script(DEFINITION_PATH)
-	var d: Dictionary = board._data
+	var d := board._data
 	board.view._rule_nodes["z1_bark"].position_offset = Vector2(555, 77)
 
-	var nr: Dictionary = board.add_rule()
+	var nr: RuleData = board.add_rule()
 	ok = _check("adding an empty rule creates a unique ID and reports its missing steps and relay",
-		d["rules"].size() == definition.rules.size() + 1
-		and d["notes"].any(func(note): return "'new_rule' has no steps or completion relay" in note)) and ok
-	ok = _check("card move synced into model", d["rules"][1]["pos"] == Vector2(555, 77)) and ok
-	nr["requires"] = ["guard_calmed"]
-	nr["steps"].append(VerbCatalog.new_step(d, "score"))
-	nr["steps"].append(VerbCatalog.new_step(d, "show_node"))
-	ok = _check("new_step fills required args with a compatible prop", nr["steps"][1]["args"] == ["guard"]) and ok
+		d.rules.size() == definition.rules.size() + 1
+		and d.warnings.any(func(note): return "'new_rule' has no steps or completion relay" in note)) and ok
+	ok = _check("card move synced into model", d.rules[1].pos == Vector2(555, 77)) and ok
+	nr.requires = PackedStringArray(["guard_calmed"])
+	nr.steps.append(VerbCatalog.new_step(d, "score"))
+	nr.steps.append(VerbCatalog.new_step(d, "show_node"))
+	ok = _check("new_step fills required args with a compatible prop", nr.steps[1].args == PackedStringArray(["guard"])) and ok
 	board._changed("new_rule")
-	ok = _check("add steps: clean again", d["notes"].is_empty() and d["compiles"]) and ok
+	ok = _check("add steps: clean again", d.warnings.is_empty() and d.errors.is_empty()) and ok
 	var retained_stage: Stage = board._analysis_stage
 	var retained_prop_count := retained_stage.get_child_count()
 	board._changed("new_rule")
@@ -154,43 +154,46 @@ func _test_board_editing() -> bool:
 		board._analysis_stage == retained_stage and retained_stage.get_child_count() == retained_prop_count) and ok
 
 	board.connect_wire({"rule": "z1_bark", "port": 0}, "new_rule")
-	ok = _check("wire: names the unnamed port and sets trigger", _rule(d, "z1_bark")["emit"] == "z1_bark_done" and nr["trigger"] == "relay:z1_bark_done") and ok
-	ok = _check("wire: no problems after wiring", d["notes"].is_empty()) and ok
+	ok = _check("wire: names the unnamed port and sets trigger", _rule(d, "z1_bark").emit == "z1_bark_done" and nr.trigger == "relay:z1_bark_done") and ok
+	ok = _check("wire: no problems after wiring", d.warnings.is_empty()) and ok
 	board.connect_wire({"event": "deliver"}, "new_rule")
-	ok = _check("wire from event node", nr["trigger"] == "deliver") and ok
+	ok = _check("wire from event node", nr.trigger == "deliver") and ok
 	board.disconnect_wire("new_rule")
-	ok = _check("disconnect: trigger cleared and flagged", nr["trigger"] == "" and d["notes"].any(func(p): return "'new_rule' has no trigger" in p)) and ok
+	ok = _check("disconnect: trigger cleared and flagged", nr.trigger == "" and d.warnings.any(func(p): return "'new_rule' has no trigger" in p)) and ok
+	ok = _check("advisory findings mark the rule and menu as warnings",
+		d.errors.is_empty() and board.view._rule_nodes["new_rule"].title.begins_with("Warning · ")
+		and board._notes_button.get_popup().get_item_text(0).begins_with("Warning: ")) and ok
 
 	board.duplicate_rule("new_rule")
 	ok = _check("duplicate: unique id", AuthoredData.rule_ids(d).has("new_rule_copy")) and ok
 	board.delete_rule("new_rule_copy")
 	board.delete_rule("new_rule")
 	ok = _check("delete: original count restored; unheard relay is flagged",
-		d["rules"].size() == definition.rules.size() and d["notes"].size() == 1 and "z1_bark_done" in d["notes"][0]) and ok
-	_rule(d, "z1_bark")["emit"] = ""
+		d.rules.size() == definition.rules.size() and d.warnings.size() == 1 and "z1_bark_done" in d.warnings[0]) and ok
+	_rule(d, "z1_bark").emit = ""
 	board._changed("")
-	ok = _check("clearing the emit makes it clean again", d["notes"].is_empty()) and ok
+	ok = _check("clearing the emit makes it clean again", d.warnings.is_empty()) and ok
 
 	# Blackboard editing
 	board.blackboard._on_add(0)
-	ok = _check("add variable (bool, local)", d["vars"].size() == 4 and d["vars"][3]["key"] == "new_var" and d["vars"][3]["scope"] == "local") and ok
+	ok = _check("add variable (bool, local)", d.variables.size() == 4 and d.variables[3].key == "new_var" and d.variables[3].scope == "local") and ok
 	ok = _check("added variable is generated", RuleGraphReader.make_definition(d).variables[3].default_value == false) and ok
 	AuthoredData.rename_key(d, "lamp_on", "alarm_on")
 	board._changed("")
-	ok = _check("rename key updates guards", _rule(d, "z1_caught")["requires"] == ["alarm_on"]) and ok
-	ok = _check("rename key makes implicit `light` key explicit", _rule(d, "z1_bark")["steps"][1]["args"] == ["lamp", "true", "3.5", '&"alarm_on"']) and ok
-	ok = _check("rename key: still compiles with no problems", d["compiles"] and d["notes"].is_empty()) and ok
-	d["vars"] = d["vars"].filter(func(v): return v["key"] != "guard_calmed")
+	ok = _check("rename key updates guards", _rule(d, "z1_caught").requires == PackedStringArray(["alarm_on"])) and ok
+	ok = _check("rename key makes implicit `light` key explicit", _rule(d, "z1_bark").steps[1].args == PackedStringArray(["lamp", "true", "3.5", '&"alarm_on"'])) and ok
+	ok = _check("rename key: still compiles with no problems", d.errors.is_empty() and d.warnings.is_empty()) and ok
+	d.variables = d.variables.filter(func(v): return v.key != "guard_calmed")
 	board._changed("")
-	ok = _check("delete variable: references are flagged", d["notes"].any(func(p): return "'guard_calmed'" in p and "not declared" in p)) and ok
+	ok = _check("delete variable: references are flagged", d.warnings.any(func(p): return "'guard_calmed'" in p and "not declared" in p)) and ok
 
 	# Groups
 	board.add_group()
-	ok = _check("add group", d["groups"].size() == 4) and ok
-	_rule(d, "z1_standoff")["group"] = "Group"
+	ok = _check("add group", d.groups.size() == 4) and ok
+	_rule(d, "z1_standoff").group = "Group"
 	board._changed("z1_standoff")
 	board.delete_group("Group")
-	ok = _check("delete group clears membership", d["groups"].size() == 3 and _rule(d, "z1_standoff")["group"] == "") and ok
+	ok = _check("delete group clears membership", d.groups.size() == 3 and _rule(d, "z1_standoff").group == "") and ok
 	board.queue_free()
 
 
@@ -208,7 +211,7 @@ func _test_save_and_history() -> bool:
 	root.add_child(b2)
 	b2.open_script(TMP_PATH)
 	await process_frame
-	var d2: Dictionary = b2._data
+	var d2 := b2._data
 	ok = _check("adding an event creates a wireable event card",
 		b2.add_call_name("  doorbell  ") and b2.view._event_nodes.has("doorbell")) and ok
 	ok = _check("invalid Call IDs are rejected without editing the graph",
@@ -220,7 +223,7 @@ func _test_save_and_history() -> bool:
 	b2._redo_button.pressed.emit()
 	ok = _check("redo restores event", b2.view._event_nodes.has("doorbell") and b2._dirty) and ok
 
-	var old_pos: Vector2 = _rule(d2, "z1_bark")["pos"]
+	var old_pos: Vector2 = _rule(d2, "z1_bark").pos
 	b2.view._rule_nodes["z1_bark"].position_offset = old_pos + Vector2(42, 0)
 	b2.view.end_node_move.emit()
 	b2.undo()
@@ -238,25 +241,28 @@ func _test_save_and_history() -> bool:
 		b2.view.get_group_rects()["Delivery"].size == frame_size.round() + Vector2(30, 30)) and ok
 	b2.undo()
 	b2.blackboard._on_add(0)
-	ok = _check("new edit clears redo", b2._redo_button.disabled and d2["vars"].size() == 4) and ok
+	ok = _check("new edit clears redo", b2._redo_button.disabled and d2.variables.size() == 4) and ok
 	b2.undo()
-	ok = _check("undo restores blackboard rows", d2["vars"].size() == 3) and ok
+	ok = _check("undo restores blackboard rows", d2.variables.size() == 3) and ok
 
 	b2.connect_wire({"event": "doorbell"}, "z1_decoy")
-	ok = _check("wire uses new event", _rule(d2, "z1_decoy")["trigger"] == "doorbell") and ok
+	ok = _check("wire uses new event", _rule(d2, "z1_decoy").trigger == "doorbell") and ok
 	b2.undo()
-	ok = _check("undo restores previous wire", _rule(d2, "z1_decoy")["trigger"] == "offer:decoy") and ok
+	ok = _check("undo restores previous wire", _rule(d2, "z1_decoy").trigger == "offer:decoy") and ok
 	b2.redo()
-	ok = _check("redo reconnects event wire", _rule(d2, "z1_decoy")["trigger"] == "doorbell") and ok
-	_rule(d2, "z1_standoff")["steps"][0]["args"][0] = "@@"
+	ok = _check("redo reconnects event wire", _rule(d2, "z1_decoy").trigger == "doorbell") and ok
+	_rule(d2, "z1_standoff").steps[0].args[0] = "@@"
 	b2._changed("z1_standoff")
-	ok = _check("broken edit: compile failure detected", not d2["compiles"]) and ok
+	ok = _check("broken edit: compile failure detected", not d2.errors.is_empty()) and ok
 	b2._on_rule_selected("z1_calm")
-	var note_index: int = d2["notes"].find_custom(func(note: String) -> bool: return "'z1_standoff'" in note)
+	var note_index: int = d2.errors.find_custom(func(note: String) -> bool: return "'z1_standoff'" in note)
 	if note_index >= 0:
 		b2._notes_button.get_popup().index_pressed.emit(note_index)
 	ok = _check("choosing a validation note selects the affected rule",
 		b2._notes_button.visible and note_index >= 0 and b2._selected == "z1_standoff") and ok
+	ok = _check("compile errors are labeled on the graph and in the diagnostics menu",
+		note_index >= 0 and b2.view._rule_nodes["z1_standoff"].title.begins_with("Error · ")
+		and b2._notes_button.get_popup().get_item_text(note_index).begins_with("Error: ")) and ok
 	b2.save()
 	ok = _check("broken edit: save refused, file untouched", FileAccess.get_file_as_string(TMP_PATH) == original) and ok
 	b2._request_reload()
@@ -264,11 +270,11 @@ func _test_save_and_history() -> bool:
 		b2._reload_dialog.visible and b2.is_dirty()) and ok
 	b2._reload_dialog.hide()
 	ok = _check("canceling reload leaves the draft intact",
-		_rule(d2, "z1_standoff")["steps"][0]["args"][0] == "@@") and ok
-	_rule(d2, "z1_standoff")["steps"][0]["args"][0] = "4.0"
-	var added: Dictionary = b2.add_rule()
-	added["steps"].append(VerbCatalog.new_step(d2, "score"))
-	b2.connect_wire({"rule": "z1_calm", "port": 0}, added["id"])
+		_rule(d2, "z1_standoff").steps[0].args[0] == "@@") and ok
+	_rule(d2, "z1_standoff").steps[0].args[0] = "4.0"
+	var added: RuleData = b2.add_rule()
+	added.steps.append(VerbCatalog.new_step(d2, "score"))
+	b2.connect_wire({"rule": "z1_calm", "port": 0}, added.id)
 	var saved_frame: GraphFrame = b2.view._frames["Delivery"]
 	saved_frame.size += Vector2(10.0002, 0)
 	var expected_size := saved_frame.size.round()
@@ -290,19 +296,19 @@ func _test_save_and_history() -> bool:
 	var re := RuleGraphReader.inspect_definition(TMP_PATH)
 	ok = _check("save: script unchanged", FileAccess.get_file_as_string(STAGE_PATH) == src) and ok
 	ok = _check("save: rule, relay and interval persisted",
-		_rule(re, "new_rule")["trigger"] == "relay:z1_calm_done"
-		and _rule(re, "z1_standoff")["steps"][0]["args"][0] == "4.0") and ok
+		_rule(re, "new_rule").trigger == "relay:z1_calm_done"
+		and _rule(re, "z1_standoff").steps[0].args[0] == "4.0") and ok
 	ok = _check("save: the re-entry policy persists",
 		_rule(re, "z1_standoff").get("reentry") == Rule.ReentryPolicy.RESTART) and ok
 	ok = _check("save: frame size is rounded on disk",
-		re["groups"].any(func(g): return g["name"] == "Delivery" and g["rect"].size == expected_size)) and ok
+		re.groups.any(func(g: GroupData) -> bool: return g.name == "Delivery" and g.rect.size == expected_size)) and ok
 	ok = _check("save: moved rule position is preserved",
-		_rule(re, "z1_bark")["has_pos"] and _rule(re, "z1_bark")["pos"] == saved_rule_pos) and ok
+		_rule(re, "z1_bark").has_pos and _rule(re, "z1_bark").pos == saved_rule_pos) and ok
 	ok = _check("save: moved Call position is preserved",
-		re["call_positions"].get("deliver") == saved_call_pos) and ok
-	ok = _check("save: reloaded stage builds with no problems", re["compiles"] and re["notes"].is_empty()) and ok
+		re.call_positions.get("deliver") == saved_call_pos) and ok
+	ok = _check("save: reloaded stage builds with no problems", re.errors.is_empty() and re.warnings.is_empty()) and ok
 	ok = _check("new event and wire persist",
-		re["external_calls"].has("doorbell") and _rule(re, "z1_decoy")["trigger"] == "doorbell") and ok
+		re.external_calls.has("doorbell") and _rule(re, "z1_decoy").trigger == "doorbell") and ok
 	b2.undo()
 	ok = _check("undo after saving is an unsaved edit", b2._dirty) and ok
 	b2.redo()
@@ -329,29 +335,29 @@ func _test_debounced_history() -> bool:
 	await process_frame
 	board.open_script(TMP_PATH)
 	var id := "z1_standoff"
-	var step: Dictionary = _rule(board._data, id)["steps"][0]
-	step["args"][1] = '&"updated_tick"'
+	var step: StepData = _rule(board._data, id).steps[0]
+	step.args[1] = '&"updated_tick"'
 	board.inspector.changed.emit(id)
 	var ok := _check("scheduled edit records immediately and defers analysis",
-		board.is_dirty() and step["emits"] == "standoff_tick" and not board._analysis_debounce.is_stopped())
+		board.is_dirty() and board._data.relay_for(step) == "standoff_tick" and not board._analysis_debounce.is_stopped())
 	await create_timer(0.15).timeout
-	ok = _check("debounced analysis updates relay metadata", step["emits"] == "updated_tick") and ok
+	ok = _check("debounced analysis updates relay metadata", board._data.relay_for(step) == "updated_tick") and ok
 	board.undo()
-	step = _rule(board._data, id)["steps"][0]
+	step = _rule(board._data, id).steps[0]
 	ok = _check("one undo restores the authored relay and its metadata",
-		step["args"][1] == '&"standoff_tick"' and step["emits"] == "standoff_tick"
+		step.args[1] == '&"standoff_tick"' and board._data.relay_for(step) == "standoff_tick"
 		and not board.is_dirty() and not board._history.can_undo()) and ok
 	board.redo()
-	step = _rule(board._data, id)["steps"][0]
+	step = _rule(board._data, id).steps[0]
 	ok = _check("one redo reapplies the authored relay and its metadata",
-		step["args"][1] == '&"updated_tick"' and step["emits"] == "updated_tick") and ok
+		step.args[1] == '&"updated_tick"' and board._data.relay_for(step) == "updated_tick") and ok
 
 	var previous_card: GraphNode = board.view._rule_nodes[id]
-	step["args"][1] = '&"standoff_tick"'
+	step.args[1] = '&"standoff_tick"'
 	board.inspector.changed.emit(id)
 	board.save()
 	ok = _check("saving during debounce refreshes the changed graph card",
-		board._analysis_debounce.is_stopped() and step["emits"] == "standoff_tick"
+		board._analysis_debounce.is_stopped() and board._data.relay_for(step) == "standoff_tick"
 		and board.view._rule_nodes[id] != previous_card and not board.is_dirty()) and ok
 	board.free()
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(TMP_PATH))
@@ -383,7 +389,7 @@ func _test_canvas_actions() -> bool:
 	rule.selected = false
 	await process_frame
 	ok = _check("canvas deselection clears and hides rule settings",
-		board._selected.is_empty() and board.inspector._rule.is_empty() and not board._settings_window.visible) and ok
+		board._selected.is_empty() and board.inspector._rule == null and not board._settings_window.visible) and ok
 	view.select_rule("z1_bark")
 	board._debounce_edits = true
 	board._schedule_change("z1_bark")
@@ -409,7 +415,7 @@ func _test_canvas_actions() -> bool:
 	board._create_menu.id_pressed.emit(Callboard.CreateAction.GROUP)
 	board._create_menu.hide()
 	ok = _check("context-created group uses the clicked graph coordinates",
-		board._data["groups"].back()["rect"].position == origin) and ok
+		board._data.groups.back().rect.position == origin) and ok
 	board.undo()
 	await process_frame
 	rule = view._rule_nodes["z1_bark"]
@@ -466,11 +472,11 @@ func _test_event_and_relay_edits() -> bool:
 	ok = _check("event rename updates its card and rule trigger",
 		board.view._event_nodes.has("offer:parcel")
 		and not board.view._event_nodes.has("offer:decoy")
-		and _rule(board._data, "z1_decoy")["trigger"] == "offer:parcel"
+		and _rule(board._data, "z1_decoy").trigger == "offer:parcel"
 		and board.view.get_call_positions()["offer:parcel"] == renamed_call_pos) and ok
 	ok = _check("event name collision leaves connections alone",
 		not board.rename_connection("offer:parcel", "deliver").is_empty()
-		and _rule(board._data, "z1_decoy")["trigger"] == "offer:parcel") and ok
+		and _rule(board._data, "z1_decoy").trigger == "offer:parcel") and ok
 	card = board._connection_cards["offer:parcel"]
 	var delete := card.find_child("DeleteConnection", true, false) as Button
 	delete.pressed.emit()
@@ -480,32 +486,33 @@ func _test_event_and_relay_edits() -> bool:
 	board._delete_connection_dialog.confirmed.emit()
 	ok = _check("deleting an event clears its dependent trigger",
 		not board.view._event_nodes.has("offer:parcel")
-		and _rule(board._data, "z1_decoy")["trigger"] == "") and ok
+		and _rule(board._data, "z1_decoy").trigger == "") and ok
 	board.undo()
 	ok = _check("undo restores the event and its wire",
 		board.view._event_nodes.has("offer:parcel")
-		and _rule(board._data, "z1_decoy")["trigger"] == "offer:parcel") and ok
+		and _rule(board._data, "z1_decoy").trigger == "offer:parcel") and ok
 
 	ok = _check("relay rename updates every rule emitter and the listener",
 		board.rename_connection("relay:calm_guard", "guard_calm").is_empty()
-		and _rule(board._data, "z1_treat")["emit"] == "guard_calm"
-		and _rule(board._data, "z1_decoy")["emit"] == "guard_calm"
-		and _rule(board._data, "z1_calm")["trigger"] == "relay:guard_calm") and ok
+		and _rule(board._data, "z1_treat").emit == "guard_calm"
+		and _rule(board._data, "z1_decoy").emit == "guard_calm"
+		and _rule(board._data, "z1_calm").trigger == "relay:guard_calm") and ok
 	ok = _check("relay rename updates the authored argument of a step emitter",
 		board.rename_connection("relay:standoff_tick", "guard_tick").is_empty()
-		and _rule(board._data, "z1_standoff")["steps"][0]["args"] == ["3.5", '&"guard_tick"']
-		and _rule(board._data, "z1_bark")["trigger"] == "relay:guard_tick") and ok
+		and _rule(board._data, "z1_standoff").steps[0].args == PackedStringArray(["3.5", '&"guard_tick"'])
+		and _rule(board._data, "z1_bark").trigger == "relay:guard_tick") and ok
 	ok = _check("an external relay rename updates its declaration and listener",
 		board.rename_connection("relay:treat_out", "treat_ready").is_empty()
-		and board._data["external_calls"].has("relay:treat_ready")
-		and _rule(board._data, "z1_treat")["trigger"] == "relay:treat_ready") and ok
+		and board._data.external_calls.has("relay:treat_ready")
+		and _rule(board._data, "z1_treat").trigger == "relay:treat_ready") and ok
 
 	board.save()
 	var reloaded := RuleGraphReader.inspect_definition(TMP_PATH)
-	var tick: Dictionary = _rule(reloaded, "z1_standoff")["steps"][0]
-	var saved: StageDefinition = reloaded["definition"]
+	var tick := _rule(reloaded, "z1_standoff").steps[0]
+	var saved: StageDefinition = reloaded.definition
 	ok = _check("save and reload preserve typed data and rederive step metadata",
-		reloaded["compiles"] and tick["emits"] == "guard_tick" and tick["emit_arg"] == 1
+		reloaded.errors.is_empty() and reloaded.relay_for(tick) == "guard_tick"
+		and reloaded.step_metadata[tick].relay_argument == 1
 		and saved.rules[0] is RuleData and saved.rules[0].steps[0] is StepData) and ok
 
 	var affected := RuleConnections.impact(board._data, "relay:guard_tick")
@@ -513,17 +520,17 @@ func _test_event_and_relay_edits() -> bool:
 		affected.has("z1_standoff — step 1 (repeat_emit)") and affected.has("z1_bark — trigger")) and ok
 	ok = _check("deleting a step relay removes the emitting step and disconnects its listener",
 		board.delete_connection("relay:guard_tick").is_empty()
-		and _rule(board._data, "z1_standoff")["steps"].is_empty()
-		and _rule(board._data, "z1_bark")["trigger"] == "") and ok
+		and _rule(board._data, "z1_standoff").steps.is_empty()
+		and _rule(board._data, "z1_bark").trigger == "") and ok
 	board.undo()
 	ok = _check("undo restores the emitting step and relay connection",
-		_rule(board._data, "z1_standoff")["steps"][0]["emits"] == "guard_tick"
-		and _rule(board._data, "z1_bark")["trigger"] == "relay:guard_tick") and ok
+		board._data.relay_for(_rule(board._data, "z1_standoff").steps[0]) == "guard_tick"
+		and _rule(board._data, "z1_bark").trigger == "relay:guard_tick") and ok
 	ok = _check("deleting a rule relay clears all its outputs and listeners",
 		board.delete_connection("relay:guard_calm").is_empty()
-		and _rule(board._data, "z1_treat")["emit"] == ""
-		and _rule(board._data, "z1_decoy")["emit"] == ""
-		and _rule(board._data, "z1_calm")["trigger"] == "") and ok
+		and _rule(board._data, "z1_treat").emit == ""
+		and _rule(board._data, "z1_decoy").emit == ""
+		and _rule(board._data, "z1_calm").trigger == "") and ok
 	board.queue_free()
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(TMP_PATH))
 	return ok
@@ -538,7 +545,7 @@ func _test_rename_saved_state() -> bool:
 	board._on_rule_selected("z1_delivered")
 	board.inspector._set_id("delivered")
 	board.undo()
-	var ok := _check("undo restores the rule ID", not _rule(board._data, "z1_delivered").is_empty())
+	var ok := _check("undo restores the rule ID", _rule(board._data, "z1_delivered") != null)
 	board.redo()
 	board._on_rule_selected("delivered")
 	board.inspector._set_id("parcel_delivered")
@@ -548,7 +555,7 @@ func _test_rename_saved_state() -> bool:
 	board.save()
 
 	var data := RuleGraphReader.inspect_definition(TMP_PATH)
-	var renamed: StageDefinition = data["definition"]
+	var renamed: StageDefinition = data.definition
 	var stage := (load(renamed.preview_scene_path) as PackedScene).instantiate() as Stage
 	stage.definition = renamed
 	stage.fired = {&"z1_delivered": true}
@@ -575,13 +582,13 @@ func _test_rename_saved_state() -> bool:
 	var original := _rule(board._data, "parcel_delivered")
 	var copy := _rule(board._data, "z1_delivered")
 	ok = _check("a duplicate can reuse the old rule name without inheriting its latch",
-		original["state_key"] != copy["state_key"]) and ok
+		original.state_key != copy.state_key) and ok
 	board.blackboard._on_add(0)
 	var rows := board.blackboard._rows
 	var reused_key := rows.get_child(rows.get_child_count() - 1).find_children("*", "LineEdit", true, false).front() as LineEdit
 	reused_key.text = "guard_calmed"
 	reused_key.text_submitted.emit(reused_key.text)
-	board._data["vars"].back()["scope"] = "saved"
+	board._data.variables.back().scope = "saved"
 	var reused_stage := (load(renamed.preview_scene_path) as PackedScene).instantiate() as Stage
 	reused_stage.definition = RuleGraphReader.make_definition(board._data)
 	reused_stage.saved_vars = {&"guard_calmed": true}
@@ -620,14 +627,14 @@ func _test_numeric_undo() -> bool:
 	board._input(mouse)
 	board.undo()
 	var ok := _check("a second SpinBox gesture undoes independently",
-		board._data["vars"].back()["default"] == 2)
+		board._data.variables.back().default_value == 2)
 	board.undo()
 	ok = _check("one undo restores the value before the first SpinBox gesture",
-		board._data["vars"].back()["default"] == 0) and ok
+		board._data.variables.back().default_value == 0) and ok
 	board.redo()
 	board.redo()
 	ok = _check("redo restores the final value of each gesture",
-		board._data["vars"].back()["default"] == 4) and ok
+		board._data.variables.back().default_value == 4) and ok
 
 	board._on_rule_selected("z1_standoff")
 	var interval := board.inspector.find_children("*", "SpinBox", true, false).front() as SpinBox
@@ -638,10 +645,10 @@ func _test_numeric_undo() -> bool:
 	mouse.pressed = false
 	board._input(mouse)
 	ok = _check("the numeric step field stays active throughout a gesture",
-		_rule(board._data, "z1_standoff")["steps"][0]["args"][0] == "5.0") and ok
+		_rule(board._data, "z1_standoff").steps[0].args[0] == "5.0") and ok
 	board.undo()
 	ok = _check("one undo restores the step argument before the drag",
-		_rule(board._data, "z1_standoff")["steps"][0]["args"][0] == "3.5") and ok
+		_rule(board._data, "z1_standoff").steps[0].args[0] == "3.5") and ok
 	board.queue_free()
 	return ok
 
@@ -650,7 +657,7 @@ func _test_live_debug() -> bool:
 	var stage := definition.instantiate_for_analysis(root)
 	var board := Callboard.new()
 	root.add_child(board)
-	board._show({"error": "No stage definitions"}, false)
+	board._show(GraphDraft.load_error("No stage definitions"), false)
 	var load_error_hides_debug := not board._debug_button.visible and not board._live_debug_panel.visible
 	board.bind_live(stage)
 	stage.engine.rules.clear()
@@ -693,11 +700,17 @@ func _test_live_debug() -> bool:
 	ok = _check("live connections can fire Calls but not relays", call_can_fire and relay_has_no_fire) and ok
 	return _check("live debug records Calls fired from the connections panel", traced_call) and ok
 
-func _rule(d: Dictionary, id: String) -> Dictionary:
-	for r in d["rules"]:
-		if r["id"] == id:
-			return r
-	return {}
+func _rule(draft: GraphDraft, id: String) -> RuleData:
+	return draft.find_rule(id)
+
+func _copy_draft(source: GraphDraft) -> GraphDraft:
+	var draft := GraphDraft.new()
+	draft.definition = source.definition
+	draft.catalog = source.catalog
+	draft.props = source.props
+	draft.restore(source.snapshot())
+	RuleGraphReader.analyze(draft)
+	return draft
 
 func _check(label: String, cond: bool) -> bool:
 	print(("  ok   " if cond else "  FAIL ") + label)

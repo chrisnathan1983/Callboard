@@ -13,22 +13,24 @@ const BASE_Y_META := &"_callboard_base_y"
 func show_node(n: Node3D, should_be_visible := true) -> Step:
 	return Step.new(func(_c: Dictionary) -> void: n.visible = should_be_visible)
 
+## Scale and position animations finish their visual effect after rule cancellation.
+## Stage deactivation releases the rule's wait immediately.
 func pop(n: Node3D) -> Step:
 	var host := context.host
-	var f := func(_c: Dictionary) -> Signal:
+	var f := func(payload: Dictionary) -> Signal:
 		n.scale = Vector3.ZERO
 		var t := host.create_tween()
 		t.tween_property(n, "scale", Vector3.ONE, 0.35).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-		return t.finished   # the next step runs when the animation actually ends
+		return _animation_completion(payload, t.finished)
 	return Step.new(f)
 
 func bounce(n: Node3D) -> Step:
 	var host := context.host
-	var f := func(_c: Dictionary) -> Signal:
+	var f := func(payload: Dictionary) -> Signal:
 		var t := host.create_tween()
 		t.tween_property(n, "scale", Vector3(1.25, 0.75, 1.25), 0.1)
 		t.tween_property(n, "scale", Vector3.ONE, 0.3).set_trans(Tween.TRANS_BOUNCE)
-		return t.finished
+		return _animation_completion(payload, t.finished)
 	return Step.new(f)
 
 ## Switches a light and mirrors it into a local Blackboard key. duration > 0 switches it
@@ -45,7 +47,12 @@ func _light(n: Node3D, on: bool, duration: float, key: StringName) -> Step:
 		n.set_meta(LIGHT_ACTIVATION_META, activation)
 		n.visible = on
 		ctx.bb.write(key, on)
-		if on and duration > 0.0 and (rule == null or engine.alive(rule, gen)):
+		if on and duration > 0.0:
+			if engine.token() != gen or (rule != null and not engine.alive(rule, gen)):
+				if is_instance_valid(n) and n.get_meta(LIGHT_ACTIVATION_META, 0) == activation:
+					n.hide()
+					ctx.bb.write(key, false)
+				return
 			var on_run_cancelled := Callable()
 			var turn_off := Callable()
 			turn_off = func() -> void:
@@ -100,7 +107,7 @@ func say(n: Node3D, text: String, seconds := 1.0) -> Step:
 
 func move_to(n: Node3D, dest: Node3D, offset := Vector3.ZERO, duration := 0.7) -> Step:
 	var host := context.host
-	var move := func(_payload: Dictionary) -> Signal:
+	var move := func(payload: Dictionary) -> Signal:
 		var target_global := dest.global_position + offset
 		var parent := n.get_parent_node_3d()
 		var target_local := target_global if parent == null or n.top_level else parent.to_local(target_global)
@@ -108,30 +115,30 @@ func move_to(n: Node3D, dest: Node3D, offset := Vector3.ZERO, duration := 0.7) -
 		var tween := host.create_tween()
 		var set_position := _position_setter(n, tween, ^"global_position")
 		tween.tween_method(set_position, n.global_position, target_global, duration)
-		return tween.finished
+		return _animation_completion(payload, tween.finished)
 	return Step.new(move)
 
 ## Tints the mesh's material_override.
 func flash(m: MeshInstance3D) -> Step:
 	var host := context.host
-	var f := func(_c: Dictionary) -> Signal:
+	var f := func(payload: Dictionary) -> Signal:
 		var material := _effect_material(m, "flash")
 		if material == null:
-			return host.get_tree().process_frame
+			return _animation_completion(payload, host.get_tree().process_frame)
 		var base := _base_color(m, material)
 		var tint := Color(1, 0.15, 0.15)
 		material.albedo_color = tint
 		var t := host.create_tween()
 		t.tween_method(_color_setter(m, material, t), tint, base, 0.8)
-		return t.finished
+		return _animation_completion(payload, t.finished)
 	return Step.new(f)
 
 func jump(m: MeshInstance3D) -> Step:
 	var host := context.host
-	var f := func(_c: Dictionary) -> Signal:
+	var f := func(payload: Dictionary) -> Signal:
 		var material := _effect_material(m, "jump")
 		if material == null:
-			return host.get_tree().process_frame
+			return _animation_completion(payload, host.get_tree().process_frame)
 		var base := _base_color(m, material)
 		var tint := Color(1, 0.9, 0.3)
 		var color_tween := host.create_tween()
@@ -147,8 +154,15 @@ func jump(m: MeshInstance3D) -> Step:
 		var set_height := _position_setter(m, hop, ^"position:y")
 		hop.tween_method(set_height, m.position.y, base_y + 0.6, 0.15)
 		hop.tween_method(set_height, base_y + 0.6, base_y, 0.25).set_trans(Tween.TRANS_BOUNCE)
-		return hop.finished
+		return _animation_completion(payload, hop.finished)
 	return Step.new(f)
+
+func _animation_completion(payload: Dictionary, finished: Signal) -> Signal:
+	if payload.has("_rule"):
+		var engine := context.engine_ref.get_ref() as RuleEngine
+		if engine != null:
+			return engine.interruptible(finished)
+	return finished
 
 ## The newest tween controls position. Earlier tweens still finish so their rules resume.
 func _position_setter(node: Node3D, tween: Tween, property: NodePath) -> Callable:
