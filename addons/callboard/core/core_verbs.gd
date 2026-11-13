@@ -27,8 +27,9 @@ func repeat_emit(interval: float, tick: StringName) -> Step:
 			return
 		var gen := engine.token()
 		while engine.alive(rule, gen):
+			var timeout := engine.interruptible(engine.wait_tracked(interval, rule.id, "repeat_emit loop"))
 			engine = null
-			await (ctx.engine_ref.get_ref() as RuleEngine).wait_tracked(interval, rule.id, "repeat_emit loop")
+			await timeout
 			engine = ctx.engine_ref.get_ref() as RuleEngine
 			if not engine or not engine.alive(rule, gen):
 				return

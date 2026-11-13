@@ -7,6 +7,9 @@ signal pending_changed(entries: Array)
 signal run_cancelled(rule_id: StringName)
 signal all_cancelled
 
+class AwaitedSignal extends RefCounted:
+	signal completed
+
 var rules: Array[Rule] = []
 var fired: Dictionary                 # injected, latches one-shot rules
 var bb: Blackboard
@@ -15,6 +18,7 @@ var _gen := 0
 var _active := {}                      # Rule -> pending payloads and restart request
 var _pending_waits: Dictionary = {}
 var _pending_callbacks: Dictionary = {}
+var _awaited_signals: Dictionary = {}
 var _next_wait_id := 1
 const MAX_FIRE_DEPTH := 64
 
@@ -36,6 +40,14 @@ func cancel_all() -> void:
 			tracked_signal.disconnect(callback)
 	_pending_callbacks.clear()
 	pending_changed.emit(pending_snapshot())
+	var cancelled := _awaited_signals.values()
+	_awaited_signals.clear()
+	for entry: Dictionary in cancelled:
+		var source: Signal = entry["source"]
+		var callback: Callable = entry["callback"]
+		if not source.is_null() and source.is_connected(callback):
+			source.disconnect(callback)
+		entry["completion"].completed.emit()
 
 func fire(event: StringName, ctx := {}) -> void:
 	var depth := int(ctx.get("_callboard_fire_depth", 0)) + 1
@@ -97,7 +109,7 @@ func _run(r: Rule, event: StringName, ctx: Dictionary, gen: int) -> void:
 		var s: Step = r.steps[i]
 		if s.delay > 0.0:
 			_emit_trace("delay_started", r.id, event, i, s, "%0.2fs" % s.delay)
-			await wait_tracked(s.delay, r.id, "step delay")
+			await interruptible(wait_tracked(s.delay, r.id, "step delay"))
 			if not alive(r, gen):
 				run["cancelled"] = true
 				run_cancelled.emit(r.id)
@@ -120,6 +132,21 @@ func wait_tracked(seconds: float, rule_id: StringName, label: String) -> Signal:
 	var timeout: Signal = wait.call(seconds)
 	track_signal(timeout, rule_id, label, seconds)
 	return timeout
+
+## Completes when the source emits or the engine is deactivated.
+func interruptible(source: Signal) -> Signal:
+	var completion := AwaitedSignal.new()
+	var id := completion.get_instance_id()
+	var callback := _complete_wait.bind(id)
+	_awaited_signals[id] = {"source": source, "callback": callback, "completion": completion}
+	source.connect(callback, CONNECT_ONE_SHOT)
+	return completion.completed
+
+func _complete_wait(id: int) -> void:
+	var entry: Dictionary = _awaited_signals.get(id, {})
+	_awaited_signals.erase(id)
+	if not entry.is_empty():
+		entry["completion"].completed.emit()
 
 ## Tracks an awaited or non-blocking signal until it completes.
 func track_signal(signal_to_track: Signal, rule_id: StringName, label: String, seconds := -1.0) -> void:

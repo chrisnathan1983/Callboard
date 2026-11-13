@@ -314,7 +314,7 @@ func _stage_directory_for_path(path: String) -> String:
 		var prefix := directory if directory.ends_with("/") else directory + "/"
 		if path.begins_with(prefix) and prefix.length() > matching.length():
 			matching = directory
-	return matching if not matching.is_empty() else Settings.stages_directory()
+	return matching if not matching.is_empty() else Settings.default_stage_folder()
 
 static func _path_relative_to(path: String, directory: String) -> String:
 	var prefix := directory if directory.ends_with("/") else directory + "/"
@@ -323,7 +323,7 @@ static func _path_relative_to(path: String, directory: String) -> String:
 func _collect_stage_definition_paths(dir_path := "") -> Array[String]:
 	var paths: Array[String] = []
 	if dir_path.is_empty():
-		dir_path = Settings.stages_directory()
+		dir_path = Settings.default_stage_folder()
 	# The stage generator creates the primary directory when the first stage is added.
 	if not DirAccess.dir_exists_absolute(dir_path):
 		return paths

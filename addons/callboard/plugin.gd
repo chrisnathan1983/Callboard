@@ -9,6 +9,7 @@ const Settings := preload("res://addons/callboard/core/callboard_settings.gd")
 
 var board: Callboard
 var _opened := false
+var _last_stage_folders: Array[String] = []
 var _stage_dialog: ConfirmationDialog
 var _stage_line_edit: LineEdit
 var _stage_preview: Label
@@ -48,9 +49,12 @@ func _has_main_screen() -> bool:
 func _make_visible(visible: bool) -> void:
 	if board:
 		board.visible = visible
-		if visible and not _opened:
-			_opened = true
-			board.refresh()
+		if visible and not board.is_dirty():
+			var folders := Settings.stage_directories()
+			if not _opened or folders != _last_stage_folders:
+				_opened = true
+				_last_stage_folders = folders
+				board.refresh()
 
 func _get_plugin_name() -> String:
 	return "Callboard"
@@ -114,7 +118,7 @@ func _on_name_changed(text: String) -> void:
 		_stage_preview.text = ""
 		return
 	var safe := raw.to_snake_case()
-	_stage_preview.text = "%s/   class %s" % [Settings.stages_directory().path_join(safe), safe.to_pascal_case()]
+	_stage_preview.text = "%s/   class %s" % [Settings.default_stage_folder().path_join(safe), safe.to_pascal_case()]
 
 func _on_dialog_confirmed() -> void:
 	var raw_name := _stage_line_edit.text.strip_edges()
@@ -138,7 +142,7 @@ func _validate_stage_name(raw_name: String) -> String:
 	for c in ProjectSettings.get_global_class_list():
 		if c["class"] == cls:
 			return "Class '%s' already exists in the project." % cls
-	var dir_path := Settings.stages_directory().path_join(safe)
+	var dir_path := Settings.default_stage_folder().path_join(safe)
 	if DirAccess.dir_exists_absolute(dir_path):
 		return "Stage '%s' already exists." % safe
 	return ""
@@ -148,7 +152,7 @@ func _validate_stage_name(raw_name: String) -> String:
 func _create_stage_files(stage_name: String) -> void:
 	var safe_name := stage_name.to_snake_case()
 	var pascal := safe_name.to_pascal_case()
-	var dir_path := Settings.stages_directory().path_join(safe_name)
+	var dir_path := Settings.default_stage_folder().path_join(safe_name)
 	var script_path := dir_path.path_join(safe_name + ".gd")
 	var res_path := dir_path.path_join(safe_name + ".tres")
 	var scene_path := dir_path.path_join(safe_name + ".tscn")

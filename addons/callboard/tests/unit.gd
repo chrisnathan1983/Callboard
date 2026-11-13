@@ -198,6 +198,8 @@ func _initialize() -> void:
 	state["step_ran"] = false
 	engine.fire(&"go")
 	engine.cancel_all()
+	ok = _check("deactivation releases a delayed rule before the clock ticks",
+		engine._awaited_signals.is_empty() and clock_tick.get_connections().is_empty()) and ok
 	clock_tick.emit()
 	ok = _check("deactivation cancels an outstanding delay", not state["step_ran"]) and ok
 

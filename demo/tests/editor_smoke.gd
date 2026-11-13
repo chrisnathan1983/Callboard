@@ -103,8 +103,8 @@ func _test_authored_resource_graph() -> bool:
 
 func _test_additional_stage_locations() -> bool:
 	var previous: Variant = ProjectSettings.get_setting(
-		Settings.ADDITIONAL_STAGE_DIRECTORIES, PackedStringArray())
-	ProjectSettings.set_setting(Settings.ADDITIONAL_STAGE_DIRECTORIES,
+		Settings.STAGE_SCAN_FOLDERS, PackedStringArray())
+	ProjectSettings.set_setting(Settings.STAGE_SCAN_FOLDERS,
 		PackedStringArray(["res://demo/stages/", "res://demo/stages/stage_01/", "res://stages"]))
 	var directories := Settings.stage_directories()
 	var board := Callboard.new()
@@ -116,7 +116,7 @@ func _test_additional_stage_locations() -> bool:
 	ok = _check("stage picker labels entries relative to their selected root",
 		Callboard._path_relative_to(DEFINITION_PATH, "res://demo/stages") == "stage_01/stage_01.tres") and ok
 	board.queue_free()
-	ProjectSettings.set_setting(Settings.ADDITIONAL_STAGE_DIRECTORIES, previous)
+	ProjectSettings.set_setting(Settings.STAGE_SCAN_FOLDERS, previous)
 	return ok
 
 func _test_board_editing() -> bool:

@@ -13,7 +13,7 @@
 
 ## Run the demo
 
-Open [project.godot](project.godot) in Godot **4.7** and press **F5**. The plugin is already enabled. Open the **Callboard** editor tab and select `stage_01/stage_01.tres` to inspect the same rules that drive the demo. The project includes `res://demo/stages` in `callboard/additional_stage_directories` so the stage picker can find it. CI uses Godot **4.7.2**.
+Open [project.godot](project.godot) in Godot **4.7** and press **F5**. The plugin is already enabled. Open the **Callboard** editor tab and select `stage_01/stage_01.tres` to inspect the same rules that drive the demo. The project includes `res://demo/stages` in `callboard/stage_scan_folders` so the stage picker can find it. CI uses Godot **4.7.2**.
 
 1. Walk toward the doorway. The guard barks and the lamp flashes. Interact while the lamp is on to see the caught rule.
 2. Interact by the red shelter to offer a decoy, or walk into the blue pad to release a treat. Either path calms the guard.
@@ -44,7 +44,7 @@ The two calming paths emit the same `calm_guard` relay. The two delivery rules s
 
 1. Copy [`addons/callboard/`](addons/callboard/) into your project's `addons/` directory.
 2. Open **Project → Project Settings → Plugins** and enable **Callboard**.
-3. Choose **Project → Tools → Create New Stage…**. The generator creates a scene, a GDScript extending `Stage`, and an assigned `StageDefinition` resource under the configured Callboard stages directory (default `res://stages/`). Set `callboard/stages_directory` in Project Settings to use another folder.
+3. Choose **Project → Tools → Create New Stage…**. The generator creates a scene, a GDScript extending `Stage`, and an assigned `StageDefinition` resource under the configured Callboard stages directory (default `res://stages/`). In **Project Settings → General → Callboard**, set **Default Stage Folder** to choose where new stages are saved. Add folders under **Stage Scan Folders** to discover stages elsewhere. Callboard scans the default folder and all listed folders recursively.
 4. Open the **Callboard** tab and select your new definition. Instance the generated scene in your game and call `activate()` after it has entered the scene tree.
 
 See [Godot's plugin installation guide](https://docs.godotengine.org/en/stable/tutorials/plugins/editor/installing_plugins.html) for the editor settings.
@@ -147,6 +147,8 @@ godot --headless --path . --script res://demo/tests/smoke.gd
 ```
 
 [GitHub Actions](.github/workflows/test.yml) runs the four suites separately and checks that the demo runtime works without the editor and authoring model.
+
+If a Windows headless import reports `Safe save failed` in a restricted workspace, use a writable workspace or disable **Filesystem → On Save → Safe Save On Backup Then Rename** in a dedicated test editor profile. The setting is in Godot’s **Editor Settings**.
 
 ## License
 

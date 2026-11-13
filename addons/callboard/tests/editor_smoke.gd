@@ -10,6 +10,7 @@ func _initialize() -> void:
 	ok = _test_layer_export_filter() and ok
 	ok = _test_factory() and ok
 	ok = _test_debug_panel() and ok
+	ok = _test_project_settings() and ok
 	print("ADDON EDITOR: ", "PASS" if ok else "FAIL")
 	quit(0 if ok else 1)
 
@@ -147,6 +148,23 @@ func _test_debug_panel() -> bool:
 	panel.free()
 	first.free()
 	second.free()
+	return ok
+
+func _test_project_settings() -> bool:
+	const Settings := preload("res://addons/callboard/core/callboard_settings.gd")
+	var saved_folder: Variant = ProjectSettings.get_setting(Settings.DEFAULT_STAGE_FOLDER, null)
+	var scan_folders: Variant = ProjectSettings.get_setting(Settings.STAGE_SCAN_FOLDERS, null)
+	ProjectSettings.set_setting(Settings.DEFAULT_STAGE_FOLDER, null)
+	ProjectSettings.set_setting(Settings.STAGE_SCAN_FOLDERS, null)
+	ProjectSettings.set_setting(Settings.LEGACY_DEFAULT_FOLDER, "res://custom_stages/")
+	ProjectSettings.set_setting(Settings.LEGACY_SCAN_FOLDERS, PackedStringArray(["res://extra_stages/"]))
+	Settings.register_project_settings()
+	var ok := _check("legacy stage folder settings migrate to the new fields",
+		Settings.stage_directories() == ["res://custom_stages", "res://extra_stages"]
+		and not ProjectSettings.has_setting(Settings.LEGACY_DEFAULT_FOLDER)
+		and not ProjectSettings.has_setting(Settings.LEGACY_SCAN_FOLDERS))
+	ProjectSettings.set_setting(Settings.DEFAULT_STAGE_FOLDER, saved_folder)
+	ProjectSettings.set_setting(Settings.STAGE_SCAN_FOLDERS, scan_folders)
 	return ok
 
 func _check(label: String, cond: bool) -> bool:

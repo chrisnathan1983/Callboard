@@ -101,3 +101,7 @@ jobs:
           if grep -E '^(SCRIPT )?ERROR:' "$RUNNER_TEMP/godot-runtime-boundary.log"; then
             exit 1
           fi
+          timeout 120s godot --headless --path "$temp_project" --quit-after 5 2>&1 | tee "$RUNNER_TEMP/godot-runtime-exit.log"
+          if grep -E '^(SCRIPT )?ERROR:|ObjectDB instances were leaked' "$RUNNER_TEMP/godot-runtime-exit.log"; then
+            exit 1
+          fi

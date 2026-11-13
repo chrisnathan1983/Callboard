@@ -15,13 +15,13 @@ compatibility/default_parent_skeleton_in_mesh_instance_3d=true
 [application]
 
 config/name="Callboard"
-run/main_scene="uid://b6awcg4g07keo"
+run/main_scene="res://demo/game.tscn"
 config/features=PackedStringArray("4.7")
 
 [callboard]
 
-stages_directory="res://stages"
-additional_stage_directories=PackedStringArray("res://demo/stages")
+default_stage_folder="res://stages"
+stage_scan_folders=PackedStringArray("res://demo/stages")
 
 [display]
 
