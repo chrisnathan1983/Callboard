@@ -155,7 +155,9 @@ godot --headless --path . --script res://demo/tests/smoke.gd
 
 After all tests pass, a default-branch run publishes the addon ZIP to [GitHub Releases](https://github.com/chrisnathan1983/director_blackboard_demo_4/releases). To try a pull request, open its **Checks** tab, then follow **Package Callboard** to the workflow run and download the ZIP from the run summary or **Artifacts**.
 
-The workflow adds its run number to the patch number in `plugin.cfg`. PR builds append `-pr.<number>`, and reruns reuse the same version. Version numbers can skip when a run fails or builds a preview. Each ZIP contains the installable addon and its license.
+Packages and releases use `0.month.day.HHMMSS` in UTC. For example, a run created on November 13 at 18:42:07 UTC produces `callboard-0.11.13.184207.zip` and, on the default branch, the tag `v0.11.13.184207`. PR builds append `-pr.<number>`. Reruns reuse the original creation time. The packaged `plugin.cfg` carries the same version as the ZIP.
+
+The version resets at the start of each year. If a release tag already points to a different commit, publishing fails and preserves the existing release.
 
 If a Windows headless import reports `Safe save failed` in a restricted workspace, use a writable workspace or disable **Filesystem → On Save → Safe Save On Backup Then Rename** in a dedicated test editor profile. The setting is in Godot’s **Editor Settings**.
 
