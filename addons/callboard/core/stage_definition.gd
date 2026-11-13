@@ -12,12 +12,7 @@ static var _string_token_pattern: RegEx
 @export var external_calls := PackedStringArray()
 @export var external_vars := PackedStringArray()
 @export var variables: Array = []
-var _rules: Array = []
-@export var rules: Array:
-	get:
-		return _rules
-	set(value):
-		_rules = value
+@export var rules: Array = []
 @export var groups: Array = []
 @export var format_version := 0
 
@@ -38,7 +33,7 @@ func _set(property: StringName, value: Variant) -> bool:
 func _migrate() -> void:
 	if external_calls.is_empty():
 		external_calls = PackedStringArray(["arrive"])
-	_rules = _normalize_rules(_rules)
+	rules = _normalize_rules(rules)
 	variables = _normalize_variables(variables)
 	groups = _normalize_groups(groups)
 	format_version = maxi(format_version, CURRENT_FORMAT_VERSION)
@@ -118,6 +113,8 @@ func apply_blackboard(stage: Stage) -> void:
 			stage.define_saved(variable.key, variable.default_value, variable.state_key)
 		else:
 			stage.define_local(variable.key, variable.default_value, variable.state_key)
+		for alias in variable.aliases:
+			stage.bb.alias(alias, variable.key)
 
 func apply_graph(stage: Stage) -> Array[String]:
 	_migrate()
@@ -142,21 +139,24 @@ func apply_graph(stage: Stage) -> Array[String]:
 		var reentry: Variant = entry.reentry
 		if not (reentry is int and Rule.ReentryPolicy.values().has(reentry)):
 			problems.append("rule '%s' has an invalid re-entry policy: %s" % [rule.id, reentry])
-			continue
-		rule.reentry = reentry as Rule.ReentryPolicy
+		else:
+			rule.reentry = reentry as Rule.ReentryPolicy
 		if rule.one_shot and rule.reentry != Rule.ReentryPolicy.IGNORE:
 			problems.append("rule '%s' is one-shot and must use Ignore re-entry" % rule.id)
-			continue
 		rule.emits = entry.emit
 		for spec: StepData in entry.steps:
 			var step := _build_step(stage.verbs, spec, catalog, inputs)
 			if step == null:
 				problems.append("rule '%s' has an invalid step: %s" % [rule.id, ExprText.step_text(spec.to_dictionary())])
+				# Keep an inert placeholder so following steps retain their metadata indices.
+				step = Step.new(func(_context: Dictionary) -> void: pass)
+				step.verb = spec.verb
 			else:
 				rule.steps.append(step)
+				continue
+			rule.steps.append(step)
 		built.append(rule)
-	if problems.is_empty():
-		stage.engine.rules.append_array(built)
+	stage.engine.rules.append_array(built)
 	return problems
 
 func _build_step(factory: CoreVerbs, spec: StepData, catalog: Array, inputs: Dictionary) -> Step:

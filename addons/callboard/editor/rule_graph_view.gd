@@ -255,7 +255,7 @@ func _same_ids(nodes: Dictionary, ids: Array) -> bool:
 func _rule_signature(rd: Dictionary, problems: Array) -> Dictionary:
 	var content := rd.duplicate(true)
 	content.erase("pos")
-	content.erase("has_pos")
+	content.erase(AuthoredData.FIELD_HAS_POS)
 	content.erase("group")
 	return {
 		"content": content,
@@ -489,7 +489,7 @@ func _auto_layout(rules: Array) -> void:
 						depth[b["id"]] = maxi(depth[b["id"]], depth[a["id"]] + 1)
 	var col_y := {}
 	for rd in rules:
-		if rd["has_pos"]:
+		if rd[AuthoredData.FIELD_HAS_POS]:
 			continue
 		var d: int = depth[rd["id"]]
 		var y: float = col_y.get(d, 40.0)
@@ -634,7 +634,7 @@ func _make_rule_node(rd: Dictionary, problems: Array) -> GraphNode:
 		rows.append([_row("forbids: " + ", ".join(rd["forbids"]), COL_FORBID, &"GuiClose"), false, false, COL_DIM])
 	if not rd["cancel_if"].is_empty():
 		rows.append([_row("cancel_if: " + ", ".join(rd["cancel_if"]), COL_CANCEL, &"Stop"), false, false, COL_DIM])
-	if rd["one_shot"]:
+	if rd[AuthoredData.FIELD_ONE_SHOT]:
 		rows.append([_row("One-shot", COL_DIM, &"Lock"), false, false, COL_DIM])
 	var i := 1
 	for s in rd["steps"]:

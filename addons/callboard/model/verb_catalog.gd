@@ -4,41 +4,14 @@ class_name VerbCatalog extends RefCounted
 
 ## [{name, args: [{name, type, class, default: expr text or ""}]}], sorted by name.
 static func from_factory(factory: CoreVerbs) -> Array:
-	var out: Array = []
-	for m in factory.get_method_list():
-		var verb: String = m["name"]
-		if verb.begins_with("_"):
-			continue
-		var ret: Dictionary = m.get("return", {})
-		if ret.get("class_name", "") != "Step":
-			continue
-		var margs: Array = m["args"]
-		var defs: Array = m["default_args"]
-		var first_def := margs.size() - defs.size()
-		var args: Array = []
-		for i in margs.size():
-			var a: Dictionary = margs[i]
-			args.append({"name": String(a["name"]), "type": a["type"], "class": String(a.get("class_name", "")),
-				"default": ExprText.format_literal(defs[i - first_def]) if i >= first_def else ""})
-		out.append({"name": verb, "args": args})
-	out.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a["name"] < b["name"])
-	return out
+	return RuntimeVerbCatalog.from_factory(factory)
 
 ## [{name, class}] for every typed object variable the stage script declares (its props).
 static func props_of(stage: Stage) -> Array:
-	var out: Array = []
-	for p in stage.get_property_list():
-		if p["name"] in [&"definition", &"bb", &"engine", &"verbs"]:
-			continue
-		if (p["usage"] & PROPERTY_USAGE_SCRIPT_VARIABLE) and p["type"] == TYPE_OBJECT and String(p.get("class_name", "")) != "":
-			out.append({"name": String(p["name"]), "class": String(p["class_name"])})
-	return out
+	return RuntimeVerbCatalog.props_of(stage)
 
 static func find(catalog: Array, verb: String) -> Dictionary:
-	for v in catalog:
-		if v["name"] == verb:
-			return v
-	return {}
+	return RuntimeVerbCatalog.find(catalog, verb)
 
 ## Replace an argument expression, keeping any intervening optional defaults.
 static func set_arg(data: Dictionary, step: Dictionary, index: int, expression: String) -> void:

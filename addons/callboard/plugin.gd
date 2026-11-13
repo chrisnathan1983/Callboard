@@ -57,6 +57,15 @@ func _get_plugin_name() -> String:
 func _get_plugin_icon() -> Texture2D:
 	return EditorInterface.get_editor_theme().get_icon("GraphEdit", "EditorIcons")
 
+func _save_external_data() -> void:
+	if is_instance_valid(board) and board.is_dirty():
+		board.save()
+
+func _get_unsaved_status(for_scene: String) -> String:
+	if is_instance_valid(board) and board.is_dirty():
+		return "Callboard has unsaved edits."
+	return ""
+
 # --- Dialog -----------------------------------------------------------------------
 
 func _setup_dialog() -> void:

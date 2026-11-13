@@ -32,7 +32,9 @@ func repeat_emit(interval: float, tick: StringName) -> Step:
 			engine = ctx.engine_ref.get_ref() as RuleEngine
 			if not engine or not engine.alive(rule, gen):
 				return
-			engine.fire("relay:" + tick, c)
+			var tick_context: Dictionary = c.duplicate(true)
+			tick_context.erase("_callboard_fire_depth")
+			engine.fire("relay:" + tick, tick_context)
 	var step := Step.new(run)
 	step.emits = tick
 	step.emit_arg = 1

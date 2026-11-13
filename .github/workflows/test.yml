@@ -53,4 +53,40 @@ jobs:
       - name: Run suite
         env:
           TEST_SCRIPT: ${{ matrix.suite.script }}
-        run: godot --headless --path . --script "res://tests/$TEST_SCRIPT"
+        run: |
+          set -o pipefail
+          timeout 120s godot --headless --path . --script "res://tests/$TEST_SCRIPT" 2>&1 | tee "$RUNNER_TEMP/godot-suite.log"
+          if grep -F 'SCRIPT ERROR' "$RUNNER_TEMP/godot-suite.log"; then
+            exit 1
+          fi
+
+      - name: Verify runtime excludes editor and model layers
+        if: matrix.suite.script == 'smoke.gd'
+        run: |
+          temp_project="$RUNNER_TEMP/callboard-runtime-check"
+          mkdir -p "$temp_project"
+          cp -R addons/callboard/core tests scripts stages game.tscn project.godot "$temp_project/"
+          rm -rf "$temp_project/addons/callboard/editor" "$temp_project/addons/callboard/model"
+          python3 - "$temp_project/project.godot" <<'PY'
+          from pathlib import Path
+          import sys
+          path = Path(sys.argv[1])
+          lines = path.read_text().splitlines()
+          kept = []
+          skip = False
+          for line in lines:
+              if line.startswith("["):
+                  skip = line == "[editor_plugins]"
+              if not skip:
+                  kept.append(line)
+          path.write_text("\n".join(kept) + "\n")
+          PY
+          set -o pipefail
+          timeout 120s godot --headless --path "$temp_project" --editor --import 2>&1 | tee "$RUNNER_TEMP/godot-runtime-import.log"
+          if grep -E '^(SCRIPT )?ERROR:' "$RUNNER_TEMP/godot-runtime-import.log"; then
+            exit 1
+          fi
+          timeout 120s godot --headless --path "$temp_project" --script res://tests/smoke.gd 2>&1 | tee "$RUNNER_TEMP/godot-runtime-boundary.log"
+          if grep -F 'SCRIPT ERROR' "$RUNNER_TEMP/godot-runtime-boundary.log"; then
+            exit 1
+          fi

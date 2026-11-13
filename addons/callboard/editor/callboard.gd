@@ -8,7 +8,7 @@ class_name Callboard extends Control
 signal layout_saved(path: String)
 
 const STAGES_DIR := "res://stages"
-const EDIT_FIELDS := ["external_calls", "vars", "rules", "groups"]
+const EDIT_FIELDS := ["external_calls", "external_vars", "vars", "rules", "groups"]
 const Style := preload("res://addons/callboard/editor/board_style.gd")
 enum CreateAction { EVENT, RULE, GROUP }
 enum ContextAction { EDIT = 10, DUPLICATE, DELETE }
@@ -292,7 +292,9 @@ func _collect_stage_definition_paths(dir_path := STAGES_DIR) -> Array[String]:
 			if entry != "." and entry != "..":
 				paths.append_array(_collect_stage_definition_paths(path))
 		elif entry.ends_with(".tres"):
-			paths.append(path)
+			# The stages directory can also contain materials and other resources.
+			if ResourceLoader.load(path, "", ResourceLoader.CACHE_MODE_IGNORE) is StageDefinition:
+				paths.append(path)
 		entry = dir.get_next()
 	dir.list_dir_end()
 	paths.sort()
@@ -667,7 +669,7 @@ func _sync_layout() -> void:
 	for rd in _data["rules"]:
 		if pos.has(rd["id"]):
 			rd["pos"] = pos[rd["id"]].round()
-			rd["has_pos"] = true
+			rd[AuthoredData.FIELD_HAS_POS] = true
 	var rects := view.get_group_rects()
 	for g in _data["groups"]:
 		if rects.has(g["name"]):
@@ -735,7 +737,7 @@ func add_rule(at := Vector2.INF) -> Dictionary:
 	var rd := AuthoredData.new_rule(id, trigger)
 	rd["state_key"] = AuthoredData.new_state_key()
 	rd["pos"] = (view.view_center() - Vector2(125, 60) if at == Vector2.INF else at).round()
-	rd["has_pos"] = true
+	rd[AuthoredData.FIELD_HAS_POS] = true
 	_data["rules"].append(rd)
 	_changed(rd["id"])
 	_on_rule_selected(rd["id"])
@@ -752,7 +754,7 @@ func duplicate_rule(id: String) -> void:
 	rd["id"] = AuthoredData.unique_name(AuthoredData.rule_ids(_data), id + "_copy")
 	rd["state_key"] = AuthoredData.new_state_key()
 	rd["pos"] = src["pos"] + Vector2(30, 30)
-	rd["has_pos"] = true
+	rd[AuthoredData.FIELD_HAS_POS] = true
 	_data["rules"].append(rd)
 	_changed(rd["id"])
 	_on_rule_selected(rd["id"])
@@ -843,13 +845,20 @@ func save() -> void:
 		Style.tint(_status, Style.WARNING)
 		return
 	var draft := RuleGraphReader.make_definition(_data)
+	var previous_uid := ResourceLoader.get_resource_uid(_path)
 	draft._migrate()
 	var error := ResourceSaver.save(draft, _path)
 	if error != OK:
 		_status.text = "Save failed (error %d)" % error
 		Style.tint(_status, Style.WARNING)
 		return
-	_data["definition"] = draft
+	if previous_uid != ResourceUID.INVALID_ID:
+		var uid_error := ResourceSaver.set_uid(_path, previous_uid)
+		if uid_error != OK:
+			push_warning("Saved %s but could not preserve its resource UID (error %d)." % [_path, uid_error])
+	# CACHE_MODE_REPLACE refreshes cached resources in place when their types match.
+	var reloaded := ResourceLoader.load(_path, "", ResourceLoader.CACHE_MODE_REPLACE) as StageDefinition
+	_data["definition"] = reloaded if reloaded != null else draft
 	_record_edit()
 	_history.mark_saved(_snapshot())
 	_dirty = false

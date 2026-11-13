@@ -4,6 +4,8 @@ class_name RuleEngine extends RefCounted
 signal rule_fired(rule_id: StringName, event: StringName)
 signal trace_event(entry: Dictionary)
 signal pending_changed(entries: Array)
+signal run_cancelled(rule_id: StringName)
+signal all_cancelled
 
 var rules: Array[Rule] = []
 var fired: Dictionary                 # injected, latches one-shot rules
@@ -14,6 +16,7 @@ var _active := {}                      # Rule -> pending payloads and restart re
 var _pending_waits: Dictionary = {}
 var _pending_callbacks: Dictionary = {}
 var _next_wait_id := 1
+const MAX_FIRE_DEPTH := 64
 
 func _init(p_bb: Blackboard, p_fired: Dictionary, p_wait: Callable) -> void:
 	bb = p_bb
@@ -23,24 +26,31 @@ func _init(p_bb: Blackboard, p_fired: Dictionary, p_wait: Callable) -> void:
 func token() -> int: return _gen
 func cancel_all() -> void:
 	_gen += 1
+	all_cancelled.emit()
 	_active.clear()
 	_pending_waits.clear()
 	for tracker in _pending_callbacks.values():
 		var tracked_signal: Signal = tracker["signal"]
 		var callback: Callable = tracker["callback"]
-		if tracked_signal.is_connected(callback):
+		if not tracked_signal.is_null() and tracked_signal.is_connected(callback):
 			tracked_signal.disconnect(callback)
 	_pending_callbacks.clear()
 	pending_changed.emit(pending_snapshot())
 
 func fire(event: StringName, ctx := {}) -> void:
+	var depth := int(ctx.get("_callboard_fire_depth", 0)) + 1
+	if depth > MAX_FIRE_DEPTH:
+		push_error("Callboard stopped relay recursion at depth %d while firing '%s'." % [MAX_FIRE_DEPTH, event])
+		return
+	var forwarded: Dictionary = ctx.duplicate(true)
+	forwarded["_callboard_fire_depth"] = depth
 	_emit_trace("event_fired", &"", event)
 	var gen := _gen
 	for r in rules:
 		if gen != _gen:
 			return
 		if r.trigger == event and passes(r):
-			_dispatch(r, event, ctx, gen)
+			_dispatch(r, event, forwarded, gen)
 
 func _dispatch(r: Rule, event: StringName, ctx: Dictionary, gen: int) -> void:
 	if _active.has(r):
@@ -79,6 +89,7 @@ func _run(r: Rule, event: StringName, ctx: Dictionary, gen: int) -> void:
 	rule_fired.emit(r.id, event)
 	if not alive(r, gen):
 		run["cancelled"] = true
+		run_cancelled.emit(r.id)
 		_emit_trace("rule_cancelled", r.id, event)
 		return
 	var c := ctx.merged({"_rule": r, "_run": run}, true)
@@ -89,12 +100,14 @@ func _run(r: Rule, event: StringName, ctx: Dictionary, gen: int) -> void:
 			await wait_tracked(s.delay, r.id, "step delay")
 			if not alive(r, gen):
 				run["cancelled"] = true
+				run_cancelled.emit(r.id)
 				_emit_trace("rule_cancelled", r.id, event, i, s)
 				return
 		_emit_trace("step_started", r.id, event, i, s)
 		await s.fn.call(c)
 		if not alive(r, gen):
 			run["cancelled"] = true
+			run_cancelled.emit(r.id)
 			_emit_trace("rule_cancelled", r.id, event, i, s)
 			return
 		_emit_trace("step_completed", r.id, event, i, s)

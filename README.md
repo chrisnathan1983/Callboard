@@ -32,6 +32,10 @@ The **Callboard** tab is enabled in the Godot editor. Use it to edit a Stage def
 
 Stage definitions store rules, steps, Blackboard variables, and graph groups as typed Resources. Existing dictionary-based `.tres` files are converted by `StageDefinition._migrate()` and retain their saved state keys; the current format version is 3.
 
+This project is licensed under the Zero-Clause BSD License (0BSD). It permits use, modification, and redistribution without requiring attribution. Third-party components retain their own license terms.
+
+Renaming a Blackboard key updates authored references and preserves aliases for its former names, so gameplay writers using an old key continue to work. Blackboard writes must match the declared default type; mismatched writes are rejected with a warning, and saved values with an outdated type are reset to the declared default. Timed lights turn off when their running rule is cancelled, when the Stage is deactivated, or when their timer expires. Debug builds warn when gameplay fires an undeclared Call or tries to use an undeclared relay latch.
+
 ## Runtime and editor boundary
 
 `addons/callboard/core/` contains runtime resources and execution code. The Callboard UI and graph-authoring helpers live under `editor/` and `model/`; the editor plugin registers an export filter that removes those files from release exports while retaining them in debug exports. The sample HUD late-loads the live Callboard only in debug builds. Stage definitions compile through the runtime-safe `RuntimeVerbCatalog` and do not depend on editor authoring code.

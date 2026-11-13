@@ -7,6 +7,8 @@ const BASE_COLOR_META := &"_callboard_base_color"
 const LIGHT_ACTIVATION_META := &"_callboard_light_activation"
 const SPEECH_LABEL_NAME := &"CallboardSpeech"
 const SPEECH_TWEEN_META := &"_callboard_speech_tween"
+const POSITION_TWEEN_META := &"_callboard_position_tween"
+const BASE_Y_META := &"_callboard_base_y"
 
 func show_node(n: Node3D, should_be_visible := true) -> Step:
 	return Step.new(func(_c: Dictionary) -> void: n.visible = should_be_visible)
@@ -36,22 +38,37 @@ func light(n: Node3D, on: bool, duration := 0.0, key: StringName = &"lamp_on") -
 	var f := func(c: Dictionary) -> void:
 		var engine := ctx.engine_ref.get_ref() as RuleEngine
 		var rule := c.get("_rule") as Rule
-		var run: Dictionary = c["_run"]
 		var gen := engine.token()
+		var rule_id := StringName(rule.id) if rule != null else &"<anonymous>"
 		var node_id := n.get_instance_id()
 		var activation := int(n.get_meta(LIGHT_ACTIVATION_META, 0)) + 1
 		n.set_meta(LIGHT_ACTIVATION_META, activation)
 		n.visible = on
 		ctx.bb.write(key, on)
-		if on and duration > 0.0 and engine.alive(rule, gen):
-			var timeout: Signal = engine.wait_tracked(duration, rule.id, "light off")
+		if on and duration > 0.0 and (rule == null or engine.alive(rule, gen)):
+			var on_run_cancelled := Callable()
+			var disconnect_rule_cancel := func() -> void:
+				var current := ctx.engine_ref.get_ref() as RuleEngine
+				if current != null and on_run_cancelled.is_valid() and current.run_cancelled.is_connected(on_run_cancelled):
+					current.run_cancelled.disconnect(on_run_cancelled)
+			var turn_off := func() -> void:
+				disconnect_rule_cancel.call()
+				var light_node := instance_from_id(node_id) as Node3D
+				if light_node != null and light_node.get_meta(LIGHT_ACTIVATION_META, 0) == activation:
+					light_node.hide()
+					ctx.bb.write(key, false)
+			on_run_cancelled = func(cancelled_rule_id: StringName) -> void:
+				if cancelled_rule_id == rule_id:
+					turn_off.call()
+			if rule != null:
+				engine.run_cancelled.connect(on_run_cancelled)
+			engine.all_cancelled.connect(turn_off, CONNECT_ONE_SHOT)
+			var timeout: Signal = engine.wait_tracked(duration, rule_id, "light off")
 			timeout.connect(func() -> void:
 				var current := ctx.engine_ref.get_ref() as RuleEngine
-				var light_node := instance_from_id(node_id) as Node3D
-				if current and not run["cancelled"] and current.alive(rule, gen) and light_node != null \
-						and light_node.get_meta(LIGHT_ACTIVATION_META, 0) == activation:
-					light_node.hide()
-					ctx.bb.write(key, false), CONNECT_ONE_SHOT)
+				if current != null and current.all_cancelled.is_connected(turn_off):
+					current.all_cancelled.disconnect(turn_off)
+				turn_off.call(), CONNECT_ONE_SHOT)
 	var s := Step.new(f)
 	s.sets = [key]
 	return s
@@ -83,8 +100,13 @@ func say(n: Node3D, text: String, seconds := 1.0) -> Step:
 func move_to(n: Node3D, dest: Node3D, offset := Vector3.ZERO, duration := 0.7) -> Step:
 	var host := context.host
 	var f := func(_c: Dictionary) -> Signal:
+		_kill_node_tween(n, POSITION_TWEEN_META)
+		var target_global := dest.global_position + offset
+		var target_local: Vector3 = target_global if n.get_parent() == null else n.get_parent().to_local(target_global)
+		n.set_meta(BASE_Y_META, target_local.y)
 		var t := host.create_tween()
-		t.tween_property(n, "global_position", dest.global_position + offset, duration)
+		n.set_meta(POSITION_TWEEN_META, t)
+		t.tween_property(n, "global_position", target_global, duration)
 		return t.finished
 	return Step.new(f)
 
@@ -115,12 +137,23 @@ func jump(m: MeshInstance3D) -> Step:
 		var set_color := _color_setter(m, material, color_tween)
 		color_tween.tween_method(set_color, base, tint, 0.08)
 		color_tween.tween_method(set_color, tint, base, 0.32)
-		var y := m.position.y
+		_kill_node_tween(m, POSITION_TWEEN_META)
+		if not m.has_meta(BASE_Y_META):
+			m.set_meta(BASE_Y_META, m.position.y)
+		var y := float(m.get_meta(BASE_Y_META))
 		var t := host.create_tween()
+		m.set_meta(POSITION_TWEEN_META, t)
 		t.tween_property(m, "position:y", y + 0.6, 0.15)
 		t.tween_property(m, "position:y", y, 0.25).set_trans(Tween.TRANS_BOUNCE)
 		return t.finished
 	return Step.new(f)
+
+func _kill_node_tween(node: Node, meta: StringName) -> void:
+	if not is_instance_valid(node) or not node.has_meta(meta):
+		return
+	var previous: Variant = node.get_meta(meta)
+	if previous is Tween and previous.is_running():
+		previous.kill()
 
 func _effect_material(m: MeshInstance3D, verb: String) -> BaseMaterial3D:
 	if not is_instance_valid(m):

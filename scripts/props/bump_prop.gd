@@ -11,8 +11,8 @@ func _ready() -> void:
 		return
 	_stage = _find_stage()
 	if bump_area:
-		bump_area.collision_layer = 1 << 2
-		bump_area.collision_mask = (1 << 1) | (1 << 3)
+		bump_area.collision_layer = StageCollisionLayers.TRIGGER
+		bump_area.collision_mask = StageCollisionLayers.PLAYER | StageCollisionLayers.COMPANION
 		bump_area.body_entered.connect(_on_bump)
 
 func _on_bump(body: Node3D) -> void:

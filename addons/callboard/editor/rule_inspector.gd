@@ -127,9 +127,9 @@ func _build_rule() -> void:
 	var one_shot := CheckBox.new()
 	one_shot.text = "One-shot"
 	one_shot.tooltip_text = "The rule's latch persists in saved state"
-	one_shot.button_pressed = r["one_shot"]
+	one_shot.button_pressed = r[AuthoredData.FIELD_ONE_SHOT]
 	one_shot.toggled.connect(func(on: bool) -> void:
-		r["one_shot"] = on
+		r[AuthoredData.FIELD_ONE_SHOT] = on
 		if on and r.get("reentry", Rule.ReentryPolicy.IGNORE) != Rule.ReentryPolicy.IGNORE:
 			r["reentry"] = Rule.ReentryPolicy.IGNORE
 			policy.select(policy.get_item_index(Rule.ReentryPolicy.IGNORE))
@@ -151,12 +151,12 @@ func _build_rule() -> void:
 	menu.set_item_tooltip(1, "Stop at the next cancellation check and use the latest trigger. Unavailable for one-shot rules.")
 	menu.set_item_tooltip(2, "Run pending triggers in order once the active run ends. Unavailable for one-shot rules.")
 	for incompatible_policy in [Rule.ReentryPolicy.RESTART, Rule.ReentryPolicy.QUEUE]:
-		menu.set_item_disabled(policy.get_item_index(incompatible_policy), bool(r.get("one_shot", false)))
-	if bool(r.get("one_shot", false)) and r.get("reentry", Rule.ReentryPolicy.IGNORE) != Rule.ReentryPolicy.IGNORE:
+		menu.set_item_disabled(policy.get_item_index(incompatible_policy), bool(r.get(AuthoredData.FIELD_ONE_SHOT, false)))
+	if bool(r.get(AuthoredData.FIELD_ONE_SHOT, false)) and r.get("reentry", Rule.ReentryPolicy.IGNORE) != Rule.ReentryPolicy.IGNORE:
 		r["reentry"] = Rule.ReentryPolicy.IGNORE
 	policy.select(policy.get_item_index(r.get("reentry", Rule.ReentryPolicy.IGNORE)))
 	policy.item_selected.connect(func(i: int) -> void:
-		if bool(r.get("one_shot", false)) and policy.get_item_id(i) != Rule.ReentryPolicy.IGNORE:
+		if bool(r.get(AuthoredData.FIELD_ONE_SHOT, false)) and policy.get_item_id(i) != Rule.ReentryPolicy.IGNORE:
 			policy.select(policy.get_item_index(Rule.ReentryPolicy.IGNORE))
 			return
 		r["reentry"] = policy.get_item_id(i)

@@ -106,17 +106,44 @@ func write_var(key: StringName, value: Variant) -> void:
 func is_set(key: StringName) -> bool:
 	return bb.is_set(key)
 
+func has_fired(rule_id: StringName) -> bool:
+	for rule: Rule in engine.rules:
+		if rule.id == rule_id:
+			return fired.has(rule.latch_key()) or fired.has(rule.id)
+	return fired.has(rule_id)
+
 func fire(event: StringName, ctx := {}) -> void:
+	if OS.is_debug_build() and not _event_is_known(event):
+		push_warning("Stage '%s' fired undeclared Call '%s'; no rule emits it and it is not declared as external." % [name, event])
 	engine.fire(event, ctx)
 
 ## Use a declared Blackboard key to latch a relay fired by gameplay code.
 func fire_relay_once(relay: StringName, latch: StringName, source_id: StringName, source_event: StringName) -> bool:
-	if bb == null or relay.is_empty() or not bb.has(latch) or is_set(latch):
+	if bb == null or relay.is_empty():
+		return false
+	if not bb.has(latch):
+		if OS.is_debug_build():
+			push_warning("Stage '%s' cannot fire relay '%s': latch key '%s' is not declared." % [name, relay, latch])
+		return false
+	if is_set(latch):
 		return false
 	write_var(latch, true)
 	rule_fired.emit(source_id, source_event)
 	fire(StringName("relay:" + relay))
 	return true
+
+func _event_is_known(event: StringName) -> bool:
+	if external_calls.has(event):
+		return true
+	for rule: Rule in engine.rules:
+		if rule.trigger == event:
+			return true
+		if event == StringName("relay:" + String(rule.emits)) and not rule.emits.is_empty():
+			return true
+		for step: Step in rule.steps:
+			if not step.emits.is_empty() and event == StringName("relay:" + String(step.emits)):
+				return true
+	return false
 
 func check() -> Array[String]:
 	return RuleValidator.check(engine.rules, bb, external_calls, external_vars)

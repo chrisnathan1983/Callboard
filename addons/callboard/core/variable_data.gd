@@ -7,6 +7,7 @@ class_name VariableData extends Resource
 @export var default_value: Variant = false
 @export_multiline var note := ""
 @export var state_key: StringName
+@export var aliases: Array[StringName] = []
 
 static func from_dictionary(source: Dictionary) -> VariableData:
 	var data := VariableData.new()
@@ -15,10 +16,12 @@ static func from_dictionary(source: Dictionary) -> VariableData:
 	data.default_value = source.get("default", false)
 	data.note = String(source.get("note", ""))
 	data.state_key = StringName(source.get("state_key", source.get("key", "")))
+	for alias in source.get("aliases", []):
+		data.aliases.append(StringName(alias))
 	return data
 
 func to_dictionary() -> Dictionary:
 	return {
 		"key": String(key), "scope": scope, "default": default_value,
-		"note": note, "state_key": String(state_key),
+		"note": note, "state_key": String(state_key), "aliases": aliases.map(func(alias: StringName) -> String: return String(alias)),
 	}

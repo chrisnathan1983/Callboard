@@ -5,9 +5,9 @@ class_name TriggerArea extends Area3D
 
 enum Mode { ENTER, INTERACT }
 
-const LAYER_TRIGGER := 1 << 2
-const LAYER_PLAYER := 1 << 1
-const LAYER_COMPANION := 1 << 3
+const LAYER_TRIGGER := StageCollisionLayers.TRIGGER
+const LAYER_PLAYER := StageCollisionLayers.PLAYER
+const LAYER_COMPANION := StageCollisionLayers.COMPANION
 
 @export var event: StringName
 @export var mode: Mode = Mode.ENTER

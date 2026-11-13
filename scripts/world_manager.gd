@@ -23,7 +23,7 @@ func _setup_world() -> void:
 	add_child(cam)
 	cam.look_at_from_position(Vector3(0, 13, 10), Vector3(0, 0, -1.5), Vector3.UP)
 
-	var player = Player.new()
+	var player := Player.new()
 	player.name = "Player"
 	player.position = Vector3(0, 0.9, 4)
 	add_child(player)

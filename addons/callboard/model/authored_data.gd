@@ -3,12 +3,14 @@ class_name AuthoredData extends RefCounted
 ## Creates and edits authored graph data.
 
 const GUARDS := ["requires", "forbids", "cancel_if"]
+const FIELD_ONE_SHOT := "one_shot"
+const FIELD_HAS_POS := "has_pos"
 
 static func new_rule(id: String, trigger: String) -> Dictionary:
 	return {
 		"id": id, "trigger": trigger, "requires": [], "forbids": [], "cancel_if": [],
-		"one_shot": false, "reentry": Rule.ReentryPolicy.IGNORE, "emit": "", "steps": [],
-		"group": "", "pos": Vector2.ZERO, "has_pos": false,
+		FIELD_ONE_SHOT: false, "reentry": Rule.ReentryPolicy.IGNORE, "emit": "", "steps": [],
+		"group": "", "pos": Vector2.ZERO, FIELD_HAS_POS: false,
 	}
 
 static func new_step(verb: String, args: Array, delay := "") -> Dictionary:
@@ -40,7 +42,15 @@ static func rename_key(data: Dictionary, old: String, new_key: String) -> void:
 	for v in data["vars"]:
 		if v["key"] == old:
 			v["state_key"] = v.get("state_key", old)
+			var aliases: Array = v.get("aliases", [])
+			if not aliases.has(old):
+				aliases.append(old)
+			v["aliases"] = aliases
 			v["key"] = new_key
+	if data.get("external_vars", []).has(old):
+		data["external_vars"].erase(old)
+		if not data["external_vars"].has(new_key):
+			data["external_vars"].append(new_key)
 	for rd in data["rules"]:
 		for g in GUARDS:
 			rd[g] = rd[g].map(func(k: String) -> String: return new_key if k == old else k)

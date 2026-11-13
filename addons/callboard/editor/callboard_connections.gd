@@ -79,7 +79,7 @@ func confirm_delete(data: Dictionary, editable: bool, id: String) -> void:
 		prompt += "\n\nThese connections will be removed. Listed steps will be deleted.\n"
 		prompt += "\n".join(affected.slice(0, 6))
 		if affected.size() > 6:
-			prompt += "\n.and %d more. See the full list in Calls and Relays." % (affected.size() - 6)
+			prompt += "\n… and %d more. See the full list in Calls and Relays." % (affected.size() - 6)
 	delete_dialog.dialog_text = prompt
 	delete_dialog.popup_centered()
 

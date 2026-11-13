@@ -32,15 +32,13 @@ func bind_stage(stage: Stage) -> void:
 		board.call("bind_live", stage)
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventKey and event.pressed and not event.echo:
-		match event.keycode:
-			KEY_F1:
-				if board_panel:
-					board_panel.visible = not board_panel.visible
-			KEY_R:
-				manager.clear_stage(false)
-			KEY_X:
-				manager.clear_stage(true)
+	if event.is_action_pressed(&"toggle_callboard"):
+		if board_panel:
+			board_panel.visible = not board_panel.visible
+	if event.is_action_pressed(&"reset_stage"):
+		manager.clear_stage(false)
+	if event.is_action_pressed(&"strike_show"):
+		manager.clear_stage(true)
 
 func _process(_delta: float) -> void:
 	if board_panel and board_panel.visible:

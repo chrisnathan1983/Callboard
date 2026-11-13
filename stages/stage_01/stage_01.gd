@@ -74,5 +74,5 @@ func _build_props() -> void:
 func _restore_state() -> void:
 	if get_var(&"guard_calmed"):
 		guard.position = SHELTER_POS + GUARD_REST_OFFSET
-	if fired.has(&"z1_delivered"):
+	if has_fired(&"z1_delivered"):
 		reward.visible = true

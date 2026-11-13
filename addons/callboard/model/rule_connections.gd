@@ -40,8 +40,6 @@ static func impact(data: Dictionary, id: String) -> PackedStringArray:
 static func edit_error(data: Dictionary, id: String) -> String:
 	if id == RELAY_PREFIX or not ids(data).has(id):
 		return "This Call or relay no longer exists."
-	if id.begins_with(RELAY_PREFIX) and not data["compiles"]:
-		return "Fix invalid steps before editing relay connections."
 	return ""
 
 ## new_name is the bare relay name for relays, or the full Call ID for Calls.
@@ -84,7 +82,7 @@ static func rename(data: Dictionary, id: String, new_name: String) -> String:
 			renamed_steps.append(step)
 	_replace_references(draft, id, new_id)
 	RuleGraphReader.analyze(draft)
-	if not draft["compiles"] or renamed_steps.any(func(step: Dictionary) -> bool: return step["emits"] != new_name):
+	if renamed_steps.any(func(step: Dictionary) -> bool: return step["emits"] != new_name):
 		return "The edited steps could not emit the new relay. Check the verb arguments."
 	data["external_calls"] = draft["external_calls"]
 	data["rules"] = draft["rules"]
