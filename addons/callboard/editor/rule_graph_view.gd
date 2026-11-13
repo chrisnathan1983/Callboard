@@ -4,7 +4,7 @@ class_name RuleGraphView extends GraphEdit
 ## GraphFrames for groups. Wires are derived from relay relationships, never stored.
 ##
 ## The view never edits the model. It turns gestures into semantic signals and the board
-## applies them, then calls show_data() again.
+## applies them, then calls update_data() to refresh the affected graph content.
 ##   drag output -> input     wire_added
 ##   drag a wire off an input wire_removed
 ##   Delete key               rules_delete_requested
@@ -33,6 +33,7 @@ var fit_area := Rect2()
 var _rule_nodes := {}    # rule id -> GraphNode
 var _event_nodes := {}   # event name -> GraphNode
 var _frames := {}        # group name -> GraphFrame
+var _rule_signatures := {}
 var _resizing_frame := false
 var _editable := true
 var _fit_requested := false
@@ -139,6 +140,7 @@ func clear_view() -> void:
 	_rule_nodes.clear()
 	_event_nodes.clear()
 	_frames.clear()
+	_rule_signatures.clear()
 
 func show_data(data: Dictionary) -> void:
 	clear_view()
@@ -180,6 +182,86 @@ func show_data(data: Dictionary) -> void:
 
 	_make_event_nodes(data["external_calls"], rules)
 	_connect_all(rules)
+	_cache_rule_signatures(rules, problems)
+
+## Updates stable graph structures in place. A structural change falls back to a full build;
+## otherwise only rule cards whose rendered content changed are recreated.
+func update_data(data: Dictionary) -> void:
+	var rules: Array = data["rules"]
+	var problems: Array = data["notes"]
+	if (not _same_ids(_rule_nodes, rules.map(func(rd: Dictionary) -> String: return rd["id"]))
+		or not _same_ids(_event_nodes, data["external_calls"])
+		or not _same_ids(_frames, data["groups"].map(func(group: Dictionary) -> String: return group["name"]))):
+		show_data(data)
+		return
+
+	_auto_layout(rules)
+	clear_connections()
+	for group in data["groups"]:
+		var frame: GraphFrame = _frames[group["name"]]
+		frame.position_offset = group["rect"].position
+		frame.size = group["rect"].size
+
+	for rd in rules:
+		var id: String = rd["id"]
+		var signature := _rule_signature(rd, problems)
+		var node: GraphNode = _rule_nodes[id]
+		if _rule_signatures.get(id) != signature:
+			_retire_element(node)
+			node = _make_rule_node(rd, problems)
+			add_child(node)
+			_rule_nodes[id] = node
+		else:
+			node.position_offset = rd["pos"]
+		var frame: GraphFrame = _frames.get(rd["group"])
+		var current_frame := get_element_frame(node.name)
+		if frame != current_frame:
+			if current_frame != null:
+				detach_graph_element_from_frame(node.name)
+			if frame != null:
+				attach_graph_element_to_frame(node.name, frame.name)
+		_rule_signatures[id] = signature
+
+	var event_positions := _event_positions(data["external_calls"], rules)
+	for event_id in _event_nodes:
+		(_event_nodes[event_id] as GraphNode).position_offset = event_positions[event_id]
+	_connect_all(rules)
+	_refresh_wire_focus()
+
+func _same_ids(nodes: Dictionary, ids: Array) -> bool:
+	if nodes.size() != ids.size():
+		return false
+	for id in ids:
+		if not nodes.has(id):
+			return false
+	return true
+
+func _rule_signature(rd: Dictionary, problems: Array) -> Dictionary:
+	var content := rd.duplicate(true)
+	content.erase("pos")
+	content.erase("has_pos")
+	content.erase("group")
+	return {
+		"content": content,
+		"warned": problems.any(func(problem: String) -> bool: return ("'%s'" % rd["id"]) in problem),
+		"editable": _editable,
+	}
+
+func _cache_rule_signatures(rules: Array, problems: Array) -> void:
+	_rule_signatures.clear()
+	for rd in rules:
+		_rule_signatures[rd["id"]] = _rule_signature(rd, problems)
+
+func _retire_element(element: GraphElement) -> void:
+	if _inspected_node == element:
+		_inspected_node = null
+	element.selected = false
+	if get_element_frame(element.name) != null:
+		detach_graph_element_from_frame(element.name)
+	element.set_meta("dead", true)
+	element.visible = false
+	element.name = "dead_%d" % element.get_instance_id()
+	element.queue_free()
 
 ## Current card positions and frame rects, to be written back into the model.
 func get_positions() -> Dictionary:
@@ -586,6 +668,20 @@ func _add_card_rows(node: GraphNode, rows: Array) -> void:
 					node.set_slot_color_right(i, Style.resolve_color(node, row[3])))
 
 func _make_event_nodes(events: Array, rules: Array) -> void:
+	var positions := _event_positions(events, rules)
+	for event_id in events:
+		var n := GraphNode.new()
+		n.name = "ev_" + _safe(event_id)
+		n.set_meta("event", event_id)
+		n.title = "External Call"
+		n.tooltip_text = event_id
+		n.position_offset = positions[event_id]
+		_style_card(n, 174.0, COL_EVENT, Color("#1e3947"), &"Signal")
+		_add_card_rows(n, [[_row(event_id, Style.TEXT), false, true, COL_EVENT]])
+		add_child(n)
+		_event_nodes[event_id] = n
+
+func _event_positions(events: Array, rules: Array) -> Dictionary:
 	var min_x := 0.0
 	for rd in rules:
 		min_x = minf(min_x, rd["pos"].x)
@@ -598,19 +694,12 @@ func _make_event_nodes(events: Array, rules: Array) -> void:
 		entries.append({"event": e, "y": y if y < 1e9 else 0.0})
 	entries.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a["y"] < b["y"])
 	var prev_y := -1e9
+	var positions := {}
 	for en in entries:
 		var y: float = maxf(en["y"], prev_y + 90.0)
 		prev_y = y
-		var n := GraphNode.new()
-		n.name = "ev_" + _safe(en["event"])
-		n.set_meta("event", en["event"])
-		n.title = "External Call"
-		n.tooltip_text = en["event"]
-		n.position_offset = Vector2(min_x - 230.0, y)
-		_style_card(n, 174.0, COL_EVENT, Color("#1e3947"), &"Signal")
-		_add_card_rows(n, [[_row(en["event"], Style.TEXT), false, true, COL_EVENT]])
-		add_child(n)
-		_event_nodes[en["event"]] = n
+		positions[en["event"]] = Vector2(min_x - 230.0, y)
+	return positions
 
 func _connect_all(rules: Array) -> void:
 	for ev in _event_nodes:

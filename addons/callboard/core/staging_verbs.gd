@@ -41,7 +41,7 @@ func light(n: Node3D, on: bool, duration := 0.0, key: StringName = &"lamp_on") -
 		var gen := engine.token()
 		apply.call(on)
 		if on and duration > 0.0 and engine.alive(rule, gen):
-			var timeout: Signal = ctx.wait.call(duration)
+			var timeout: Signal = engine.wait_tracked(duration, rule.id, "light off")
 			timeout.connect(func() -> void:
 				var current := ctx.engine_ref.get_ref() as RuleEngine
 				if current and current.alive(rule, gen) and is_instance_valid(n):

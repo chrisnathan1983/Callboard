@@ -44,8 +44,11 @@ var _event_name := LineEdit.new()
 var _event_error := Label.new()
 var _blackboard_button: Button
 var _connections_button: Button
+var _debug_button: Button
 var _connections_ui := CallboardConnections.new()
+var _live_debug_ui := CallboardLiveDebugPanel.new()
 var _connections_panel: PanelContainer
+var _live_debug_panel: PanelContainer
 var _connection_rows: VBoxContainer = _connections_ui.rows
 var _connection_cards: Dictionary = _connections_ui.cards
 var _expanded_connections: Dictionary = _connections_ui.expanded
@@ -156,7 +159,7 @@ func _init() -> void:
 	_settings_window.hide()
 	add_child(_settings_window)
 	_overlay_layout.setup(self, _file_tools, _create_tools, _left_tools, _blackboard_panel,
-		_connections_panel, _connection_rows, _settings_window, blackboard, inspector, view)
+		_connections_panel, _live_debug_panel, _connection_rows, _settings_window, blackboard, inspector, view)
 
 	resized.connect(_layout_overlays)
 	_layout_overlays.call_deferred()
@@ -178,15 +181,20 @@ func _make_left_tools() -> void:
 	buttons.allow_unpress = true
 	_blackboard_panel = Style.panel(blackboard, Style.SURFACE, Vector2(12, 10), true)
 	_setup_connections_panel()
+	_live_debug_panel = _live_debug_ui.setup()
 	_blackboard_button = _panel_launcher("Blackboard", "▤", _blackboard_panel, buttons)
 	_connections_button = _panel_launcher("Calls & relays", "⇄", _connections_panel, buttons)
+	_debug_button = _panel_launcher("Live debugging", "?", _live_debug_panel, buttons)
+	_debug_button.visible = false
 	_connections_button.toggled.connect(func(open: bool) -> void:
 		if open:
 			_refresh_connections())
 	launchers.add_child(_blackboard_button)
 	launchers.add_child(_connections_button)
+	launchers.add_child(_debug_button)
 	_left_tools.add_child(_blackboard_panel)
 	_left_tools.add_child(_connections_panel)
+	_left_tools.add_child(_live_debug_panel)
 	_left_tools.minimum_size_changed.connect(_layout_overlays, CONNECT_DEFERRED)
 	add_child(_left_tools)
 
@@ -303,6 +311,7 @@ func bind_live(stage: Stage) -> void:
 	_save_button.hide()
 	_reload_button.hide()
 	stage.rule_fired.connect(_on_live_rule_fired)
+	_live_debug_ui.bind_stage(stage)
 	_selected = ""
 	_dirty = false
 	_show(RuleGraphReader.read(stage), false)
@@ -318,9 +327,14 @@ func _process(delta: float) -> void:
 	if _accum >= 0.2:
 		_accum = 0.0
 		blackboard.refresh_live(_live)
+		if _live_debug_panel.visible:
+			_live_debug_ui.refresh_runtime()
 
 func _exit_tree() -> void:
 	_clear_analysis_stage()
+	_live_debug_ui.unbind_stage()
+	if _live != null and is_instance_valid(_live) and _live.rule_fired.is_connected(_on_live_rule_fired):
+		_live.rule_fired.disconnect(_on_live_rule_fired)
 
 func _analyze_data() -> void:
 	_analysis_debounce.stop()
@@ -359,8 +373,11 @@ func _show(data: Dictionary, editable: bool) -> void:
 		b.visible = editable
 	_create_tools.visible = editable
 	_connections_button.visible = editable
+	_debug_button.visible = not editable
 	if not _editable:
 		_connections_button.button_pressed = false
+	else:
+		_debug_button.button_pressed = false
 	view.set_editable(_editable)
 	blackboard.show_data(data, _editable, not editable)
 	view.show_data(data)
@@ -455,7 +472,7 @@ func _restore_edit(state: Dictionary) -> void:
 		_data[field] = state[field].duplicate(true)
 	_analyze_data()
 	blackboard.show_data(_data, true, false)
-	view.show_data(_data)
+	view.update_data(_data)
 	if not _find_rule(_selected).is_empty():
 		view.select_rule(_selected)
 		_on_rule_selected(_selected)
@@ -646,7 +663,7 @@ func _changed(select_id: String, spin: SpinBox = null) -> void:
 		_spin_refresh_pending = true
 		return
 	_analyze_data()
-	view.show_data(_data)
+	view.update_data(_data)
 	_selected = select_id
 	if _find_rule(select_id).is_empty():
 		_selected = ""

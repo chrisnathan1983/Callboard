@@ -7,13 +7,23 @@ const TMP_PATH := "res://.godot/stage_tmp.tres"
 const ExportFilter := preload("res://addons/callboard/editor/export_plugin.gd")
 
 func _initialize() -> void:
-	var ok := _test_factory()
+	var ok := _test_authored_resource_graph()
+	ok = _test_board_editing() and ok
+	ok = _test_save_and_history() and ok
+	ok = (await _test_numeric_undo()) and ok
+	ok = (await _test_event_and_relay_edits()) and ok
+	ok = (await _test_canvas_actions()) and ok
+	ok = _test_factory() and ok
+	ok = _test_live_debug() and ok
 	ok = (await _test_scene_assigned_props()) and ok
 	ok = _test_layer_export_filter() and ok
 	ok = _test_rename_saved_state() and ok
+	print("EDITOR: ", "PASS" if ok else "FAIL")
+	quit(0 if ok else 1)
 
+func _test_authored_resource_graph() -> bool:
+	var ok := true
 	# --- Authored resource ----------------------------------------------------------
-	var src := FileAccess.get_file_as_string(STAGE_PATH)
 	var definition := load(DEFINITION_PATH) as StageDefinition
 	var data := RuleGraphReader.inspect_definition(DEFINITION_PATH)
 	ok = _check("resource stores events, variables, rules and groups",
@@ -34,9 +44,25 @@ func _initialize() -> void:
 	gv.show_data(data)
 	ok = _check("graph: rule nodes and wires built",
 		gv._rule_nodes.size() == data["rules"].size() and not gv.get_connection_list().is_empty()) and ok
+	var kept_rule_node: GraphNode = gv._rule_nodes["z1_caught"]
+	var updated_rule_node: GraphNode = gv._rule_nodes["z1_bark"]
+	var kept_event_node: GraphNode = gv._event_nodes["deliver"]
+	var graph_edit := data.duplicate(true)
+	var edited_rule: Dictionary = graph_edit["rules"].filter(func(rule: Dictionary) -> bool: return rule["id"] == "z1_bark")[0]
+	edited_rule["one_shot"] = true
+	gv.update_data(graph_edit)
+	ok = _check("incremental graph refresh replaces only the changed rule card",
+		gv._rule_nodes["z1_bark"] != updated_rule_node and gv._rule_nodes["z1_caught"] == kept_rule_node
+		and gv._event_nodes["deliver"] == kept_event_node and not gv.get_connection_list().is_empty()) and ok
 	gv.pulse("z1_bark")
 	gv.queue_free()
 
+
+	return ok
+
+func _test_board_editing() -> bool:
+	var ok := true
+	var definition := load(DEFINITION_PATH) as StageDefinition
 	# --- D. Editing through the board ------------------------------------------------
 	var board := Callboard.new()
 	root.add_child(board)
@@ -103,6 +129,13 @@ func _initialize() -> void:
 	ok = _check("delete group clears membership", d["groups"].size() == 3 and _rule(d, "z1_standoff")["group"] == "") and ok
 	board.queue_free()
 
+
+	return ok
+
+func _test_save_and_history() -> bool:
+	var ok := true
+	var src := FileAccess.get_file_as_string(STAGE_PATH)
+	var definition := load(DEFINITION_PATH) as StageDefinition
 	# --- E. Save: refuses broken output, writes good output ----------------------------
 	ok = _check("temporary resource saved", ResourceSaver.save(definition, TMP_PATH) == OK) and ok
 	var original := FileAccess.get_file_as_string(TMP_PATH)
@@ -197,12 +230,8 @@ func _initialize() -> void:
 	b2.queue_free()
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(TMP_PATH))
 
-	await process_frame
-	ok = _test_numeric_undo() and ok
-	ok = _test_event_and_relay_edits() and ok
-	ok = (await _test_canvas_actions()) and ok
-	print("EDITOR: ", "PASS" if ok else "FAIL")
-	quit(0 if ok else 1)
+	return ok
+
 
 func _test_scene_assigned_props() -> bool:
 	var definition := StageDefinition.new()
@@ -313,6 +342,7 @@ func _test_event_and_relay_edits() -> bool:
 	var board := Callboard.new()
 	root.add_child(board)
 	board.open_script(TMP_PATH)
+	await process_frame
 	board._connections_button.button_pressed = true
 	board._refresh_connections("offer:decoy")
 	var card: Control = board._connection_cards["offer:decoy"]
@@ -455,6 +485,7 @@ func _test_numeric_undo() -> bool:
 	var board := Callboard.new()
 	root.add_child(board)
 	board.open_script(DEFINITION_PATH)
+	await process_frame
 	board.blackboard._on_add(1)
 	var row := board.blackboard._rows.get_child(board.blackboard._rows.get_child_count() - 1)
 	var spin := row.find_children("*", "SpinBox", true, false).front() as SpinBox
@@ -559,6 +590,31 @@ func _build_blackboard() -> void:
 	stage.free()
 
 	return ok
+
+func _test_live_debug() -> bool:
+	var definition := load(DEFINITION_PATH) as StageDefinition
+	var stage := definition.instantiate()
+	root.add_child(stage)
+	stage.build()
+	var board := Callboard.new()
+	root.add_child(board)
+	board.bind_live(stage)
+	stage.engine.rules.clear()
+	var panel: CallboardLiveDebugPanel = board._live_debug_ui
+	for i in panel._calls.item_count:
+		if panel._calls.get_item_text(i) == "offer:decoy":
+			panel._calls.select(i)
+	var call_count := panel._calls.item_count
+	panel.fire_selected()
+	var traced_call := panel._trace_rows.get_child_count() == 1
+	if traced_call:
+		traced_call = "offer:decoy" in (panel._trace_rows.get_child(0) as Label).text
+	var live_controls := board._debug_button.visible and not board._connections_button.visible
+	board.free()
+	stage.free()
+	var ok := _check("live debug launcher is shown", live_controls)
+	ok = _check("live panel lists declared Calls", call_count == 4) and ok
+	return _check("live panel records fired Calls", traced_call) and ok
 
 func _rule(d: Dictionary, id: String) -> Dictionary:
 	for r in d["rules"]:

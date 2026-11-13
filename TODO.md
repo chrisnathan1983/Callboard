@@ -47,19 +47,19 @@ Priorities: **P1** correctness or things that block other work, **P2** worthwhil
 
 ## Editor experience
 
-- [ ] **P2: Debounce `analyze()` and update the graph incrementally.** The graph still recreates every node after analysis; this may lag with larger authored stages.
+- [x] **P2: Debounce `analyze()` and update the graph incrementally.**
   - [x] Reuse Stage 01's built scene props across edits; Blackboard services and rules are rebuilt for each analysis. Other stages opt in only when their props are safe to retain.
   - [x] Debounce Blackboard and inspector text edits in editor mode; multiple changes within 75 ms share an analysis and graph refresh.
-  - [ ] Update graph nodes incrementally instead of rebuilding the whole view.
+  - [x] Reuse unchanged rule, event, and group nodes; refresh only changed rule cards when graph structure stays stable, and rebuild when IDs change.
 - [x] **P2: Avoid rebuilding the graph during a numeric drag.** Numeric changes record undo snapshots during the gesture; analysis and graph refresh happen on release.
 - [x] **P2: Cache regexes used by compilation and renaming.** The step string, literal, and connection-name patterns now compile once per script class.
-- [ ] **P2: Live debugging tools.** In live mode, add a "fire this call" button, a rule-fired history with step-level trace, and a list of pending delays and loops.
+- [x] **P2: Live debugging tools.** The live panel can fire declared Calls, shows a rolling rule and step trace, and lists active rules plus pending delays and repeat loops.
 - [x] **P3: Expose a public `is_dirty()`** on `Callboard`; the plugin uses the public method.
 
 ## Code quality
 
 - [x] **P3: Add static types where they are missing**, including `GameHud.manager` as `GameManager` and `Props.trigger_box`'s context as `Dictionary`.
-- [ ] **P3: Restructure `editor_smoke.gd`.** One very long `_initialize` with shared mutable state makes failures hard to localize. Split it into independent test functions with their own fixtures, or adopt GdUnit4 or GUT if the suite keeps growing.
+- [x] **P3: Restructure `editor_smoke.gd`.** `_initialize` now only orchestrates focused test functions; graph reading, board editing, and save/history checks each use local fixtures and results.
 - [x] **P3: Add tests for the new behaviors above** (re-entrancy policy, cancellation and one-shot, `flash` re-entry, undeclared-key writes, migration).
 
 ## Docs
