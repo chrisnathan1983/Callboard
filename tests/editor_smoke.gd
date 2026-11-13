@@ -45,16 +45,37 @@ func _test_authored_resource_graph() -> bool:
 	gv.show_data(data)
 	ok = _check("graph: rule nodes and wires built",
 		gv._rule_nodes.size() == data["rules"].size() and not gv.get_connection_list().is_empty()) and ok
+	var min_rule_x: float = INF
+	for rule in data["rules"]:
+		min_rule_x = minf(min_rule_x, rule["pos"].x)
+	ok = _check("external Calls are arranged close to the rule column",
+		is_equal_approx(gv._event_nodes["deliver"].position_offset.x + RuleGraphView.CALL_WIDTH,
+			min_rule_x - RuleGraphView.CALL_GAP)) and ok
+	var fresh_data := data.duplicate(true)
+	fresh_data["call_positions"] = {}
+	for rule in fresh_data["rules"]:
+		rule[AuthoredData.FIELD_HAS_POS] = false
+	var fresh_graph := RuleGraphView.new()
+	root.add_child(fresh_graph)
+	fresh_graph.show_data(fresh_data)
+	ok = _check("a resource with no node positions gets an initial automatic layout",
+		fresh_graph._rule_nodes.values().all(func(node: GraphNode) -> bool:
+			return node.position_offset != Vector2.ZERO)) and ok
+	fresh_graph.queue_free()
 	var kept_rule_node: GraphNode = gv._rule_nodes["z1_caught"]
 	var updated_rule_node: GraphNode = gv._rule_nodes["z1_bark"]
 	var kept_event_node: GraphNode = gv._event_nodes["deliver"]
 	var graph_edit := data.duplicate(true)
 	var edited_rule: Dictionary = graph_edit["rules"].filter(func(rule: Dictionary) -> bool: return rule["id"] == "z1_bark")[0]
 	edited_rule["one_shot"] = true
+	edited_rule["pos"] = Vector2(555, 77)
+	edited_rule[AuthoredData.FIELD_HAS_POS] = false
 	gv.update_data(graph_edit)
 	ok = _check("incremental graph refresh replaces only the changed rule card",
 		gv._rule_nodes["z1_bark"] != updated_rule_node and gv._rule_nodes["z1_caught"] == kept_rule_node
 		and gv._event_nodes["deliver"] == kept_event_node and not gv.get_connection_list().is_empty()) and ok
+	ok = _check("incremental refresh does not auto-arrange nodes when position data exists",
+		gv._rule_nodes["z1_bark"].position_offset == Vector2(555, 77)) and ok
 	gv.set_minimized(true)
 	var compact_rule: GraphNode = gv._rule_nodes["z1_bark"]
 	var compact_treat: GraphNode = gv._rule_nodes["z1_treat"]
@@ -71,6 +92,11 @@ func _test_authored_resource_graph() -> bool:
 		and compact_call.get_child_count() == 1
 		and (compact_call.get_child(0) as Label).text == "deliver") and ok
 	gv.set_minimized(false)
+	gv._rule_nodes["z1_bark"].position_offset = Vector2(999, 777)
+	gv.auto_arrange()
+	var arranged_pos: Vector2 = gv._rule_nodes["z1_bark"].position_offset
+	ok = _check("the Arrange command explicitly repositions saved rules",
+		arranged_pos != Vector2(999, 777)) and ok
 	gv.pulse("z1_bark")
 	gv.queue_free()
 
@@ -153,6 +179,7 @@ func _test_save_and_history() -> bool:
 	var ok := true
 	var src := FileAccess.get_file_as_string(STAGE_PATH)
 	var definition := load(DEFINITION_PATH) as StageDefinition
+	definition.call_positions = {"deliver": Vector2(-600, 150)}
 	# --- E. Save: refuses broken output, writes good output ----------------------------
 	ok = _check("temporary resource saved", ResourceSaver.save(definition, TMP_PATH) == OK) and ok
 	var original := FileAccess.get_file_as_string(TMP_PATH)
@@ -230,6 +257,11 @@ func _test_save_and_history() -> bool:
 		policy.item_selected.emit(policy.selected)
 	ok = _check("changing the dropdown updates the rule",
 		_rule(d2, "z1_standoff").get("reentry") == Rule.ReentryPolicy.RESTART) and ok
+	var saved_rule_pos := Vector2(712, 286)
+	var saved_call_pos := Vector2(-580, 174)
+	b2.view._rule_nodes["z1_bark"].position_offset = saved_rule_pos
+	b2.view._event_nodes["deliver"].position_offset = saved_call_pos
+	b2.view.end_node_move.emit()
 	b2.save()
 	var re := RuleGraphReader.inspect_definition(TMP_PATH)
 	ok = _check("save: script unchanged", FileAccess.get_file_as_string(STAGE_PATH) == src) and ok
@@ -240,7 +272,10 @@ func _test_save_and_history() -> bool:
 		_rule(re, "z1_standoff").get("reentry") == Rule.ReentryPolicy.RESTART) and ok
 	ok = _check("save: frame size is rounded on disk",
 		re["groups"].any(func(g): return g["name"] == "Delivery" and g["rect"].size == expected_size)) and ok
-	ok = _check("save: position preserved", _rule(re, "new_rule")["has_pos"]) and ok
+	ok = _check("save: moved rule position is preserved",
+		_rule(re, "z1_bark")["has_pos"] and _rule(re, "z1_bark")["pos"] == saved_rule_pos) and ok
+	ok = _check("save: moved Call position is preserved",
+		re["call_positions"].get("deliver") == saved_call_pos) and ok
 	ok = _check("save: reloaded stage builds with no problems", re["compiles"] and re["notes"].is_empty()) and ok
 	ok = _check("new event and wire persist",
 		re["external_calls"].has("doorbell") and _rule(re, "z1_decoy")["trigger"] == "doorbell") and ok
@@ -249,6 +284,10 @@ func _test_save_and_history() -> bool:
 	b2.redo()
 	ok = _check("redo to saved state clears unsaved indicator", not b2._dirty) and ok
 	b2.open_script(TMP_PATH)
+	ok = _check("reopening resource restores moved rule position",
+		b2.view.get_positions()["z1_bark"] == saved_rule_pos) and ok
+	ok = _check("reopening resource restores moved Call position",
+		b2.view.get_call_positions()["deliver"] == saved_call_pos) and ok
 	ok = _check("reopening resource starts a fresh history", b2._undo_button.disabled and b2._redo_button.disabled) and ok
 	b2.queue_free()
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(TMP_PATH))
@@ -438,13 +477,17 @@ func _test_event_and_relay_edits() -> bool:
 		board._connections_panel.visible and details.visible and "z1_decoy — trigger" in details.text
 		and "gameplay code" in details.text)
 	var edit := card.find_child("ConnectionName", true, false) as LineEdit
+	var renamed_call_pos := Vector2(-640, 202)
+	board.view._event_nodes["offer:decoy"].position_offset = renamed_call_pos
+	board.view.end_node_move.emit()
 	edit.text = "offer:parcel"
 	edit.text_changed.emit(edit.text)
 	edit.text_submitted.emit(edit.text)
 	ok = _check("event rename updates its card and rule trigger",
 		board.view._event_nodes.has("offer:parcel")
 		and not board.view._event_nodes.has("offer:decoy")
-		and _rule(board._data, "z1_decoy")["trigger"] == "offer:parcel") and ok
+		and _rule(board._data, "z1_decoy")["trigger"] == "offer:parcel"
+		and board.view.get_call_positions()["offer:parcel"] == renamed_call_pos) and ok
 	ok = _check("event name collision leaves connections alone",
 		not board.rename_connection("offer:parcel", "deliver").is_empty()
 		and _rule(board._data, "z1_decoy")["trigger"] == "offer:parcel") and ok

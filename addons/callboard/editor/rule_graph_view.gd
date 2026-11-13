@@ -22,6 +22,8 @@ signal layout_changed
 const Style := preload("res://addons/callboard/editor/board_style.gd")
 const CARD_WIDTH := 264.0
 const COMPACT_CARD_WIDTH := CARD_WIDTH
+const CALL_WIDTH := 174.0
+const CALL_GAP := 20.0
 const COL_EVENT := Style.EVENT
 const COL_RELAY := Style.RELAY
 const COL_REQ := Style.SUCCESS
@@ -56,6 +58,11 @@ func _init() -> void:
 	fit.tooltip_text = "Frame every Call, rule and group"
 	fit.pressed.connect(request_fit)
 	get_menu_hbox().add_child(fit)
+	var arrange := Button.new()
+	arrange.text = "Arrange"
+	arrange.tooltip_text = "Arrange rules by relay flow and place Calls beside them"
+	arrange.pressed.connect(auto_arrange)
+	get_menu_hbox().add_child(arrange)
 	_compact_button = Button.new()
 	_compact_button.text = "Compact"
 	_compact_button.toggle_mode = true
@@ -194,7 +201,8 @@ func show_data(data: Dictionary) -> void:
 	clear_view()
 	var rules: Array = data["rules"]
 	var problems: Array = data["notes"]
-	_auto_layout(rules)
+	if not _has_position_data(data):
+		_auto_layout(rules, true)
 
 	for g in data["groups"]:
 		var f := GraphFrame.new()
@@ -223,7 +231,7 @@ func show_data(data: Dictionary) -> void:
 		if rd["group"] != "" and _frames.has(rd["group"]):
 			attach_graph_element_to_frame(n.name, _frames[rd["group"]].name)
 
-	_make_event_nodes(data["external_calls"], rules)
+	_make_event_nodes(data["external_calls"], rules, data.get("call_positions", {}))
 	_connect_all(rules)
 	_cache_rule_signatures(rules, problems)
 
@@ -238,7 +246,6 @@ func update_data(data: Dictionary) -> void:
 		show_data(data)
 		return
 
-	_auto_layout(rules)
 	clear_connections()
 	for group in data["groups"]:
 		var frame: GraphFrame = _frames[group["name"]]
@@ -265,7 +272,7 @@ func update_data(data: Dictionary) -> void:
 				attach_graph_element_to_frame(node.name, frame.name)
 		_rule_signatures[id] = signature
 
-	var event_positions := _event_positions(data["external_calls"], rules)
+	var event_positions := _event_positions(data["external_calls"], rules, data.get("call_positions", {}))
 	for event_id in _event_nodes:
 		(_event_nodes[event_id] as GraphNode).position_offset = event_positions[event_id]
 	_connect_all(rules)
@@ -311,6 +318,13 @@ func get_positions() -> Dictionary:
 	var out := {}
 	for id in _rule_nodes:
 		out[id] = (_rule_nodes[id] as GraphNode).position_offset
+	return out
+
+## Current external Call node positions, keyed by Call ID.
+func get_call_positions() -> Dictionary:
+	var out := {}
+	for id in _event_nodes:
+		out[id] = (_event_nodes[id] as GraphNode).position_offset
 	return out
 
 func get_group_rects() -> Dictionary:
@@ -540,8 +554,33 @@ func _safe(s: String) -> String:
 		s = s.replace(ch, "_")
 	return s
 
-## Rules with no "# @node" comment get a column by relay depth so new rules are never stacked.
-func _auto_layout(rules: Array) -> void:
+func _has_position_data(data: Dictionary) -> bool:
+	if not data.get("call_positions", {}).is_empty():
+		return true
+	for rd in data["rules"]:
+		if rd.get(AuthoredData.FIELD_HAS_POS, false):
+			return true
+	return false
+
+func auto_arrange() -> void:
+	if _last_data.is_empty() or not _editable:
+		return
+	var rules: Array = _last_data["rules"]
+	_auto_layout(rules, true)
+	for rd in rules:
+		rd[AuthoredData.FIELD_HAS_POS] = true
+		var node: GraphNode = _rule_nodes.get(rd["id"])
+		if node:
+			node.position_offset = rd["pos"]
+	var call_positions := _event_positions(_last_data["external_calls"], rules, {}, true)
+	for id in _event_nodes:
+		(_event_nodes[id] as GraphNode).position_offset = call_positions[id]
+	layout_changed.emit()
+	request_fit()
+
+## Rules without saved positions are placed by relay depth. Force is reserved for
+## first-open layouts and the explicit Arrange command.
+func _auto_layout(rules: Array, force := false) -> void:
 	var node_width := COMPACT_CARD_WIDTH if _minimized else CARD_WIDTH
 	var row_spacing := 88.0 if _minimized else 220.0
 	var depth := {}
@@ -557,7 +596,7 @@ func _auto_layout(rules: Array) -> void:
 						depth[b["id"]] = maxi(depth[b["id"]], depth[a["id"]] + 1)
 	var col_y := {}
 	for rd in rules:
-		if rd[AuthoredData.FIELD_HAS_POS]:
+		if not force and rd[AuthoredData.FIELD_HAS_POS]:
 			continue
 		var d: int = depth[rd["id"]]
 		var y: float = col_y.get(d, 40.0)
@@ -816,8 +855,8 @@ func _add_card_rows(node: GraphNode, rows: Array) -> void:
 				if row[2]:
 					node.set_slot_color_right(i, Style.resolve_color(node, right_color)))
 
-func _make_event_nodes(events: Array, rules: Array) -> void:
-	var positions := _event_positions(events, rules)
+func _make_event_nodes(events: Array, rules: Array, saved_positions: Dictionary) -> void:
+	var positions := _event_positions(events, rules, saved_positions)
 	for event_id in events:
 		var n := GraphNode.new()
 		n.name = "ev_" + _safe(event_id)
@@ -825,15 +864,17 @@ func _make_event_nodes(events: Array, rules: Array) -> void:
 		n.title = "External Call"
 		n.tooltip_text = event_id
 		n.position_offset = positions[event_id]
-		_style_card(n, 174.0, COL_EVENT, &"Signal")
+		_style_card(n, CALL_WIDTH, COL_EVENT, &"Signal")
 		_add_card_rows(n, [[_row(event_id, Style.TEXT), false, true, COL_EVENT]])
 		add_child(n)
 		_event_nodes[event_id] = n
 
-func _event_positions(events: Array, rules: Array) -> Dictionary:
-	var min_x := 0.0
+func _event_positions(events: Array, rules: Array, saved_positions: Dictionary = {}, force := false) -> Dictionary:
+	var min_x := INF
 	for rd in rules:
 		min_x = minf(min_x, rd["pos"].x)
+	if min_x == INF:
+		min_x = 0.0
 	var entries: Array = []
 	for e in events:
 		var y := 1e9
@@ -845,9 +886,15 @@ func _event_positions(events: Array, rules: Array) -> Dictionary:
 	var prev_y := -1e9
 	var positions := {}
 	for en in entries:
+		var event_id: String = en["event"]
+		if not force and saved_positions.get(event_id) is Vector2:
+			var saved: Vector2 = saved_positions[event_id]
+			positions[event_id] = saved
+			prev_y = maxf(prev_y, saved.y)
+			continue
 		var y: float = maxf(en["y"], prev_y + 90.0)
 		prev_y = y
-		positions[en["event"]] = Vector2(min_x - 230.0, y)
+		positions[event_id] = Vector2(min_x - CALL_WIDTH - CALL_GAP, y)
 	return positions
 
 func _connect_all(rules: Array) -> void:

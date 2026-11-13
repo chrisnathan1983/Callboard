@@ -15,6 +15,7 @@ static func read(stage: Stage) -> Dictionary:
 		"groups": definition.groups.map(func(g: GroupData) -> Dictionary: return g.to_dictionary()),
 		"catalog": VerbCatalog.from_factory(stage.verbs), "props": VerbCatalog.props_of(stage),
 		"external_calls": Array(stage.external_calls).map(func(e): return String(e)),
+		"call_positions": definition.call_positions.duplicate(true),
 		"external_vars": Array(stage.external_vars).map(func(k): return String(k)),
 	}
 	_read_results(data, stage, stage.graph_errors.is_empty(), stage.graph_errors + stage.check())
@@ -62,6 +63,7 @@ static func make_definition(data: Dictionary) -> StageDefinition:
 	draft.preview_scene_path = original.preview_scene_path
 	draft.set_meta(StageDefinition.ANALYSIS_SCENE_SOURCE_META, original.analysis_source_path())
 	draft.external_calls = PackedStringArray(data["external_calls"])
+	draft.call_positions = data.get("call_positions", original.call_positions).duplicate(true)
 	draft.external_vars = PackedStringArray(data.get("external_vars", Array(original.external_vars)))
 	draft.variables = data["vars"].map(func(v: Dictionary) -> VariableData: return VariableData.from_dictionary(v))
 	draft.rules = data["rules"].map(func(r: Dictionary) -> RuleData: return RuleData.from_dictionary(r))

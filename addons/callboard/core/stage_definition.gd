@@ -2,7 +2,7 @@
 class_name StageDefinition extends Resource
 ## Authored data shared by the runtime and the Callboard.
 
-const CURRENT_FORMAT_VERSION := 3
+const CURRENT_FORMAT_VERSION := 4
 const ANALYSIS_SCENE_SOURCE_META := &"_analysis_scene_source"
 static var _string_token_pattern: RegEx
 
@@ -11,6 +11,8 @@ static var _string_token_pattern: RegEx
 ## when the scene itself references this StageDefinition.
 @export_file("*.tscn") var preview_scene_path := ""
 @export var external_calls := PackedStringArray()
+## Canvas positions for external Call nodes, keyed by Call ID.
+@export var call_positions: Dictionary = {}
 @export var external_vars := PackedStringArray()
 @export var variables: Array = []
 @export var rules: Array = []

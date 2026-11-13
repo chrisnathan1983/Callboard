@@ -7,7 +7,7 @@ class_name Callboard extends Control
 
 signal layout_saved(path: String)
 
-const EDIT_FIELDS := ["external_calls", "external_vars", "vars", "rules", "groups"]
+const EDIT_FIELDS := ["external_calls", "call_positions", "external_vars", "vars", "rules", "groups"]
 const Style := preload("res://addons/callboard/editor/board_style.gd")
 const Settings := preload("res://addons/callboard/core/callboard_settings.gd")
 enum CreateAction { EVENT, RULE, GROUP }
@@ -402,7 +402,7 @@ func _clear_analysis_stage() -> void:
 
 func _show(data: Dictionary, editable: bool, live := false) -> void:
 	if data.has("error"):
-		_show({"rules": [], "groups": [], "vars": [], "external_calls": [],
+		_show({"rules": [], "groups": [], "vars": [], "external_calls": [], "call_positions": {},
 			"external_vars": [], "notes": [data["error"]]}, false)
 		_set_status(data["error"], Style.ERROR)
 		return
@@ -686,6 +686,9 @@ func rename_connection(id: String, new_name: String) -> String:
 		return "The graph is read-only."
 	var error := RuleConnections.rename(_data, id, new_name)
 	if error.is_empty():
+		if not id.begins_with(RuleConnections.RELAY_PREFIX) and _data["call_positions"].has(id):
+			_data["call_positions"][new_name.strip_edges()] = _data["call_positions"].get(id)
+			_data["call_positions"].erase(id)
 		_changed(_selected)
 		_on_rule_selected(_selected)
 	return error
@@ -695,6 +698,8 @@ func delete_connection(id: String) -> String:
 		return "The graph is read-only."
 	var error := RuleConnections.remove(_data, id)
 	if error.is_empty():
+		if not id.begins_with(RuleConnections.RELAY_PREFIX):
+			_data["call_positions"].erase(id)
 		_changed(_selected)
 		_on_rule_selected(_selected)
 	return error
@@ -708,6 +713,15 @@ func _sync_layout() -> void:
 		if pos.has(rd["id"]):
 			rd["pos"] = pos[rd["id"]].round()
 			rd[AuthoredData.FIELD_HAS_POS] = true
+	var call_positions: Dictionary = _data.get("call_positions", {}).duplicate(true)
+	var visible_call_positions := view.get_call_positions()
+	for id in visible_call_positions:
+		if _data["external_calls"].has(id):
+			call_positions[id] = visible_call_positions[id].round()
+	for id in call_positions.keys():
+		if not _data["external_calls"].has(id):
+			call_positions.erase(id)
+	_data["call_positions"] = call_positions
 	var rects := view.get_group_rects()
 	for g in _data["groups"]:
 		if rects.has(g["name"]):
