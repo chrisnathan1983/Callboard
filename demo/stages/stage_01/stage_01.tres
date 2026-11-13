@@ -2,7 +2,7 @@
 
 [ext_resource type="Script" path="res://addons/callboard/core/group_data.gd" id="1_1e1bh"]
 [ext_resource type="Script" path="res://addons/callboard/core/stage_definition.gd" id="1_6haco"]
-[ext_resource type="Script" path="res://stages/stage_01/stage_01.gd" id="2_nih50"]
+[ext_resource type="Script" path="res://demo/stages/stage_01/stage_01.gd" id="2_nih50"]
 [ext_resource type="Script" path="res://addons/callboard/core/rule_data.gd" id="2_sw6iv"]
 [ext_resource type="Script" path="res://addons/callboard/core/step_data.gd" id="3_udjpu"]
 [ext_resource type="Script" path="res://addons/callboard/core/variable_data.gd" id="6_orrc7"]

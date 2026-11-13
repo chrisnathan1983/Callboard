@@ -1,6 +1,6 @@
 @tool
 extends EditorExportPlugin
-## Removes Callboard authoring code from release exports.
+## Removes addon tests from exports and authoring code from release exports.
 
 var _debug_export := false
 
@@ -12,6 +12,8 @@ func _export_file(path: String, _type: String, _features: PackedStringArray) -> 
 		skip()
 
 static func should_strip(path: String, is_debug: bool) -> bool:
+	if path.begins_with("res://addons/callboard/tests/"):
+		return true
 	if is_debug:
 		return false
 	return (path.begins_with("res://addons/callboard/editor/")

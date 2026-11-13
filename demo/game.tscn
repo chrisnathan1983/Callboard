@@ -1,0 +1,16 @@
+[gd_scene format=3 uid="uid://b6awcg4g07keo"]
+
+[ext_resource type="Script" uid="uid://b04npba1apdes" path="res://demo/scripts/game_manager.gd" id="1_e2o6t"]
+[ext_resource type="PackedScene" uid="uid://c3qqdni5bspdi" path="res://demo/stages/stage_01/stage_01.tscn" id="2_feb5d"]
+[ext_resource type="Script" uid="uid://fvf3f7fkja4" path="res://demo/scripts/world_manager.gd" id="3_feb5d"]
+[ext_resource type="Script" uid="uid://oxor5iyf4oi7" path="res://demo/scripts/game_hud.gd" id="4_fc0e3"]
+
+[node name="GameManager" type="Node3D" unique_id=93247648]
+script = ExtResource("1_e2o6t")
+stage_scene = ExtResource("2_feb5d")
+
+[node name="WorldManager" type="Node3D" parent="." unique_id=752824251]
+script = ExtResource("3_feb5d")
+
+[node name="HUD" type="CanvasLayer" parent="." unique_id=33095439]
+script = ExtResource("4_fc0e3")

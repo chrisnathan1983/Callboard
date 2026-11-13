@@ -1,7 +1,7 @@
 [gd_resource type="Resource" script_class="StageDefinition" format=3]
 
 [ext_resource type="Script" path="res://addons/callboard/core/stage_definition.gd" id="1"]
-[ext_resource type="Script" path="res://stages/stage_01/stage_01.gd" id="2"]
+[ext_resource type="Script" path="res://addons/callboard/tests/fixtures/legacy_stage.gd" id="2"]
 
 [resource]
 script = ExtResource("1")

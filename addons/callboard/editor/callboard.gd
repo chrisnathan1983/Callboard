@@ -324,6 +324,9 @@ func _collect_stage_definition_paths(dir_path := "") -> Array[String]:
 	var paths: Array[String] = []
 	if dir_path.is_empty():
 		dir_path = Settings.stages_directory()
+	# The stage generator creates the primary directory when the first stage is added.
+	if not DirAccess.dir_exists_absolute(dir_path):
+		return paths
 	var dir := DirAccess.open(dir_path)
 	if dir == null:
 		push_error("Could not open stage directory '%s': %s" % [dir_path, error_string(DirAccess.get_open_error())])

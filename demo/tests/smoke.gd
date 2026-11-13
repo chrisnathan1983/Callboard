@@ -1,8 +1,8 @@
 extends SceneTree
 ## Short runtime smoke test using the real scene and physics overlap checks.
 
-const STAGE_SCENE_PATH := "res://stages/stage_01/stage_01.tscn"
-const GAME_SCENE_PATH := "res://game.tscn"
+const STAGE_SCENE_PATH := "res://demo/stages/stage_01/stage_01.tscn"
+const GAME_SCENE_PATH := "res://demo/game.tscn"
 
 func _initialize() -> void:
 	var packed := load(STAGE_SCENE_PATH) as PackedScene
@@ -169,6 +169,11 @@ func _test_game_scene() -> bool:
 	await process_frame
 	var ok := _check("the game manager updates the HUD after scoring",
 		game.score == 25 and hud.hud.text.begins_with("Score: 25"))
+	var has_debug_board := OS.is_debug_build() and ResourceLoader.exists(
+		"res://addons/callboard/editor/callboard.gd", "Script")
+	ok = _check("the HUD mounts the hidden live panel when available",
+		(hud.board_panel != null and not hud.board_panel.visible) if has_debug_board
+		else hud.board_panel == null) and ok
 	game.stage.deactivate()
 	await create_timer(3.5).timeout
 	game.queue_free()

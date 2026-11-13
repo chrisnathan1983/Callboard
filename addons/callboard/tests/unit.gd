@@ -5,7 +5,7 @@ signal clock_tick
 
 func _initialize() -> void:
 	var ok := true
-	var legacy_definition := load("res://tests/fixtures/legacy_stage_definition.tres") as StageDefinition
+	var legacy_definition := load("res://addons/callboard/tests/fixtures/legacy_stage_definition.tres") as StageDefinition
 	if legacy_definition:
 		legacy_definition._migrate()
 		var legacy_stage := legacy_definition.instantiate()

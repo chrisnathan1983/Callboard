@@ -1,6 +1,6 @@
 [gd_scene format=3]
 
-[ext_resource type="Script" path="res://tests/fixtures/assigned_prop_stage.gd" id="1"]
+[ext_resource type="Script" path="res://addons/callboard/tests/fixtures/assigned_prop_stage.gd" id="1"]
 
 [node name="AssignedPropStage" type="Node3D" node_paths=PackedStringArray("assigned_target")]
 script = ExtResource("1")

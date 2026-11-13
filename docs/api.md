@@ -31,7 +31,7 @@ func unload_stage() -> void:
     stage = null
 ```
 
-Call `load_stage()` from a parent already in the scene tree. Keep a pair of dictionaries per Stage if your game loads several Stages. Both dictionaries are shared by reference. Serialize and restore them in your save system if they should survive a game restart. See the [demo manager](../scripts/game_manager.gd) for signal wiring and reload behavior.
+Call `load_stage()` from a parent already in the scene tree. Keep a pair of dictionaries per Stage if your game loads several Stages. Both dictionaries are shared by reference. Serialize and restore them in your save system if they should survive a game restart. See the [demo manager](../demo/scripts/game_manager.gd) for signal wiring and reload behavior.
 
 Preserve Variant types when saving these dictionaries. For example, use `var_to_str()` and `str_to_var()`. JSON reads numbers as floats, so a JSON save layer needs to restore declared integer values to `int` before assigning `saved_vars`.
 
@@ -80,7 +80,7 @@ Use `@tool` on the Stage script and custom verb factory so Callboard can analyze
 | `external_vars` | Declared Blackboard keys that gameplay writes. This tells validation which values have a writer outside the graph. |
 | `variables`, `rules`, `groups` | Authored subresources. Rule steps are stored with the rule. |
 
-Use the generated `.tscn` when loading a Stage that relies on scene-assigned nodes. `StageDefinition.instantiate()` creates a Stage from its script and assigns the definition. Find working examples in [Stage 01](../stages/stage_01/) and the [scene-assigned prop fixture](../tests/fixtures/assigned_prop_stage.tscn).
+Use the generated `.tscn` when loading a Stage that relies on scene-assigned nodes. `StageDefinition.instantiate()` creates a Stage from its script and assigns the definition. Find working examples in [Stage 01](../demo/stages/stage_01/) and the [scene-assigned prop fixture](../addons/callboard/tests/fixtures/assigned_prop_stage.tscn).
 
 Step arguments and delays are evaluated at graph compilation using Godot's [Expression](https://docs.godotengine.org/en/stable/classes/class_expression.html). Use project-authored data. The expressions can call methods and reference typed props and script constants. The event payload is available to the step callable when the rule runs.
 
@@ -102,7 +102,7 @@ The `changed(key, value)` signal is forwarded as `Stage.var_changed`. Use the wr
 [`TriggerArea`](../addons/callboard/core/trigger_area.gd) extends `Area3D`. Place it under a Stage, add a `CollisionShape3D`, and set `event` and optional `ctx`. It locates the closest Stage ancestor.
 
 - **ENTER** dispatches when a body in the `Player` or `Companion` group enters. Its mask uses physics layers 2 and 4, respectively.
-- **INTERACT** dispatches when your controller calls `interact()`. The demo [player](../scripts/actors/player.gd) finds a nearby area using the trigger layer, physics layer 3.
+- **INTERACT** dispatches when your controller calls `interact()`. The demo [player](../demo/scripts/actors/player.gd) finds a nearby area using the trigger layer, physics layer 3.
 
 Use [`StageCollisionLayers`](../addons/callboard/core/collision_layers.gd) for the bit masks, or call `stage.fire()` directly from your own interaction system.
 
@@ -121,7 +121,7 @@ The default factory is [`StagingVerbs`](../addons/callboard/core/staging_verbs.g
 | Staging | `move_to(n, dest, offset = Vector3.ZERO, duration = 0.7)` | Tween a node to a target with an offset. |
 | Staging | `flash(m)`, `jump(m)` | Tint a mesh or animate a vertical hop. Both use a BaseMaterial3D material override. |
 
-The demo's [`Stage01Verbs`](../stages/stage_01/stage_01_verbs.gd) supplies `light(n, on, duration = 0.0)`, which updates its `lamp_on` key, and `stun_player(seconds)`. It is selected by `Stage01._make_verbs()`; other games can define their own methods and actor lookup without inheriting demo group names. To build a key-agnostic light action, call the protected-by-convention `StagingVerbs._light(n, on, duration, key)` helper from your own verb method.
+The demo's [`Stage01Verbs`](../demo/stages/stage_01/stage_01_verbs.gd) supplies `light(n, on, duration = 0.0)`, which updates its `lamp_on` key, and `stun_player(seconds)`. It is selected by `Stage01._make_verbs()`; other games can define their own methods and actor lookup without inheriting demo group names. To build a key-agnostic light action, call the protected-by-convention `StagingVerbs._light(n, on, duration, key)` helper from your own verb method.
 
 ## Custom verbs
 
@@ -176,4 +176,18 @@ Declare a Boolean Blackboard key `door_open` and assign a typed `Node3D` propert
 
 The rule engine dispatches matching rules in authored order. A rule's steps run in order and await their completion when applicable. A rule's own relay fires after its final step completes. Different rules can overlap. The re-entry policy governs repeated triggers of the same rule.
 
-The [unit suite](../tests/unit.gd) exercises guards, re-entry, cancellation, and migration. The [runtime smoke test](../tests/smoke.gd) shows how to drive a Stage through the same calls the game uses.
+The [unit suite](../addons/callboard/tests/unit.gd) exercises guards, re-entry, cancellation, and migration. The [demo runtime smoke test](../demo/tests/smoke.gd) shows how to drive a Stage through the same calls the game uses.
+
+## Embedding the live debugger
+
+`CallboardDebugPanel.create()` returns an unparented `PanelContainer` in debug builds when the board script is available. It returns `null` in release builds or when the authoring code is absent. Place the panel in your HUD and bind a Stage after the Stage has entered the scene tree.
+
+```gdscript
+var panel := CallboardDebugPanel.create()
+if panel:
+    add_child(panel)
+    panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+    panel.bind_stage(stage)
+```
+
+Call `bind_stage()` again after loading a replacement Stage. The HUD controls the panel's layout and visibility.

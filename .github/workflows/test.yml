@@ -17,11 +17,13 @@ jobs:
       matrix:
         suite:
           - name: Unit tests
-            script: unit.gd
+            script: addons/callboard/tests/unit.gd
           - name: Callboard smoke test
-            script: editor_smoke.gd
-          - name: Runtime smoke test
-            script: smoke.gd
+            script: addons/callboard/tests/editor_smoke.gd
+          - name: Demo editor smoke test
+            script: demo/tests/editor_smoke.gd
+          - name: Demo runtime smoke test
+            script: demo/tests/smoke.gd
     env:
       GODOT_VERSION: 4.7.2-stable
     defaults:
@@ -62,19 +64,20 @@ jobs:
           TEST_SCRIPT: ${{ matrix.suite.script }}
         run: |
           set -o pipefail
-          timeout 120s godot --headless --path . --script "res://tests/$TEST_SCRIPT" 2>&1 | tee "$RUNNER_TEMP/godot-suite.log"
+          timeout 120s godot --headless --path . --script "res://$TEST_SCRIPT" 2>&1 | tee "$RUNNER_TEMP/godot-suite.log"
           if grep -F 'SCRIPT ERROR' "$RUNNER_TEMP/godot-suite.log"; then
             exit 1
           fi
 
       - name: Verify runtime excludes editor and model layers
-        if: matrix.suite.script == 'smoke.gd'
+        if: matrix.suite.script == 'demo/tests/smoke.gd'
         run: |
           temp_project="$RUNNER_TEMP/callboard-runtime-check"
-          mkdir -p "$temp_project/addons/callboard" "$temp_project/tests"
+          mkdir -p "$temp_project/addons/callboard" "$temp_project/demo/tests"
           cp -R addons/callboard/core "$temp_project/addons/callboard/"
-          cp -R scripts stages game.tscn project.godot "$temp_project/"
-          cp tests/smoke.gd tests/smoke.gd.uid "$temp_project/tests/"
+          cp project.godot "$temp_project/"
+          cp -R demo/game.tscn demo/scripts demo/stages "$temp_project/demo/"
+          cp demo/tests/smoke.gd demo/tests/smoke.gd.uid "$temp_project/demo/tests/"
           python3 - "$temp_project/project.godot" <<'PY'
           from pathlib import Path
           import sys
@@ -94,7 +97,7 @@ jobs:
           if grep -E '^(SCRIPT )?ERROR:' "$RUNNER_TEMP/godot-runtime-import.log"; then
             exit 1
           fi
-          timeout 120s godot --headless --path "$temp_project" --script res://tests/smoke.gd 2>&1 | tee "$RUNNER_TEMP/godot-runtime-boundary.log"
+          timeout 120s godot --headless --path "$temp_project" --script res://demo/tests/smoke.gd 2>&1 | tee "$RUNNER_TEMP/godot-runtime-boundary.log"
           if grep -E '^(SCRIPT )?ERROR:' "$RUNNER_TEMP/godot-runtime-boundary.log"; then
             exit 1
           fi

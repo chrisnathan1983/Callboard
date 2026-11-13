@@ -1,11 +1,10 @@
 extends SceneTree
-## Headless authoring integration test: godot --headless --path . --script res://tests/editor_smoke.gd
+## Headless authoring integration tests using the demo's Stage 01 graph.
 
-const STAGE_PATH := "res://stages/stage_01/stage_01.gd"
-const DEFINITION_PATH := "res://stages/stage_01/stage_01.tres"
+const STAGE_PATH := "res://demo/stages/stage_01/stage_01.gd"
+const DEFINITION_PATH := "res://demo/stages/stage_01/stage_01.tres"
 const TMP_PATH := "res://.godot/stage_tmp.tres"
 const Settings := preload("res://addons/callboard/core/callboard_settings.gd")
-const ExportFilter := preload("res://addons/callboard/editor/export_plugin.gd")
 
 func _initialize() -> void:
 	var ok := _test_authored_resource_graph()
@@ -16,12 +15,9 @@ func _initialize() -> void:
 	ok = (await _test_numeric_undo()) and ok
 	ok = (await _test_event_and_relay_edits()) and ok
 	ok = (await _test_canvas_actions()) and ok
-	ok = _test_factory() and ok
 	ok = _test_live_debug() and ok
-	ok = _test_scene_assigned_props() and ok
-	ok = _test_layer_export_filter() and ok
 	ok = _test_rename_saved_state() and ok
-	print("EDITOR: ", "PASS" if ok else "FAIL")
+	print("DEMO EDITOR: ", "PASS" if ok else "FAIL")
 	quit(0 if ok else 1)
 
 func _test_authored_resource_graph() -> bool:
@@ -109,16 +105,16 @@ func _test_additional_stage_locations() -> bool:
 	var previous: Variant = ProjectSettings.get_setting(
 		Settings.ADDITIONAL_STAGE_DIRECTORIES, PackedStringArray())
 	ProjectSettings.set_setting(Settings.ADDITIONAL_STAGE_DIRECTORIES,
-		PackedStringArray(["res://stages/stage_01/", "res://stages"]))
+		PackedStringArray(["res://demo/stages/", "res://demo/stages/stage_01/", "res://stages"]))
 	var directories := Settings.stage_directories()
 	var board := Callboard.new()
 	root.add_child(board)
 	var paths := board._collect_all_stage_definition_paths()
 	var ok := _check("additional stage directories are normalized and deduplicated",
-		directories == ["res://stages", "res://stages/stage_01"]
+		directories == ["res://stages", "res://demo/stages", "res://demo/stages/stage_01"]
 		and paths.count(DEFINITION_PATH) == 1)
 	ok = _check("stage picker labels entries relative to their selected root",
-		Callboard._path_relative_to(DEFINITION_PATH, "res://stages") == "stage_01/stage_01.tres") and ok
+		Callboard._path_relative_to(DEFINITION_PATH, "res://demo/stages") == "stage_01/stage_01.tres") and ok
 	board.queue_free()
 	ProjectSettings.set_setting(Settings.ADDITIONAL_STAGE_DIRECTORIES, previous)
 	return ok
@@ -129,8 +125,8 @@ func _test_board_editing() -> bool:
 	# --- D. Editing through the board ------------------------------------------------
 	var board := Callboard.new()
 	root.add_child(board)
-	var stage_paths := board._collect_stage_definition_paths()
-	ok = _check("board: discovers nested stage resources",
+	var stage_paths := board._collect_all_stage_definition_paths()
+	ok = _check("board: discovers the demo stage from the project settings",
 		stage_paths.has(DEFINITION_PATH)) and ok
 	board.open_script(DEFINITION_PATH)
 	var d: Dictionary = board._data
@@ -352,50 +348,6 @@ func _test_debounced_history() -> bool:
 	board.free()
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(TMP_PATH))
 	return ok
-
-func _test_scene_assigned_props() -> bool:
-	var definition := StageDefinition.new()
-	definition.stage_script = load("res://tests/fixtures/assigned_prop_stage.gd")
-	definition.preview_scene_path = "res://tests/fixtures/assigned_prop_stage.tscn"
-	definition.external_calls = PackedStringArray(["go"])
-	definition.rules = [{
-		"id": "use_scene_prop", "trigger": "go", "requires": [], "forbids": [],
-		"cancel_if": [], "one_shot": false, "reentry": Rule.ReentryPolicy.IGNORE,
-		"emit": "", "state_key": "use_scene_prop", "group": "", "steps": [{
-			"verb": "show_node", "args": ["target", "true"],
-		}, {
-			"verb": "show_node", "args": ["assigned_target", "true"],
-		}],
-	}]
-	if not _check("explicit preview fixture saved", ResourceSaver.save(definition, TMP_PATH) == OK):
-		return false
-	var board := Callboard.new()
-	root.add_child(board)
-	board.open_script(TMP_PATH)
-	var ok := _check("Callboard resolves exported and @onready props from a differently named preview scene",
-		board._data.get("compiles", false) and board._data["notes"].is_empty())
-	if ok:
-		board.add_call_name("preview_fixture_call")
-		board.save()
-		ok = _check("Callboard saves omit the transient analysis source",
-			not "metadata/_analysis_scene_source" in FileAccess.get_file_as_string(TMP_PATH)) and ok
-		board.open_script(TMP_PATH)
-		var reloaded: StageDefinition = board._data.get("definition")
-		ok = _check("Callboard save preserves the explicit preview scene",
-			reloaded != null and reloaded.preview_scene_path == definition.preview_scene_path
-			and reloaded.external_calls.has("preview_fixture_call")
-			and board._data["compiles"] and board._data["notes"].is_empty()) and ok
-	board.free()
-	DirAccess.remove_absolute(ProjectSettings.globalize_path(TMP_PATH))
-	return ok
-
-func _test_layer_export_filter() -> bool:
-	return _check("release exports strip Callboard authoring scripts only",
-		ExportFilter.should_strip("res://addons/callboard/editor/callboard.gd", false)
-		and ExportFilter.should_strip("res://addons/callboard/model/rule_graph_reader.gd", false)
-		and ExportFilter.should_strip("res://addons/callboard/plugin.gd", false)
-		and not ExportFilter.should_strip("res://addons/callboard/core/stage.gd", false)
-		and not ExportFilter.should_strip("res://addons/callboard/editor/callboard.gd", true))
 
 func _test_canvas_actions() -> bool:
 	var board := Callboard.new()
@@ -681,70 +633,6 @@ func _test_numeric_undo() -> bool:
 	ok = _check("one undo restores the step argument before the drag",
 		_rule(board._data, "z1_standoff")["steps"][0]["args"][0] == "3.5") and ok
 	board.queue_free()
-	return ok
-
-func _test_factory() -> bool:
-	# Build an unparented resource-backed stage with its own verb factory.
-	var script := GDScript.new()
-	script.source_code = """@tool
-extends Stage
-
-const MESSAGE := 'A, "B"'
-var target: Node3D
-
-class CustomVerbs extends StagingVerbs:
-	func stamp(prop: Node3D, label: String) -> Step:
-		return Step.new(func(_c: Dictionary) -> void: prop.set_meta(&"label", label))
-
-func _make_verbs(ctx: StepContext) -> CoreVerbs:
-	return CustomVerbs.new(ctx)
-
-func _build_props() -> void:
-	target = Node3D.new()
-	add_child(target)
-
-func _build_blackboard() -> void:
-	write_var(&"ready", true)
-"""
-	if not _check("custom factory fixture compiles", script.reload() == OK):
-		return false
-	var definition := StageDefinition.new()
-	definition.stage_script = script
-	definition.variables = [{"key": "ready", "scope": "local", "default": false}]
-	var spec := {"verb": "stamp", "args": ["target", "MESSAGE"], "delay": "0.25"}
-	definition.rules = [{
-		"id": "custom", "trigger": "arrive", "requires": [], "forbids": [],
-		"cancel_if": [], "one_shot": false, "emit": "", "steps": [spec],
-	}]
-	var stage := definition.instantiate()
-	stage.build()
-	var catalog := VerbCatalog.from_factory(stage.verbs)
-	var ok := _check("factory discovers its custom verb and the inherited verbs",
-		VerbCatalog.find(catalog, "stamp").size() > 0
-		and VerbCatalog.find(catalog, "show_node").size() > 0
-		and VerbCatalog.find(catalog, "repeat_emit").size() > 0)
-	ok = _check("stage runs the blackboard hook after resource defaults", stage.is_set(&"ready")) and ok
-	if _check("custom resource compiles", stage.graph_errors.is_empty()):
-		var step := stage.engine.rules[0].steps[0]
-		ok = _check("resource compiler supplies verb, prop, constant and delay metadata",
-			step.verb == &"stamp" and step.args == [stage.get("target"), 'A, "B"']
-			and step.delay == 0.25) and ok
-		step.fn.call({})
-		ok = _check("compiled custom step runs with the supplied arguments",
-			stage.get("target").get_meta(&"label") == 'A, "B"') and ok
-	else:
-		ok = false
-	stage.engine.rules.clear()
-	stage.free()
-
-	definition.rules[0].steps[0].args = PackedStringArray(["null", "MESSAGE"])
-	stage = definition.instantiate()
-	stage.build()
-	ok = _check("validator still reports null props with compiler-generated metadata",
-		stage.check().any(func(problem): return "'stamp' step with an unset prop" in problem)) and ok
-	stage.engine.rules.clear()
-	stage.free()
-
 	return ok
 
 func _test_live_debug() -> bool:

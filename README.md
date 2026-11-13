@@ -13,7 +13,7 @@
 
 ## Run the demo
 
-Open [project.godot](project.godot) in Godot **4.7** and press **F5**. The plugin is already enabled. Open the **Callboard** editor tab and select `stage_01/stage_01.tres` to inspect the same rules that drive the demo. CI uses Godot **4.7.2**.
+Open [project.godot](project.godot) in Godot **4.7** and press **F5**. The plugin is already enabled. Open the **Callboard** editor tab and select `stage_01/stage_01.tres` to inspect the same rules that drive the demo. The project includes `res://demo/stages` in `callboard/additional_stage_directories` so the stage picker can find it. CI uses Godot **4.7.2**.
 
 1. Walk toward the doorway. The guard barks and the lamp flashes. Interact while the lamp is on to see the caught rule.
 2. Interact by the red shelter to offer a decoy, or walk into the blue pad to release a treat. Either path calms the guard.
@@ -109,6 +109,8 @@ To add a numeric guard, enter a comparison such as `score >= 10` below Requires,
 
 Press **F1** in the demo to inspect the running Stage. The **DEBUG** panel shows active rules, queued or restarting runs, pending waits, and recent event and step activity. Open **Blackboard** to inspect current values or **Calls & relays** to fire a declared Call while testing. The live graph uses the loaded Stage definition and highlights rules as they run.
 
+Use `CallboardDebugPanel.create()` to add the live board to your own HUD. See [Embedding the live debugger](docs/api.md#embedding-the-live-debugger).
+
 To see a cancellation, start with a fresh Stage, wait for a guard tick, then offer the decoy. The trace shows the calming relay and the guard loop stopping at its next cancellation check.
 
 ## How it fits together
@@ -124,7 +126,7 @@ flowchart TD
 	steps -->|Relays| engine
 ```
 
-The editor writes a `.tres` file that the Stage compiles into runtime rules. The export plugin strips the editor and authoring model from release exports. The demo HUD loads the live board only in debug builds. See the [API reference](docs/api.md) for Stage lifecycle, persistence, signals, built-in verbs, and runtime diagnostics.
+The editor writes a `.tres` file that the Stage compiles into runtime rules. The export plugin excludes addon tests from exports and strips the editor and authoring model from release exports. See the [API reference](docs/api.md) for Stage lifecycle, persistence, signals, built-in verbs, and runtime diagnostics.
 
 ## Develop and test
 
@@ -132,17 +134,19 @@ The editor writes a `.tres` file that the Stage compiles into runtime rules. The
 | --- | --- |
 | [`addons/callboard/core/`](addons/callboard/core/) | Stage, Blackboard, rule execution, validation, and verbs |
 | [`addons/callboard/editor/`](addons/callboard/editor/) and [`model/`](addons/callboard/model/) | Authoring UI, live board, and graph tooling |
-| [`stages/stage_01/`](stages/stage_01/) and [`scripts/`](scripts/) | Sample Stage and demo game |
-| [`tests/`](tests/) | Unit, editor smoke, and runtime smoke tests |
+| [`demo/`](demo/) | Demo game scene, scripts, and sample Stage |
+| [`addons/callboard/tests/`](addons/callboard/tests/) | Addon unit tests, editor smoke tests, and fixtures |
+| [`demo/tests/`](demo/tests/) | Editor and runtime smoke tests that exercise the demo |
 
 ```sh
 godot --headless --path . --import
-godot --headless --path . --script res://tests/unit.gd
-godot --headless --path . --script res://tests/editor_smoke.gd
-godot --headless --path . --script res://tests/smoke.gd
+godot --headless --path . --script res://addons/callboard/tests/unit.gd
+godot --headless --path . --script res://addons/callboard/tests/editor_smoke.gd
+godot --headless --path . --script res://demo/tests/editor_smoke.gd
+godot --headless --path . --script res://demo/tests/smoke.gd
 ```
 
-[GitHub Actions](.github/workflows/test.yml) runs the three suites separately and checks that the demo runtime works without the editor and authoring model.
+[GitHub Actions](.github/workflows/test.yml) runs the four suites separately and checks that the demo runtime works without the editor and authoring model.
 
 ## License
 
