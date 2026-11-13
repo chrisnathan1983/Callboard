@@ -154,6 +154,10 @@ godot --headless --path . --script res://demo/tests/smoke.gd
 
 If a Windows headless import reports `Safe save failed` in a restricted workspace, use a writable workspace or disable **Filesystem → On Save → Safe Save On Backup Then Rename** in a dedicated test editor profile. The setting is in Godot’s **Editor Settings**.
 
+## AI disclosure
+
+I developed Callboard through vibe coding from start to finish. I directed the project and used ChatGPT (Codex) as my primary assistant for writing the code and carrying out project tasks. GitHub Copilot occasionally helped with coding. I also consulted Claude and Google Gemini for direction and feedback.
+
 ## License
 
 Callboard, formerly Director Blackboard / Rule Board, is released under the [Zero-Clause BSD License](LICENSE).
