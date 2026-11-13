@@ -73,10 +73,12 @@ GitHub Actions runs each suite as a separate check on pushes and pull requests, 
 
 ## Make a Stage
 
-1. Create one from **Project > Tools > Create New Stage...**, or write a `@tool` script extending `Stage`. Keep `_build_props()` safe to call on an unparented instance so the editor can inspect it.
+1. Create one from **Project > Tools > Create New Stage...**, or write a `@tool` script extending `Stage`.
 2. Assign the script to a `StageDefinition` resource. List Blackboard keys written by gameplay code under **External Vars**.
 3. Add Calls, Blackboard variables, rules, and graph layout in Callboard.
 4. Assign the definition to the Stage scene. Before adding a Stage to the SceneTree, inject existing `saved_vars` and `fired` dictionaries if they should persist across reloads, then call `activate()`. Call `deactivate()` when unloading it.
+
+Callboard uses a same-name sibling scene to validate scene-assigned props. If the scene lives elsewhere or has a different name, set **Preview Scene Path** on the StageDefinition in the Inspector. Use a scene with a `Stage` root. Stages built entirely in script can leave the field empty.
 
 The Stage builds props, applies definition defaults, calls the optional `_build_blackboard()` hook, and builds its rules. Use `get_var()`, `write_var()`, and `fire()` in gameplay code. Saved keys retain injected values when defaults are applied; initialize local keys consistently when they should reset on reload.
 

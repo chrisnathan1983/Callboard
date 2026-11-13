@@ -36,6 +36,7 @@ func light(n: Node3D, on: bool, duration := 0.0, key: StringName = &"lamp_on") -
 	var f := func(c: Dictionary) -> void:
 		var engine := ctx.engine_ref.get_ref() as RuleEngine
 		var rule := c.get("_rule") as Rule
+		var run: Dictionary = c["_run"]
 		var gen := engine.token()
 		var node_id := n.get_instance_id()
 		var activation := int(n.get_meta(LIGHT_ACTIVATION_META, 0)) + 1
@@ -47,7 +48,7 @@ func light(n: Node3D, on: bool, duration := 0.0, key: StringName = &"lamp_on") -
 			timeout.connect(func() -> void:
 				var current := ctx.engine_ref.get_ref() as RuleEngine
 				var light_node := instance_from_id(node_id) as Node3D
-				if current and current.alive(rule, gen) and light_node != null \
+				if current and not run["cancelled"] and current.alive(rule, gen) and light_node != null \
 						and light_node.get_meta(LIGHT_ACTIVATION_META, 0) == activation:
 					light_node.hide()
 					ctx.bb.write(key, false), CONNECT_ONE_SHOT)

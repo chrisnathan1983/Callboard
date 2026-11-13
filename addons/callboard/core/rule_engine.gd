@@ -49,6 +49,7 @@ func _dispatch(r: Rule, event: StringName, ctx: Dictionary, gen: int) -> void:
 		match r.reentry:
 			Rule.ReentryPolicy.RESTART:
 				active["restart"] = true
+				active["run"]["cancelled"] = true
 				pending.clear()
 				pending.append(ctx.duplicate(true))
 			Rule.ReentryPolicy.QUEUE:
@@ -68,25 +69,32 @@ func _dispatch(r: Rule, event: StringName, ctx: Dictionary, gen: int) -> void:
 		_active.erase(r)
 
 func _run(r: Rule, event: StringName, ctx: Dictionary, gen: int) -> void:
+	# Non-blocking steps can outlive a successful run, so keep cancellation
+	# on the run itself even after the rule leaves the active table.
+	var run := {"cancelled": false}
+	_active[r]["run"] = run
 	if r.one_shot:
 		fired[r.latch_key()] = true
 	_emit_trace("rule_started", r.id, event)
 	rule_fired.emit(r.id, event)
 	if not alive(r, gen):
+		run["cancelled"] = true
 		_emit_trace("rule_cancelled", r.id, event)
 		return
-	var c := ctx.merged({"_rule": r}, true)
+	var c := ctx.merged({"_rule": r, "_run": run}, true)
 	for i in r.steps.size():
 		var s: Step = r.steps[i]
 		if s.delay > 0.0:
 			_emit_trace("delay_started", r.id, event, i, s, "%0.2fs" % s.delay)
 			await wait_tracked(s.delay, r.id, "step delay")
 			if not alive(r, gen):
+				run["cancelled"] = true
 				_emit_trace("rule_cancelled", r.id, event, i, s)
 				return
 		_emit_trace("step_started", r.id, event, i, s)
 		await s.fn.call(c)
 		if not alive(r, gen):
+			run["cancelled"] = true
 			_emit_trace("rule_cancelled", r.id, event, i, s)
 			return
 		_emit_trace("step_completed", r.id, event, i, s)

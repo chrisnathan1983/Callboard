@@ -41,7 +41,7 @@ static func analyze(data: Dictionary, cached_stage: Stage = null, retain_instanc
 	if not reused:
 		instance = draft.instantiate_for_analysis(tree.root) if tree else draft.instantiate()
 	if instance == null:
-		_read_results(data, null, false, ["Stage Script must extend Stage."])
+		_read_results(data, null, false, [_analysis_error(draft)])
 		return null
 	if instance.bb == null:
 		instance.build()
@@ -58,6 +58,7 @@ static func make_definition(data: Dictionary) -> StageDefinition:
 	var original: StageDefinition = data["definition"]
 	var draft := StageDefinition.new()
 	draft.stage_script = original.stage_script
+	draft.preview_scene_path = original.preview_scene_path
 	draft.set_meta("_analysis_scene_source", original.get_meta("_analysis_scene_source", original.resource_path))
 	draft.external_calls = PackedStringArray(data["external_calls"])
 	draft.external_vars = original.external_vars
@@ -74,7 +75,7 @@ static func inspect_definition(path: String) -> Dictionary:
 	var tree := Engine.get_main_loop() as SceneTree
 	var instance := definition.instantiate_for_analysis(tree.root) if tree else definition.instantiate()
 	if instance == null:
-		return {"error": "Assign a Stage script to %s" % path.get_file()}
+		return {"error": _analysis_error(definition)}
 	if instance.bb == null:
 		instance.build()
 	var data := read(instance)
@@ -83,6 +84,11 @@ static func inspect_definition(path: String) -> Dictionary:
 		instance.get_parent().remove_child(instance)
 	instance.free()
 	return data
+
+static func _analysis_error(definition: StageDefinition) -> String:
+	if not definition.preview_scene_path.is_empty():
+		return "Preview scene '%s' must load and have a Stage root." % definition.preview_scene_path
+	return "Assign a script extending Stage to the StageDefinition."
 
 static func _read_results(data: Dictionary, stage: Stage, ok: bool, problems: Array) -> void:
 	data["compiles"] = ok

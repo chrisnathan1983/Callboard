@@ -6,6 +6,9 @@ const CURRENT_FORMAT_VERSION := 3
 static var _string_token_pattern: RegEx
 
 @export var stage_script: GDScript
+## Optional scene for Callboard validation. A path avoids a resource cycle
+## when the scene itself references this StageDefinition.
+@export_file("*.tscn") var preview_scene_path := ""
 @export var external_calls := PackedStringArray()
 @export var external_vars := PackedStringArray()
 @export var variables: Array = []
@@ -79,11 +82,15 @@ func instantiate() -> Stage:
 		instance.free()
 	return null
 
-## Build a validation instance from the sibling scene when available, so props assigned
-## in the scene and @onready references match the values used by the running stage.
-func instantiate_for_analysis(parent: Node) -> Stage:
+func analysis_scene_path() -> String:
+	if not preview_scene_path.is_empty():
+		return preview_scene_path
 	var source_path: String = get_meta("_analysis_scene_source", resource_path)
-	var scene_path := source_path.get_basename() + ".tscn" if not source_path.is_empty() else ""
+	return source_path.get_basename() + ".tscn" if not source_path.is_empty() else ""
+
+## Build a validation instance with scene-assigned props and @onready references.
+func instantiate_for_analysis(parent: Node) -> Stage:
+	var scene_path := analysis_scene_path()
 	if not scene_path.is_empty() and ResourceLoader.exists(scene_path):
 		var scene := ResourceLoader.load(scene_path) as PackedScene
 		if scene:
@@ -93,7 +100,10 @@ func instantiate_for_analysis(parent: Node) -> Stage:
 				stage.definition = self
 				parent.add_child(stage)
 				return stage
-			scene_instance.free()
+			if scene_instance != null:
+				scene_instance.free()
+	if not preview_scene_path.is_empty():
+		return null
 	var fallback := instantiate()
 	if fallback:
 		parent.add_child(fallback)

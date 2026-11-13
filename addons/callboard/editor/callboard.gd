@@ -354,7 +354,7 @@ func _analyze_data() -> void:
 	_analysis_debounce.stop()
 	_pending_selection = ""
 	var definition: StageDefinition = _data["definition"]
-	var scene_source: String = definition.get_meta("_analysis_scene_source", definition.resource_path)
+	var scene_source := definition.analysis_scene_path()
 	var script_path := definition.stage_script.resource_path if definition.stage_script else ""
 	var source_key := scene_source + "|" + script_path
 	if not _analysis_source_key.is_empty() and _analysis_source_key != source_key:

@@ -192,6 +192,7 @@ func _initialize() -> void:
 	ok = _test_restart() and ok
 	ok = _test_queue() and ok
 	ok = _test_retriggered_light() and ok
+	ok = _test_light_from_restarted_run() and ok
 	print("UNIT: ", "PASS" if ok else "FAIL")
 	quit(0 if ok else 1)
 
@@ -219,6 +220,34 @@ func _test_retriggered_light() -> bool:
 		timers[1].timeout.emit()
 		ok = _check("the latest timeout switches the light and Blackboard key off",
 			not lamp.visible and not bb.is_set(&"lamp_on")) and ok
+	lamp.free()
+	return ok
+
+func _test_light_from_restarted_run() -> bool:
+	var bb := Blackboard.new()
+	bb.define(&"lamp_on", &"local", false)
+	var light_timer := create_timer(10.0)
+	var engine := RuleEngine.new(bb, {}, func(seconds: float) -> Signal:
+		return light_timer.timeout if seconds == 10.0 else clock_tick)
+	var verbs := StagingVerbs.new(StepContext.new(bb, engine, null, Callable()))
+	var lamp := Node3D.new()
+	var light_step := verbs.light(lamp, true, 10.0)
+	var rule := Rule.new(&"timed_light", &"light")
+	rule.reentry = Rule.ReentryPolicy.RESTART
+	var starts: Array[bool] = []
+	rule.steps.append(Step.new(func(ctx: Dictionary) -> void:
+		starts.append(ctx["turn_on"])
+		if ctx["turn_on"]:
+			light_step.fn.call(ctx)))
+	rule.steps.append(Step.new(func(_ctx: Dictionary) -> void: pass).after(1.0))
+	engine.rules.append(rule)
+	engine.fire(&"light", {"turn_on": true})
+	engine.fire(&"light", {"turn_on": false})
+	clock_tick.emit()
+	light_timer.timeout.emit()
+	var ok := _check("a restarted run invalidates its old light timeout even when the replacement skips light",
+		starts == [true, false] and lamp.visible and bb.is_set(&"lamp_on"))
+	clock_tick.emit()
 	lamp.free()
 	return ok
 

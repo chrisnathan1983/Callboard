@@ -15,7 +15,7 @@ func _initialize() -> void:
 	ok = (await _test_canvas_actions()) and ok
 	ok = _test_factory() and ok
 	ok = _test_live_debug() and ok
-	ok = (await _test_scene_assigned_props()) and ok
+	ok = _test_scene_assigned_props() and ok
 	ok = _test_layer_export_filter() and ok
 	ok = _test_rename_saved_state() and ok
 	print("EDITOR: ", "PASS" if ok else "FAIL")
@@ -236,26 +236,36 @@ func _test_save_and_history() -> bool:
 func _test_scene_assigned_props() -> bool:
 	var definition := StageDefinition.new()
 	definition.stage_script = load("res://tests/fixtures/assigned_prop_stage.gd")
-	definition.set_meta("_analysis_scene_source", "res://tests/fixtures/assigned_prop_stage.tscn")
+	definition.preview_scene_path = "res://tests/fixtures/assigned_prop_stage.tscn"
 	definition.external_calls = PackedStringArray(["go"])
 	definition.rules = [{
 		"id": "use_scene_prop", "trigger": "go", "requires": [], "forbids": [],
 		"cancel_if": [], "one_shot": false, "reentry": Rule.ReentryPolicy.IGNORE,
 		"emit": "", "state_key": "use_scene_prop", "group": "", "steps": [{
-			"verb": "show_node", "args": ["target", "true"], "delay": "", "emits": "", "sets": []
+			"verb": "show_node", "args": ["target", "true"],
+		}, {
+			"verb": "show_node", "args": ["assigned_target", "true"],
 		}],
 	}]
-	var instance := definition.instantiate_for_analysis(root)
-	await process_frame
-	if instance and instance.bb == null:
-		instance.build()
-	var result := _check("analysis loads scene-assigned typed props",
-		instance != null and instance.get("target") != null and instance.graph_errors.is_empty())
-	if instance:
-		if instance.get_parent():
-			instance.get_parent().remove_child(instance)
-		instance.free()
-	return result
+	if not _check("explicit preview fixture saved", ResourceSaver.save(definition, TMP_PATH) == OK):
+		return false
+	var board := Callboard.new()
+	root.add_child(board)
+	board.open_script(TMP_PATH)
+	var ok := _check("Callboard resolves exported and @onready props from a differently named preview scene",
+		board._data.get("compiles", false) and board._data["notes"].is_empty())
+	if ok:
+		board.add_call_name("preview_fixture_call")
+		board.save()
+		board.open_script(TMP_PATH)
+		var reloaded: StageDefinition = board._data.get("definition")
+		ok = _check("Callboard save preserves the explicit preview scene",
+			reloaded != null and reloaded.preview_scene_path == definition.preview_scene_path
+			and reloaded.external_calls.has("preview_fixture_call")
+			and board._data["compiles"] and board._data["notes"].is_empty()) and ok
+	board.free()
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(TMP_PATH))
+	return ok
 
 func _test_layer_export_filter() -> bool:
 	return _check("release exports strip Callboard authoring scripts only",
