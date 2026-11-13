@@ -28,11 +28,11 @@ func _initialize() -> void:
 
 	var bb := Blackboard.new()
 	bb.define(&"lamp_on", &"local", false)
-	var undeclared_changes := 0
-	bb.changed.connect(func(_key: StringName, _value: Variant) -> void: undeclared_changes += 1)
+	var undeclared_changes := [0]
+	bb.changed.connect(func(_key: StringName, _value: Variant) -> void: undeclared_changes[0] += 1)
 	bb.write(&"missing", true)
 	ok = _check("undeclared Blackboard writes are rejected in every build",
-		not bb.local.has(&"missing") and undeclared_changes == 0) and ok
+		not bb.local.has(&"missing") and undeclared_changes[0] == 0) and ok
 	var speed_changes: Array = []
 	bb.changed.connect(func(key: StringName, value: Variant) -> void:
 		if key == &"speed":
