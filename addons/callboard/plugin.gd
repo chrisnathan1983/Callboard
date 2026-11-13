@@ -3,9 +3,9 @@ extends EditorPlugin
 ## Adds a "Callboard" main-screen tab next to 2D / 3D / Script, and a
 ## "Create New Stage..." entry under Project -> Tools.
 
-const STAGES_DIR := "res://stages/"
 const MENU_ITEM := "Create New Stage..."
 const ExportPlugin := preload("res://addons/callboard/editor/export_plugin.gd")
+const Settings := preload("res://addons/callboard/core/callboard_settings.gd")
 
 var board: Callboard
 var _opened := false
@@ -17,6 +17,7 @@ var _pending_navigate_path := ""
 var _export_plugin: EditorExportPlugin
 
 func _enter_tree() -> void:
+	Settings.register_project_settings()
 	board = Callboard.new()
 	board.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	board.layout_saved.connect(func(path: String) -> void:
@@ -113,7 +114,7 @@ func _on_name_changed(text: String) -> void:
 		_stage_preview.text = ""
 		return
 	var safe := raw.to_snake_case()
-	_stage_preview.text = "%s%s/   class %s" % [STAGES_DIR, safe, safe.to_pascal_case()]
+	_stage_preview.text = "%s/   class %s" % [Settings.stages_directory().path_join(safe), safe.to_pascal_case()]
 
 func _on_dialog_confirmed() -> void:
 	var raw_name := _stage_line_edit.text.strip_edges()
@@ -137,7 +138,7 @@ func _validate_stage_name(raw_name: String) -> String:
 	for c in ProjectSettings.get_global_class_list():
 		if c["class"] == cls:
 			return "Class '%s' already exists in the project." % cls
-	var dir_path := STAGES_DIR + safe + "/"
+	var dir_path := Settings.stages_directory().path_join(safe)
 	if DirAccess.dir_exists_absolute(dir_path):
 		return "Stage '%s' already exists." % safe
 	return ""
@@ -147,10 +148,10 @@ func _validate_stage_name(raw_name: String) -> String:
 func _create_stage_files(stage_name: String) -> void:
 	var safe_name := stage_name.to_snake_case()
 	var pascal := safe_name.to_pascal_case()
-	var dir_path := STAGES_DIR + safe_name + "/"
-	var script_path := dir_path + safe_name + ".gd"
-	var res_path := dir_path + safe_name + ".tres"
-	var scene_path := dir_path + safe_name + ".tscn"
+	var dir_path := Settings.stages_directory().path_join(safe_name)
+	var script_path := dir_path.path_join(safe_name + ".gd")
+	var res_path := dir_path.path_join(safe_name + ".tres")
+	var scene_path := dir_path.path_join(safe_name + ".tscn")
 
 	for p in [script_path, res_path, scene_path]:
 		if FileAccess.file_exists(p):

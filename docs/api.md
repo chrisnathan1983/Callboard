@@ -64,7 +64,7 @@ When `SceneTree.paused` is true, rule delays, repeat ticks, timed lights, and th
 | `_build_props() -> void` | Create or bind props before rule steps are compiled. |
 | `_build_blackboard() -> void` | Define or initialize script-owned keys after authored defaults are applied. |
 | `_restore_state() -> void` | Restore scene presentation after the graph is built. The demo uses this to restore the guard's position and reward visibility. |
-| `_make_verbs(context: StepContext) -> CoreVerbs` | Return the verb factory. The default is `StagingVerbs.new(context)`. |
+| `_make_verbs(context: StepContext) -> CoreVerbs` | Return the verb factory. The default is `StagingVerbs.new(context)`. Put game-specific effects and Blackboard key defaults in a Stage-specific subclass. |
 
 Use `@tool` on the Stage script and custom verb factory so Callboard can analyze them in the editor. Initialize typed prop references in the scene or in `_build_props()` before the editor or runtime compiles steps.
 
@@ -117,11 +117,11 @@ The default factory is [`StagingVerbs`](../addons/callboard/core/staging_verbs.g
 | Core | `repeat_emit(interval, tick)` | Emit `relay:<tick>` every interval in seconds until the rule is cancelled. This step occupies the rule while it runs. |
 | Staging | `show_node(n, should_be_visible = true)` | Set a `Node3D`'s visibility. |
 | Staging | `pop(n)`, `bounce(n)` | Play a scale animation. |
-| Staging | `light(n, on, duration = 0.0, key = &"lamp_on")` | Set visibility and write a Boolean Blackboard key. A positive duration turns the light off on timeout or cancellation. |
 | Staging | `say(n, text, seconds = 1.0)` | Show temporary text at a node. |
 | Staging | `move_to(n, dest, offset = Vector3.ZERO, duration = 0.7)` | Tween a node to a target with an offset. |
 | Staging | `flash(m)`, `jump(m)` | Tint a mesh or animate a vertical hop. Both use a BaseMaterial3D material override. |
-| Staging | `stun_player(seconds)` | Invoke `stun(seconds)` on the first node in the `Player` group. The player controller supplies that method. |
+
+The demo's [`Stage01Verbs`](../stages/stage_01/stage_01_verbs.gd) supplies `light(n, on, duration = 0.0)`, which updates its `lamp_on` key, and `stun_player(seconds)`. It is selected by `Stage01._make_verbs()`; other games can define their own methods and actor lookup without inheriting demo group names. To build a key-agnostic light action, call the protected-by-convention `StagingVerbs._light(n, on, duration, key)` helper from your own verb method.
 
 ## Custom verbs
 

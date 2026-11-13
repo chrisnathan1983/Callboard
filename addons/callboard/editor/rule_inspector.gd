@@ -15,6 +15,7 @@ signal group_delete_requested(group_name: String)
 signal content_size_changed
 
 const Style := preload("res://addons/callboard/editor/board_style.gd")
+const GuardExpression := preload("res://addons/callboard/core/guard_expression.gd")
 
 var _data: Dictionary
 var _rule: Dictionary
@@ -284,7 +285,7 @@ func _trigger_options() -> Array:
 				out.append("relay:" + relay)
 	return out
 
-func _guard_menu(field: String) -> MenuButton:
+func _guard_menu(field: String) -> Control:
 	var mb := MenuButton.new()
 	mb.flat = false
 	mb.alignment = HORIZONTAL_ALIGNMENT_LEFT
@@ -311,7 +312,44 @@ func _guard_menu(field: String) -> MenuButton:
 		refresh_text.call()
 		changed.emit(_rule["id"]))
 	refresh_text.call()
-	return mb
+	var section := VBoxContainer.new()
+	section.add_child(mb)
+	var comparison_row := HBoxContainer.new()
+	var comparison_edit := LineEdit.new()
+	comparison_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	comparison_edit.placeholder_text = "score >= 10"
+	comparison_edit.tooltip_text = "Add an int/float comparison; operators: >, >=, <, <=, ==, !="
+	comparison_edit.editable = not _read_only
+	comparison_row.add_child(comparison_edit)
+	var add_comparison := Button.new()
+	add_comparison.text = "Add"
+	add_comparison.disabled = _read_only
+	add_comparison.pressed.connect(func() -> void:
+		var parsed := GuardExpression.parse(comparison_edit.text)
+		if not parsed["ok"] or not parsed["comparison"]:
+			comparison_edit.tooltip_text = "Enter a comparison such as score >= 10."
+			return
+		var variable: Dictionary = {}
+		for item in _data["vars"]:
+			if item["key"] == String(parsed["key"]):
+				variable = item
+				break
+		if variable.is_empty() or typeof(variable["default"]) not in [TYPE_INT, TYPE_FLOAT]:
+			comparison_edit.tooltip_text = "Comparisons require a declared int or float Blackboard key."
+			return
+		var expression := "%s %s %s" % [parsed["key"], parsed["operator"], parsed["literal"]]
+		if not _rule[field].has(expression):
+			_rule[field].append(expression)
+			keys.append(expression)
+			popup.add_check_item(expression)
+			popup.set_item_checked(keys.size() - 1, true)
+		refresh_text.call()
+		comparison_edit.clear()
+		comparison_edit.tooltip_text = "Add an int/float comparison; operators: >, >=, <, <=, ==, !="
+		changed.emit(_rule["id"]))
+	comparison_row.add_child(add_comparison)
+	section.add_child(comparison_row)
+	return section
 
 # --- Steps ------------------------------------------------------------------------
 

@@ -18,6 +18,10 @@ config/name="Callboard"
 run/main_scene="uid://b6awcg4g07keo"
 config/features=PackedStringArray("4.7")
 
+[callboard]
+
+stages_directory="res://stages"
+
 [display]
 
 window/size/viewport_width=1280

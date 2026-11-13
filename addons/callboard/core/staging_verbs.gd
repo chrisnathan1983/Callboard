@@ -33,7 +33,7 @@ func bounce(n: Node3D) -> Step:
 
 ## Switches a light and mirrors it into a local Blackboard key. duration > 0 switches it
 ## off again on timeout or cancellation (non-blocking).
-func light(n: Node3D, on: bool, duration := 0.0, key: StringName = &"lamp_on") -> Step:
+func _light(n: Node3D, on: bool, duration: float, key: StringName) -> Step:
 	var ctx := context
 	var f := func(c: Dictionary) -> void:
 		var engine := ctx.engine_ref.get_ref() as RuleEngine
@@ -184,11 +184,3 @@ func _color_setter(mesh: MeshInstance3D, material: BaseMaterial3D, tween: Tween)
 		var current_mesh := instance_from_id(mesh_id) as MeshInstance3D
 		if current_mesh != null and current_mesh.get_meta(COLOR_TWEEN_META, 0) == tween_id:
 			material.albedo_color = color
-
-func stun_player(seconds: float) -> Step:
-	var host := context.host
-	var f := func(_c: Dictionary) -> void:
-		var p := host.get_tree().get_first_node_in_group(&"Player")
-		if p:
-			p.stun(seconds)   # not awaited: the stun runs on its own
-	return Step.new(f)

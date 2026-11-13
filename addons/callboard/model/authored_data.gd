@@ -3,6 +3,7 @@ class_name AuthoredData extends RefCounted
 ## Creates and edits authored graph data.
 
 const GUARDS := ["requires", "forbids", "cancel_if"]
+const GuardExpression := preload("res://addons/callboard/core/guard_expression.gd")
 const FIELD_ONE_SHOT := "one_shot"
 const FIELD_HAS_POS := "has_pos"
 const FIELD_STATE_KEY := "state_key"
@@ -56,7 +57,8 @@ static func rename_key(data: Dictionary, old: String, new_key: String) -> void:
 			data["external_vars"].append(new_key)
 	for rd in data["rules"]:
 		for g in GUARDS:
-			rd[g] = rd[g].map(func(k: String) -> String: return new_key if k == old else k)
+			rd[g] = rd[g].map(func(guard: String) -> String:
+				return GuardExpression.rename_key(guard, old, new_key))
 		for s in rd["steps"]:
 			var verb := VerbCatalog.find(data["catalog"], s["verb"])
 			var params: Array = verb.get("args", [])

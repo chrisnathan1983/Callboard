@@ -20,6 +20,9 @@ func _init() -> void:
 func can_reuse_analysis_props() -> bool:
 	return true
 
+func _make_verbs(context: StepContext) -> CoreVerbs:
+	return Stage01Verbs.new(context)
+
 func _build_props() -> void:
 	Props.box(self, "Ground", Vector3(24, 0.1, 18), Vector3(0, -0.05, 0), Color(0.92, 0.95, 1.0))
 	Props.box(self, "Building", Vector3(7, 3.5, 3), Vector3(0, 1.75, -6), Color(0.55, 0.35, 0.25))

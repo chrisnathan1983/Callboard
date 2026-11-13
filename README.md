@@ -44,7 +44,7 @@ The two calming paths emit the same `calm_guard` relay. The two delivery rules s
 
 1. Copy [`addons/callboard/`](addons/callboard/) into your project's `addons/` directory.
 2. Open **Project → Project Settings → Plugins** and enable **Callboard**.
-3. Choose **Project → Tools → Create New Stage…**. The generator creates a scene, a GDScript extending `Stage`, and an assigned `StageDefinition` resource under `res://stages/`.
+3. Choose **Project → Tools → Create New Stage…**. The generator creates a scene, a GDScript extending `Stage`, and an assigned `StageDefinition` resource under the configured Callboard stages directory (default `res://stages/`). Set `callboard/stages_directory` in Project Settings to use another folder.
 4. Open the **Callboard** tab and select your new definition. Instance the generated scene in your game and call `activate()` after it has entered the scene tree.
 
 See [Godot's plugin installation guide](https://docs.godotengine.org/en/stable/tutorials/plugins/editor/installing_plugins.html) for the editor settings.
@@ -87,9 +87,9 @@ Add a `show_node` or `move_to` step to make a scene prop respond. Step arguments
 
 | Setting | Behavior |
 | --- | --- |
-| **Requires** | Every listed key must be truthy when the rule is considered. |
-| **Forbids** | Any truthy listed key blocks the start. |
-| **Cancel If** | Any truthy listed key cancels the run at a cancellation check, such as after a delay or awaited step. |
+| **Requires** | Every listed guard must pass when the rule is considered. Bare keys use truthiness; numeric comparisons such as `score >= 10` work with `int` and `float` keys. |
+| **Forbids** | Any passing guard blocks the start. A comparison such as `heat < 2.5` can be forbidden just like a truthy key. |
+| **Cancel If** | Any passing guard cancels the run at a cancellation check, such as after a delay or awaited step. |
 | **One-shot** | Latches when the rule starts. The latch survives reloads when your game reuses the `fired` dictionary. |
 | **Re-entry** | **Ignore** drops another trigger during a run. **Restart** keeps the newest payload and replaces the run at a cancellation check. **Queue** retains payloads in arrival order and rechecks guards before each run. One-shot rules use **Ignore**. |
 
@@ -98,6 +98,8 @@ Add a `show_node` or `move_to` step to make a scene prop respond. Step arguments
 Use **Calls & relays** to manage connections. Renaming updates authored references. Update Call names in gameplay code and scene triggers separately. Blackboard renames preserve aliases for existing gameplay references.
 
 Select a rule to edit its guards, steps, and relay. Rule renames preserve saved one-shot latches. Pass the current rule ID to `Stage.has_fired()`. Use the toolbar to save, reload, undo, or redo. Validation checks step expressions and surfaces issues such as relay cycles and overlapping guards.
+
+To add a numeric guard, enter a comparison such as `score >= 10` below Requires, Forbids, or Cancel If and press **Add**. Supported operators are `>`, `>=`, `<`, `<=`, `==`, and `!=`; comparisons accept only declared `int` and `float` Blackboard keys.
 
 ## Live debugging
 

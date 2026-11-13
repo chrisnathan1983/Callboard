@@ -29,11 +29,19 @@ static func check(rules: Array[Rule], bb: Blackboard,
 			problems.append("rule '%s' has no trigger" % r.id)
 		elif not emitted.has(r.trigger) and not external_calls.has(r.trigger):
 			problems.append("rule '%s' listens to '%s' but nothing emits it and it is not a declared external Call" % [r.id, r.trigger])
-		for k in r.requires + r.forbids + r.cancel_if:
-			if not bb.schema.has(k):
-				problems.append("rule '%s' checks key '%s' which is not declared on the Blackboard" % [r.id, k])
-			elif not settable.has(k):
-				problems.append("rule '%s' checks key '%s' but nothing sets it" % [r.id, k])
+		for guard in r.requires + r.forbids + r.cancel_if:
+			var parsed := GuardExpression.parse(String(guard))
+			if not parsed["ok"]:
+				problems.append("rule '%s' has an invalid guard '%s'" % [r.id, guard])
+				continue
+			var key: StringName = bb.resolve_key(parsed["key"])
+			if not bb.schema.has(key):
+				problems.append("rule '%s' checks key '%s' which is not declared on the Blackboard" % [r.id, key])
+				continue
+			if parsed["comparison"] and bb.schema[key].get("type") not in [TYPE_INT, TYPE_FLOAT]:
+				problems.append("rule '%s' compares '%s', which is not an int or float Blackboard key" % [r.id, key])
+			if not settable.has(key):
+				problems.append("rule '%s' checks key '%s' but nothing sets it" % [r.id, key])
 		for s in r.steps:
 			if s.args.has(null):
 				problems.append("rule '%s' has a '%s' step with an unset prop" % [r.id, s.verb])

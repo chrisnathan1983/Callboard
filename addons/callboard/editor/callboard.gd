@@ -7,9 +7,9 @@ class_name Callboard extends Control
 
 signal layout_saved(path: String)
 
-const STAGES_DIR := "res://stages"
 const EDIT_FIELDS := ["external_calls", "external_vars", "vars", "rules", "groups"]
 const Style := preload("res://addons/callboard/editor/board_style.gd")
+const Settings := preload("res://addons/callboard/core/callboard_settings.gd")
 enum CreateAction { EVENT, RULE, GROUP }
 enum ContextAction { EDIT = 10, DUPLICATE, DELETE }
 
@@ -262,12 +262,12 @@ func refresh() -> void:
 	var keep := _path
 	_picker.clear()
 	for path in _collect_stage_definition_paths():
-		_picker.add_item(path.trim_prefix(STAGES_DIR + "/"))
+		_picker.add_item(path.trim_prefix(Settings.stages_directory() + "/"))
 		_picker.set_item_metadata(_picker.item_count - 1, path)
 		_picker.get_popup().set_item_tooltip(_picker.item_count - 1, path)
 	if _picker.item_count == 0:
 		_path = ""
-		_show({"error": "No stage definitions in " + STAGES_DIR}, false)
+		_show({"error": "No stage definitions in " + Settings.stages_directory()}, false)
 		return
 	var idx := 0
 	for i in _picker.item_count:
@@ -276,8 +276,10 @@ func refresh() -> void:
 	_picker.select(idx)
 	open_script(_picker.get_item_metadata(idx))
 
-func _collect_stage_definition_paths(dir_path := STAGES_DIR) -> Array[String]:
+func _collect_stage_definition_paths(dir_path := "") -> Array[String]:
 	var paths: Array[String] = []
+	if dir_path.is_empty():
+		dir_path = Settings.stages_directory()
 	var dir := DirAccess.open(dir_path)
 	if dir == null:
 		push_error("Could not open stage directory '%s': %s" % [dir_path, error_string(DirAccess.get_open_error())])

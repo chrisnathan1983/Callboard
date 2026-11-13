@@ -177,7 +177,9 @@ func _emit_trace(kind: String, rule_id: StringName, event: StringName,
 
 func passes(r: Rule) -> bool:
 	if r.one_shot and fired.has(r.latch_key()): return false
-	return r.requires.all(bb.is_set) and not r.forbids.any(bb.is_set)
+	return (r.requires.all(func(guard: StringName) -> bool: return GuardExpression.evaluate(bb, guard))
+		and not r.forbids.any(func(guard: StringName) -> bool: return GuardExpression.evaluate(bb, guard)))
 
 func alive(r: Rule, gen: int) -> bool:
-	return gen == _gen and not _active.get(r, {}).get("restart", false) and not r.cancel_if.any(bb.is_set)
+	return (gen == _gen and not _active.get(r, {}).get("restart", false)
+		and not r.cancel_if.any(func(guard: StringName) -> bool: return GuardExpression.evaluate(bb, guard)))
