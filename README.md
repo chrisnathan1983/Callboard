@@ -1,99 +1,141 @@
 # Callboard
 
-Callboard is a Godot addon for authoring event driven gameplay rules in a visual graph. Gameplay runs in **Stages**. Each Stage has a typed Blackboard, external Calls, rules, and internal relays.
+**Choreograph event-driven gameplay in Godot.** Callboard is a visual rule editor and GDScript runtime for 3D scenes. Define what can happen, which conditions must be true, and what runs next in a Stage graph. Your gameplay code supplies events and actions. Callboard handles the sequencing, state checks, and relays between rules.
 
-> Formerly Director Blackboard / Rule Board.
+[Run the demo](#run-the-demo) · [Install](#install-in-your-project) · [Author a stage](#author-a-stage) · [Live debugging](#live-debugging) · [API reference](docs/api.md)
 
-## Requirements and demo
+[![Godot tests](https://github.com/chrisnathan1983/director_blackboard_demo_4/actions/workflows/test.yml/badge.svg)](https://github.com/chrisnathan1983/director_blackboard_demo_4/actions/workflows/test.yml)
+**Godot 4.7** · **GDScript** · **[0BSD](LICENSE)**
 
-- Godot 4.7 (the project declares the `4.7` feature version).
-- Open `project.godot`, let Godot import the project, then press **F5** to run the demo.
-- Move with **WASD** or the arrow keys. Press **E** near an interaction area.
+![Callboard editor showing the Stage 01 graph, including Guard Standoff, Calming Paths, and Delivery](docs/screenshots/callboard-editor.png)
 
-In the sample Stage, interact at the shelter to offer a decoy, deliver at the doorway, and bump the blue pad to release a treat.
+*Stage 01 in the Callboard authoring workspace. Follow the wires from a Call through the rules and relays it can trigger.*
 
-| Key | Action |
+## Run the demo
+
+Open [project.godot](project.godot) in Godot **4.7** and press **F5**. The plugin is already enabled. Open the **Callboard** editor tab and select `stage_01/stage_01.tres` to inspect the same rules that drive the demo. CI uses Godot **4.7.2**.
+
+1. Walk toward the doorway. The guard barks and the lamp flashes. Interact while the lamp is on to see the caught rule.
+2. Interact by the red shelter to offer a decoy, or walk into the blue pad to release a treat. Either path calms the guard.
+3. Return to the doorway with the lamp off and interact to collect the delivery reward.
+
+| Control | Action |
 | --- | --- |
-| **F1** | Toggle the read only live Callboard overlay. |
-| **R** | Reload the Stage. Saved Blackboard values and one-shot latches persist; local values reset. |
-| **X** | Clear saved values and one-shot latches, reset the score, and reload the Stage. |
+| **WASD** or **arrow keys** | Move |
+| **E** | Interact |
+| **F1** | Toggle the live Callboard |
+| **R** | Reload the Stage and reset local variables |
+| **X** | Clear saved variables, one-shot latches, and score, then reload |
 
-## Authoring
+```mermaid
+flowchart LR
+    offer["Offer decoy"] --> calm["Calm guard"]
+    treat["Release treat"] --> calm
+    calm --> off["Turn lamp off"]
+    call["Deliver at the doorway"] --> delivery{"Lamp on at delivery?"}
+    off -.->|Updates lamp state| delivery
+    delivery -->|Yes| caught["Stun player"]
+    delivery -->|No| reward["Award 200 points once"]
+```
 
-The **Callboard** tab is enabled in the Godot editor. Use it to edit a Stage definition stored in one `.tres` resource.
+The two calming paths emit the same `calm_guard` relay. The two delivery rules share the `deliver` Call and use opposite checks on `lamp_on`.
 
-- Add typed Blackboard variables and choose whether each value is saved or local.
-- Add Calls, rules, and groups. Connect rule outputs to triggers; the graph wires are derived from rule triggers and emitted relays.
-- Rename Calls and relays across authored connections. Deleting a relay removes its emitting steps and disconnects its listeners. Update gameplay code and scene triggers when renaming an external Call or relay.
-- Edit each rule's trigger, guards, cancellation conditions, one-shot setting, re-entry policy, emitted relay, group, and ordered steps.
-- Save validates step expressions. Reload picks up edits made outside the Callboard.
-- Undo and redo are available from the toolbar and **Ctrl/Cmd+Z**, **Ctrl/Cmd+Shift+Z**, or **Ctrl/Cmd+Y**. A held numeric field creates one undo entry per gesture.
-- Create a Stage with **Project > Tools > Create New Stage...**.
+## Install in your project
 
-Stage definitions store rules, steps, Blackboard variables, and graph groups as typed Resources. Existing dictionary-based `.tres` files are converted by `StageDefinition._migrate()` and retain their saved state keys; the current format version is 3.
+1. Copy [`addons/callboard/`](addons/callboard/) into your project's `addons/` directory.
+2. Open **Project → Project Settings → Plugins** and enable **Callboard**.
+3. Choose **Project → Tools → Create New Stage…**. The generator creates a scene, a GDScript extending `Stage`, and an assigned `StageDefinition` resource under `res://stages/`.
+4. Open the **Callboard** tab and select your new definition. Instance the generated scene in your game and call `activate()` after it has entered the scene tree.
 
-This project is licensed under the Zero-Clause BSD License (0BSD). It permits use, modification, and redistribution without requiring attribution. Third-party components retain their own license terms.
+See [Godot's plugin installation guide](https://docs.godotengine.org/en/stable/tutorials/plugins/editor/installing_plugins.html) for the editor settings.
 
-Renaming a Blackboard key updates authored references and preserves aliases for its former names, so gameplay writers using an old key continue to work. Blackboard writes must match the declared default type; mismatched writes are rejected with a warning, and saved values with an outdated type are reset to the declared default. Timed lights turn off when their running rule is cancelled, when the Stage is deactivated, or when their timer expires. Debug builds warn when gameplay fires an undeclared Call or tries to use an undeclared relay latch.
+## Author a Stage
 
-## Runtime and editor boundary
+A **Stage** is a `Node3D` scene with a **StageDefinition** resource. The resource holds Calls, Blackboard variables, rules, ordered steps, and graph layout. The scene supplies actors and props.
 
-`addons/callboard/core/` contains runtime resources and execution code. The Callboard UI and graph-authoring helpers live under `editor/` and `model/`; the editor plugin registers an export filter that removes those files from release exports while retaining them in debug exports. The sample HUD late-loads the live Callboard only in debug builds. Stage definitions compile through the runtime-safe `RuntimeVerbCatalog` and do not depend on editor authoring code.
-
-## Glossary
-
-| Term | Meaning |
+| On the board | In the game |
 | --- | --- |
-| **Stage** | A gameplay scene host with its script, props, Blackboard, and authored rules. |
-| **Call** | A named external event sent by gameplay code to activate rules. The Stage starts with the built in `arrive` Call. |
-| **Rule** | A response to a trigger. Its guards are checked when the trigger arrives; its steps run in order. |
-| **Relay** | An internal event emitted by a rule or step. Relays can trigger other rules. |
-| **One-shot** | A rule that latches when it starts. Its latch is stored in the manager's `fired` dictionary and survives Stage reloads; cancelling it mid run does not clear the latch. One-shot rules use Ignore re-entry so the latch cannot conflict with repeated runs. |
-| **Re-entry policy** | What happens when a trigger reaches a rule that is already running: Ignore (default), Restart with the latest payload at the next cancellation check, or Queue payloads in arrival order. Restart and Queue are unavailable for one-shot rules. |
-| **Notes** | Validation messages shown for authored rules and steps. |
+| **Call** | An event fired by gameplay, such as `deliver`. `activate()` fires `arrive`. |
+| **Blackboard** | Typed state read by rules and written by steps or gameplay. Local values reset on reload. Saved values use a dictionary supplied by your game. |
+| **Rule** | A response to a Call or relay. Its guards decide whether it can start. |
+| **Step** | An action built by a GDScript verb, optionally preceded by a delay. |
+| **Relay** | A named event emitted by a rule or step. Listeners use a trigger such as `relay:calm_guard`. |
 
-Calls and relays both enter the rule engine through `fire()`. Their distinction is where they come from: gameplay code sends Calls; rules and steps emit relays.
+### Build your first rule
 
-## Project layout
+1. In a new Stage, open **Blackboard** and add a local `bool` named `door_open` with a default of `false`.
+2. Add a Call named `open_door`. Add a rule and wire the Call to its trigger, or choose `open_door` in **Rule settings**.
+3. Set **Forbids** to `door_open`. Add a `set_var` step with arguments `&"door_open"` and `true`, then save.
+4. From an interaction handler, send the Call to your initialized Stage.
 
-- `addons/callboard/` — runtime classes, Stage definition model, editor graph and plugin.
-- `scripts/` — demo harness, HUD, world setup, player, and prop scripts.
-- `stages/stage_01/` — sample Stage script, scene, and definition.
-- `game.tscn` — main scene; `project.godot` — project and plugin configuration.
-- `tests/unit.gd` — deterministic validator, rule engine, re-entry, clock, and migration checks.
-- `tests/editor_smoke.gd` — Callboard authoring and save integration checks.
-- `tests/smoke.gd` — runtime checks for the sample Stage and player interactions.
+```gdscript
+func on_door_interacted(stage: Stage) -> void:
+    stage.fire(&"open_door")
+    print(stage.get_var(&"door_open"))  # true
+```
 
-Run the suites from the project directory:
+Add a `show_node` or `move_to` step to make a scene prop respond. Step arguments can reference typed Stage props and script constants. The API reference includes [a custom verb you can add to the picker](docs/api.md#custom-verbs).
+
+<details>
+<summary>See the Blackboard and Rule settings</summary>
+
+![Blackboard variables on the left and the selected delivery rule with its trigger, guard, one-shot latch, and steps on the right](docs/screenshots/rule-settings.png)
+
+</details>
+
+### Control when a rule runs
+
+| Setting | Behavior |
+| --- | --- |
+| **Requires** | Every listed key must be truthy when the rule is considered. |
+| **Forbids** | Any truthy listed key blocks the start. |
+| **Cancel If** | Any truthy listed key cancels the run at a cancellation check, such as after a delay or awaited step. |
+| **One-shot** | Latches when the rule starts. The latch survives reloads when your game reuses the `fired` dictionary. |
+| **Re-entry** | **Ignore** drops another trigger during a run. **Restart** keeps the newest payload and replaces the run at a cancellation check. **Queue** retains payloads in arrival order and rechecks guards before each run. One-shot rules use **Ignore**. |
+
+Use **Calls & relays** to manage connections. Renaming updates authored references. Update Call names in gameplay code and scene triggers separately. Blackboard renames preserve aliases for existing gameplay references. Select a rule to edit its guards, steps, and relay. Use the toolbar to save, reload, undo, or redo. Validation checks step expressions and surfaces issues such as relay cycles and overlapping guards.
+
+## Live debugging
+
+![The running demo with the live Callboard, active guard rule, pending timer, and recent event trace](docs/screenshots/live-debugger.png)
+
+Press **F1** in the demo to inspect the running Stage. The **DEBUG** panel shows active rules, queued or restarting runs, pending waits, and recent event and step activity. Open **Blackboard** to inspect current values or **Calls & relays** to fire a declared Call while testing. The live graph uses the loaded Stage definition and highlights rules as they run.
+
+To see a cancellation, start with a fresh Stage, wait for a guard tick, then offer the decoy. The trace shows the calming relay and the guard loop stopping at its next cancellation check.
+
+## How it fits together
+
+```mermaid
+flowchart TD
+    editor["Callboard editor"] --> definition["StageDefinition resource"]
+    definition --> stage["Stage scene"]
+    gameplay["Gameplay scripts and triggers"] -->|Calls| stage
+    stage --> engine["RuleEngine"]
+    engine <-->|Guards and writes| bb["Blackboard"]
+    engine -->|Executes| steps["Verb steps"]
+    steps -->|Relays| engine
+```
+
+The editor writes a `.tres` file that the Stage compiles into runtime rules. The export plugin strips the editor and authoring model from release exports. The demo HUD loads the live board only in debug builds. See the [API reference](docs/api.md) for Stage lifecycle, persistence, signals, built-in verbs, and runtime diagnostics.
+
+## Develop and test
+
+| Path | Contents |
+| --- | --- |
+| [`addons/callboard/core/`](addons/callboard/core/) | Stage, Blackboard, rule execution, validation, and verbs |
+| [`addons/callboard/editor/`](addons/callboard/editor/) and [`model/`](addons/callboard/model/) | Authoring UI, live board, and graph tooling |
+| [`stages/stage_01/`](stages/stage_01/) and [`scripts/`](scripts/) | Sample Stage and demo game |
+| [`tests/`](tests/) | Unit, editor smoke, and runtime smoke tests |
 
 ```sh
-godot --headless --path . --editor --import
+godot --headless --path . --import
 godot --headless --path . --script res://tests/unit.gd
 godot --headless --path . --script res://tests/editor_smoke.gd
 godot --headless --path . --script res://tests/smoke.gd
 ```
 
-GitHub Actions runs each suite as a separate check on pushes and pull requests, using Godot 4.7.2.
+[GitHub Actions](.github/workflows/test.yml) runs the three suites separately and checks that the demo runtime works without the editor and authoring model.
 
-## Make a Stage
+## License
 
-1. Create one from **Project > Tools > Create New Stage...**, or write a `@tool` script extending `Stage`.
-2. Assign the script to a `StageDefinition` resource. List Blackboard keys written by gameplay code under **External Vars**.
-3. Add Calls, Blackboard variables, rules, and graph layout in Callboard.
-4. Assign the definition to the Stage scene. Before adding a Stage to the SceneTree, inject existing `saved_vars` and `fired` dictionaries if they should persist across reloads, then call `activate()`. Call `deactivate()` when unloading it.
-
-Callboard uses a same-name sibling scene to validate scene-assigned props. If the scene lives elsewhere or has a different name, set **Preview Scene Path** on the StageDefinition in the Inspector. Use a scene with a `Stage` root. Stages built entirely in script can leave the field empty.
-
-The Stage builds props, applies definition defaults, calls the optional `_build_blackboard()` hook, and builds its rules. Use `get_var()`, `write_var()`, and `fire()` in gameplay code. Saved keys retain injected values when defaults are applied; initialize local keys consistently when they should reset on reload.
-
-Resource step arguments use Godot Expression syntax. Typed Stage props and script constants are available by name, along with literals such as `&"lamp_on"`. Expressions are trusted project data and can call GDScript methods.
-
-## Custom verbs
-
-Resource backed Stages use `StagingVerbs` by default. Extend it to add verbs, or extend `CoreVerbs` for a factory with Blackboard writes, scoring, and repeating relays. Override `_make_verbs(context: StepContext) -> CoreVerbs` in the Stage script to use a custom factory. Give public verbs typed parameters and a `Step` return type to make them appear in Callboard. Declare Blackboard keys the step writes in `sets` and any relay it emits in `emits`.
-
-If a step emits a relay named by one of its arguments, set `Step.emit_arg` to that argument's zero based index so Callboard can update it during a relay rename. Edit fixed relay names in the verb code. For a step that waits internally, capture `engine.token()` on entry and check `engine.alive(payload["_rule"], token)` after each await before applying more effects.
-
-## Runtime components
-
-`Stage` owns scene setup and lifecycle. `Blackboard` stores local and saved values. `RuleEngine` evaluates guards and runs steps and relays. `RuleValidator` checks the same built rules for the editor and runtime, including relay cycles and shared triggers with overlapping guards. The engine accepts an injected wait callable so tests can advance delays and repeating relays without real time passing.
+Callboard, formerly Director Blackboard / Rule Board, is released under the [Zero-Clause BSD License](LICENSE).
