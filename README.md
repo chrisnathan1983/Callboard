@@ -38,8 +38,8 @@ The **Callboard** tab is enabled in the Godot editor. Use it to edit a Stage def
 | **Call** | A named external event sent by gameplay code to activate rules. The Stage starts with the built in `arrive` Call. |
 | **Rule** | A response to a trigger. Its guards are checked when the trigger arrives; its steps run in order. |
 | **Relay** | An internal event emitted by a rule or step. Relays can trigger other rules. |
-| **One-shot** | A rule that latches when it starts. Its latch is stored in the manager's `fired` dictionary and survives Stage reloads; cancelling it mid run does not clear the latch. |
-| **Re-entry policy** | What happens when a trigger reaches a rule that is already running: Ignore (default), Restart with the latest payload at the next cancellation check, or Queue payloads in arrival order. |
+| **One-shot** | A rule that latches when it starts. Its latch is stored in the manager's `fired` dictionary and survives Stage reloads; cancelling it mid run does not clear the latch. One-shot rules use Ignore re-entry so the latch cannot conflict with repeated runs. |
+| **Re-entry policy** | What happens when a trigger reaches a rule that is already running: Ignore (default), Restart with the latest payload at the next cancellation check, or Queue payloads in arrival order. Restart and Queue are unavailable for one-shot rules. |
 | **Notes** | Validation messages shown for authored rules and steps. |
 
 Calls and relays both enter the rule engine through `fire()`. Their distinction is where they come from: gameplay code sends Calls; rules and steps emit relays.

@@ -20,6 +20,7 @@ var blackboard := BlackboardPanel.new()
 var inspector := RuleInspector.new()
 var _picker := OptionButton.new()
 var _status := Label.new()
+var _status_note_cursor := 0
 var _edit_buttons: Array[Button] = []
 var _data := {}
 var _path := ""
@@ -52,6 +53,7 @@ var _current_edit := {}
 var _saved_edit := {}
 var _restoring := false
 var _spin_drag_active := false
+var _spin_refresh_pending := false
 var _last_spin_edit := 0
 var _selecting_after_edit := false
 var _reveal_pending := false
@@ -94,6 +96,7 @@ func _init() -> void:
 	Style.fallback_font_size(_status, 13)
 	_status.custom_minimum_size.x = 320
 	_status.mouse_filter = Control.MOUSE_FILTER_PASS
+	_status.gui_input.connect(_on_status_gui_input)
 	file_tools.add_child(_status)
 	_file_tools = _floating_toolbar(file_tools)
 
@@ -385,8 +388,24 @@ func _update_status() -> void:
 	if is_instance_valid(_live):
 		t = "Live · " + t
 	_status.text = t
-	_status.tooltip_text = t + ("\n" + "\n".join(_data["notes"]) if n > 0 else "")
+	_status.tooltip_text = t + ("\nClick to select affected rules.\n" + "\n".join(_data["notes"]) if n > 0 else "")
 	Style.tint(_status, Style.WARNING if n > 0 or _dirty else Style.SUCCESS)
+
+func _on_status_gui_input(event: InputEvent) -> void:
+	if not event is InputEventMouseButton or not event.pressed or event.button_index != MOUSE_BUTTON_LEFT:
+		return
+	var affected: Array[String] = []
+	for rule in _data.get("rules", []):
+		var id: String = rule.get("id", "")
+		if not id.is_empty() and _data.get("notes", []).any(func(note: String) -> bool:
+			return ("'%s'" % id) in note):
+			affected.append(id)
+	if affected.is_empty():
+		return
+	var target := affected[_status_note_cursor % affected.size()]
+	_status_note_cursor += 1
+	view.select_rule(target)
+	accept_event()
 
 # --- History ----------------------------------------------------------------------
 
@@ -468,8 +487,14 @@ func _input(event: InputEvent) -> void:
 		_last_spin_edit = 0
 		if event.button_index == MOUSE_BUTTON_LEFT:
 			_spin_drag_active = event.pressed
+			if not event.pressed and _spin_refresh_pending:
+				_spin_refresh_pending = false
+				_changed(_selected)
 			if not event.pressed and _reveal_pending:
 				_reveal_selected_rule.call_deferred()
+
+func is_dirty() -> bool:
+	return _dirty
 
 func _shortcut_input(event: InputEvent) -> void:
 	if not _editable or not is_visible_in_tree() or _event_dialog.visible or _delete_connection_dialog.visible or _create_menu.visible:
@@ -782,6 +807,10 @@ func _changed(select_id: String, spin: SpinBox = null) -> void:
 	if not _editable or _restoring:
 		return
 	_sync_layout()
+	if spin and _spin_drag_active:
+		_record_edit(spin)
+		_spin_refresh_pending = true
+		return
 	RuleGraphReader.analyze(_data)
 	view.show_data(_data)
 	_selected = select_id

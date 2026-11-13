@@ -3,6 +3,7 @@ class_name RuleConnections extends RefCounted
 ## Edits references to external Calls and relays in an authored graph.
 
 const RELAY_PREFIX := "relay:"
+static var _invalid_name_pattern: RegEx
 
 static func ids(data: Dictionary) -> Array:
 	var names := {}
@@ -51,7 +52,9 @@ static func rename(data: Dictionary, id: String, new_name: String) -> String:
 	if id == "arrive":
 		return "The stage lifecycle fires the built-in arrive Call."
 	new_name = new_name.strip_edges()
-	if new_name.is_empty() or new_name.begins_with(RELAY_PREFIX) or RegEx.create_from_string('[\\x00-\\x1f"\\\\]').search(new_name):
+	if _invalid_name_pattern == null:
+		_invalid_name_pattern = RegEx.create_from_string('[\\x00-\\x1f"\\\\]')
+	if new_name.is_empty() or new_name.begins_with(RELAY_PREFIX) or _invalid_name_pattern.search(new_name):
 		return "Enter a name without quotes, backslashes, control characters, or the relay: prefix."
 	var is_relay := id.begins_with(RELAY_PREFIX)
 	var new_id := RELAY_PREFIX + new_name if is_relay else new_name

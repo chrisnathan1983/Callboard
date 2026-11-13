@@ -1,4 +1,4 @@
-extends Node3D
+class_name GameManager extends Node3D
 ## Demo harness. Stands in for a StageManager: it owns the saved Blackboard state,
 ## and loads/unloads the stage.
 

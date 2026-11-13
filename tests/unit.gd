@@ -25,6 +25,11 @@ func _initialize() -> void:
 
 	var bb := Blackboard.new()
 	bb.define(&"lamp_on", &"local", false)
+	var undeclared_changes := 0
+	bb.changed.connect(func(_key: StringName, _value: Variant) -> void: undeclared_changes += 1)
+	bb.write(&"missing", true)
+	ok = _check("undeclared Blackboard writes are rejected in every build",
+		not bb.local.has(&"missing") and undeclared_changes == 0) and ok
 
 	var cycle_a := Rule.new(&"loop_a", &"relay:a")
 	var cycle_step := Step.new()
@@ -44,6 +49,13 @@ func _initialize() -> void:
 	var shared_problems := RuleValidator.check(shared_rules, bb, [&"alarm"], [])
 	ok = _check("validator flags potentially overlapping shared triggers",
 		shared_problems.any(func(p): return "share trigger 'alarm'" in p)) and ok
+	var invalid_one_shot := Rule.new(&"invalid_one_shot", &"alarm")
+	invalid_one_shot.one_shot = true
+	invalid_one_shot.reentry = Rule.ReentryPolicy.QUEUE
+	var incompatible_problems := RuleValidator.check(
+		[invalid_one_shot], bb, [&"alarm"], [])
+	ok = _check("validator rejects re-entry policies on one-shot rules",
+		incompatible_problems.any(func(p): return "one-shot and must use Ignore" in p)) and ok
 
 	var exclusive_a := Rule.new(&"exclusive_a", &"alarm")
 	exclusive_a.requires = [&"lamp_on"]
@@ -54,6 +66,10 @@ func _initialize() -> void:
 		exclusive_rules, bb, [&"alarm"], [&"lamp_on"])
 	ok = _check("validator accepts mutually exclusive shared triggers",
 		not exclusive_problems.any(func(p): return "share trigger 'alarm'" in p)) and ok
+	shared_b.allow_overlap = true
+	var overlap_problems := RuleValidator.check(shared_rules, bb, [&"alarm"], [])
+	ok = _check("validator permits explicitly intentional shared-trigger overlap",
+		not overlap_problems.any(func(p): return "share trigger 'alarm'" in p)) and ok
 
 	var route_bb := Blackboard.new()
 	route_bb.define(&"armed", &"local", false)
@@ -104,6 +120,27 @@ func _initialize() -> void:
 	await process_frame
 	ok = _check("one-shot stays latched when cancelled mid-flight",
 		latched_at_start and not latch_state["ran"] and not latch_engine.passes(latch_rule)) and ok
+
+	engine_bb.define(&"lamp_on", &"local", false)
+	var light_engine := RuleEngine.new(engine_bb, {}, fake_wait)
+	var light_factory := StagingVerbs.new(StepContext.new(engine_bb, light_engine, null, Callable()))
+	var light_rule := Rule.new(&"timed_light", &"light")
+	light_rule.cancel_if = [&"stop_latched"]
+	var light_node := Node3D.new()
+	var light_step := light_factory.light(light_node, true, 2.0, &"lamp_on")
+	light_rule.steps.append(light_step)
+	light_engine.rules.append(light_rule)
+	light_engine.fire(&"light")
+	var light_started := light_node.visible
+	engine_bb.write(&"stop_latched", false)
+	engine_bb.write(&"lamp_on", false)
+	light_engine.fire(&"light")
+	engine_bb.write(&"stop_latched", true)
+	clock_tick.emit()
+	await process_frame
+	ok = _check("cancelled timed light cannot apply its delayed off change",
+		light_started and light_node.visible) and ok
+	light_node.free()
 	wait_requests.clear()
 	var state := {"step_ran": false}
 	var engine := RuleEngine.new(engine_bb, {}, fake_wait)

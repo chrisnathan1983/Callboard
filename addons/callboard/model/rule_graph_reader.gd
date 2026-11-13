@@ -21,19 +21,24 @@ static func read(stage: Stage) -> Dictionary:
 ## Builds and validates a draft stage, then copies step metadata back onto the model.
 static func analyze(data: Dictionary) -> void:
 	var draft := make_definition(data)
-	var instance := draft.instantiate()
+	var tree := Engine.get_main_loop() as SceneTree
+	var instance := draft.instantiate_for_analysis(tree.root) if tree else draft.instantiate()
 	if instance == null:
 		_read_results(data, null, false, ["Stage Script must extend Stage."])
 		return
-	instance.build()
+	if instance.bb == null:
+		instance.build()
 	_read_results(data, instance, instance.graph_errors.is_empty(), instance.graph_errors + instance.check())
 	instance.engine.rules.clear()
+	if instance.get_parent():
+		instance.get_parent().remove_child(instance)
 	instance.free()
 
 static func make_definition(data: Dictionary) -> StageDefinition:
 	var original: StageDefinition = data["definition"]
 	var draft := StageDefinition.new()
 	draft.stage_script = original.stage_script
+	draft.set_meta("_analysis_scene_source", original.get_meta("_analysis_scene_source", original.resource_path))
 	draft.external_calls = PackedStringArray(data["external_calls"])
 	draft.external_vars = original.external_vars
 	draft.variables = data["vars"].duplicate(true)
@@ -50,12 +55,16 @@ static func inspect_definition(path: String) -> Dictionary:
 	var definition := ResourceLoader.load(path, "", ResourceLoader.CACHE_MODE_IGNORE) as StageDefinition
 	if definition == null:
 		return {"error": "Cannot load StageDefinition from %s" % path}
-	var instance := definition.instantiate()
+	var tree := Engine.get_main_loop() as SceneTree
+	var instance := definition.instantiate_for_analysis(tree.root) if tree else definition.instantiate()
 	if instance == null:
 		return {"error": "Assign a Stage script to %s" % path.get_file()}
-	instance.build()
+	if instance.bb == null:
+		instance.build()
 	var data := read(instance)
 	instance.engine.rules.clear()
+	if instance.get_parent():
+		instance.get_parent().remove_child(instance)
 	instance.free()
 	return data
 

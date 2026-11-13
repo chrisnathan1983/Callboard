@@ -13,6 +13,7 @@ var forbids: Array[StringName] = []      # fire-time guard: keys that must be fa
 var cancel_if: Array[StringName] = []    # mid-flight guard: abort if any becomes truthy
 var one_shot := false                    # latched in Stage.fired on first run
 var reentry := ReentryPolicy.IGNORE
+var allow_overlap := false              # suppress shared-trigger overlap warnings
 var steps: Array[Step] = []
 var emits: StringName = &""              # optional relay fired when all steps finish
 

@@ -30,7 +30,9 @@ func get_var(key: StringName) -> Variant:
 
 func write(key: StringName, value: Variant) -> void:
 	key = resolve_key(key)
-	assert(schema.has(key) or OS.is_debug_build() == false, "Undeclared key '%s'" % key)
+	if not schema.has(key):
+		push_error("Undeclared Blackboard key '%s'" % key)
+		return
 	var entry: Dictionary = schema.get(key, {})
 	if entry.get("scope") == &"saved":
 		saved[entry["state_key"]] = value

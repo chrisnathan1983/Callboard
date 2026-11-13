@@ -23,6 +23,8 @@ static func check(rules: Array[Rule], bb: Blackboard,
 				if not bb.schema.has(k):
 					problems.append("rule '%s' writes '%s' which is not declared on the Blackboard" % [r.id, k])
 	for r in rules:
+		if r.one_shot and r.reentry != Rule.ReentryPolicy.IGNORE:
+			problems.append("rule '%s' is one-shot and must use Ignore re-entry" % r.id)
 		if r.trigger == &"":
 			problems.append("rule '%s' has no trigger" % r.id)
 		elif not emitted.has(r.trigger) and not external_calls.has(r.trigger):
@@ -59,7 +61,7 @@ static func _find_shared_trigger_conflicts(rules: Array[Rule]) -> Array[String]:
 			for j in range(i + 1, sharing.size()):
 				var a: Rule = sharing[i]
 				var b: Rule = sharing[j]
-				if not _guards_are_exclusive(a, b):
+				if not a.allow_overlap and not b.allow_overlap and not _guards_are_exclusive(a, b):
 					problems.append(
 						"rules '%s' and '%s' share trigger '%s' and may both run; add mutually exclusive requires/forbids guards"
 						% [a.id, b.id, trigger])

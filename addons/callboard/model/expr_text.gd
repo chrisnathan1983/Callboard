@@ -2,12 +2,18 @@
 class_name ExprText extends RefCounted
 ## Formats authored step expressions and recognizes literals for inspector controls.
 
+static var _integer_pattern: RegEx
+static var _float_pattern: RegEx
+
 static func parse_literal(expr: String) -> Dictionary:
+	if _integer_pattern == null:
+		_integer_pattern = RegEx.create_from_string('^-?[0-9]+$')
+		_float_pattern = RegEx.create_from_string('^-?([0-9]+\\.[0-9]*|[0-9]*\\.[0-9]+)$')
 	if expr == "true" or expr == "false":
 		return {"ok": true, "value": expr == "true"}
-	if RegEx.create_from_string('^-?[0-9]+$').search(expr):
+	if _integer_pattern.search(expr):
 		return {"ok": true, "value": expr.to_int()}
-	if RegEx.create_from_string('^-?([0-9]+\\.[0-9]*|[0-9]*\\.[0-9]+)$').search(expr):
+	if _float_pattern.search(expr):
 		return {"ok": true, "value": expr.to_float()}
 	if expr.length() >= 2 and expr.begins_with('"') and expr.ends_with('"'):
 		return {"ok": true, "value": expr.substr(1, expr.length() - 2).replace('\\"', '"')}

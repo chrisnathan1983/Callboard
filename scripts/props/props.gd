@@ -19,7 +19,7 @@ static func box(parent: Node, node_name: String, size: Vector3, pos: Vector3, c:
 	return mi
 
 ## An E-to-interact area that fires `event` on the owning Stage.
-static func trigger_box(parent: Node, size: Vector3, pos: Vector3, event: StringName, ctx := {}) -> TriggerArea:
+static func trigger_box(parent: Node, size: Vector3, pos: Vector3, event: StringName, ctx: Dictionary = {}) -> TriggerArea:
 	var area := TriggerArea.new()
 	area.event = event
 	area.mode = TriggerArea.Mode.INTERACT

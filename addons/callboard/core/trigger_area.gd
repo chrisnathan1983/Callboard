@@ -5,13 +5,21 @@ class_name TriggerArea extends Area3D
 
 enum Mode { ENTER, INTERACT }
 
+const LAYER_TRIGGER := 1 << 2
+const LAYER_PLAYER := 1 << 1
+const LAYER_COMPANION := 1 << 3
+
 @export var event: StringName
 @export var mode: Mode = Mode.ENTER
 @export var ctx: Dictionary = {}
+var _stage: Stage
 
 func _ready() -> void:
 	if Engine.is_editor_hint():
 		return
+	collision_layer = LAYER_TRIGGER
+	collision_mask = LAYER_PLAYER | LAYER_COMPANION
+	_stage = _find_stage()
 	if mode == Mode.ENTER:
 		body_entered.connect(_on_body_entered)
 
@@ -24,8 +32,11 @@ func interact() -> void:
 		_fire()
 
 func _fire() -> void:
+	if is_instance_valid(_stage):
+		_stage.fire(event, ctx.duplicate())
+
+func _find_stage() -> Stage:
 	var node := get_parent()
 	while node and not node is Stage:
 		node = node.get_parent()
-	if node:
-		(node as Stage).fire(event, ctx.duplicate())
+	return node as Stage

@@ -3,10 +3,11 @@ extends SceneTree
 
 const STAGE_PATH := "res://stages/stage_01/stage_01.gd"
 const DEFINITION_PATH := "res://stages/stage_01/stage_01.tres"
-const TMP_PATH := "user://stage_tmp.tres"
+const TMP_PATH := "res://.godot/stage_tmp.tres"
 
 func _initialize() -> void:
 	var ok := _test_factory()
+	ok = (await _test_scene_assigned_props()) and ok
 	ok = _test_rename_saved_state() and ok
 
 	# --- Authored resource ----------------------------------------------------------
@@ -139,6 +140,13 @@ func _initialize() -> void:
 	_rule(d2, "z1_standoff")["steps"][0]["args"][0] = "@@"
 	b2._changed("z1_standoff")
 	ok = _check("broken edit: compile failure detected", not d2["compiles"]) and ok
+	b2._on_rule_selected("z1_calm")
+	var status_click := InputEventMouseButton.new()
+	status_click.button_index = MOUSE_BUTTON_LEFT
+	status_click.pressed = true
+	b2._on_status_gui_input(status_click)
+	ok = _check("status click selects a rule named by its validation notes",
+		b2._selected == "z1_standoff") and ok
 	b2.save()
 	ok = _check("broken edit: save refused, file untouched", FileAccess.get_file_as_string(TMP_PATH) == original) and ok
 	_rule(d2, "z1_standoff")["steps"][0]["args"][0] = "4.0"
@@ -186,6 +194,30 @@ func _initialize() -> void:
 	ok = (await _test_canvas_actions()) and ok
 	print("EDITOR: ", "PASS" if ok else "FAIL")
 	quit(0 if ok else 1)
+
+func _test_scene_assigned_props() -> bool:
+	var definition := StageDefinition.new()
+	definition.stage_script = load("res://tests/fixtures/assigned_prop_stage.gd")
+	definition.set_meta("_analysis_scene_source", "res://tests/fixtures/assigned_prop_stage.tscn")
+	definition.external_calls = PackedStringArray(["go"])
+	definition.rules = [{
+		"id": "use_scene_prop", "trigger": "go", "requires": [], "forbids": [],
+		"cancel_if": [], "one_shot": false, "reentry": Rule.ReentryPolicy.IGNORE,
+		"emit": "", "state_key": "use_scene_prop", "group": "", "steps": [{
+			"verb": "show_node", "args": ["target", "true"], "delay": "", "emits": "", "sets": []
+		}],
+	}]
+	var instance := definition.instantiate_for_analysis(root)
+	await process_frame
+	if instance and instance.bb == null:
+		instance.build()
+	var result := _check("analysis loads scene-assigned typed props",
+		instance != null and instance.get("target") != null and instance.graph_errors.is_empty())
+	if instance:
+		if instance.get_parent():
+			instance.get_parent().remove_child(instance)
+		instance.free()
+	return result
 
 func _test_canvas_actions() -> bool:
 	var board := Callboard.new()

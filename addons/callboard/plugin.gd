@@ -213,7 +213,7 @@ func _build_props() -> void:
 	editor_fs.update_file(scene_path)
 
 	# 4. Refresh the board's picker (skipped if it has unsaved edits: refresh would drop them)
-	if _opened and is_instance_valid(board) and not board._dirty:
+	if _opened and is_instance_valid(board) and not board.is_dirty():
 		board.refresh()
 
 	# 5. One scan; navigate once the dock has refreshed. A later creation just retargets the path.

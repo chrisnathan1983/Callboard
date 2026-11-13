@@ -3,6 +3,7 @@ class_name StageDefinition extends Resource
 ## Authored data shared by the runtime and the Callboard.
 
 const CURRENT_FORMAT_VERSION := 2
+static var _string_token_pattern: RegEx
 
 @export var stage_script: GDScript
 @export var external_calls := PackedStringArray()
@@ -50,6 +51,7 @@ static func _normalize_rules(source: Array) -> Array:
 		entry["requires"] = entry.get("requires", [])
 		entry["forbids"] = entry.get("forbids", [])
 		entry["cancel_if"] = entry.get("cancel_if", [])
+		entry["allow_overlap"] = entry.get("allow_overlap", false)
 	return normalized
 
 func instantiate() -> Stage:
@@ -63,6 +65,26 @@ func instantiate() -> Stage:
 	if instance is Node:
 		instance.free()
 	return null
+
+## Build a validation instance from the sibling scene when available, so props assigned
+## in the scene and @onready references match the values used by the running stage.
+func instantiate_for_analysis(parent: Node) -> Stage:
+	var source_path: String = get_meta("_analysis_scene_source", resource_path)
+	var scene_path := source_path.get_basename() + ".tscn" if not source_path.is_empty() else ""
+	if not scene_path.is_empty() and ResourceLoader.exists(scene_path):
+		var scene := ResourceLoader.load(scene_path) as PackedScene
+		if scene:
+			var scene_instance := scene.instantiate()
+			if scene_instance is Stage:
+				var stage := scene_instance as Stage
+				stage.definition = self
+				parent.add_child(stage)
+				return stage
+			scene_instance.free()
+	var fallback := instantiate()
+	if fallback:
+		parent.add_child(fallback)
+	return fallback
 
 func apply_blackboard(stage: Stage) -> void:
 	_migrate()
@@ -95,11 +117,15 @@ func apply_graph(stage: Stage) -> Array[String]:
 		rule.forbids.assign(entry["forbids"])
 		rule.cancel_if.assign(entry["cancel_if"])
 		rule.one_shot = entry["one_shot"]
+		rule.allow_overlap = entry["allow_overlap"]
 		var reentry: Variant = entry.get("reentry", Rule.ReentryPolicy.IGNORE)
 		if not (reentry is int and Rule.ReentryPolicy.values().has(reentry)):
 			problems.append("rule '%s' has an invalid re-entry policy: %s" % [rule.id, reentry])
 			continue
 		rule.reentry = reentry as Rule.ReentryPolicy
+		if rule.one_shot and rule.reentry != Rule.ReentryPolicy.IGNORE:
+			problems.append("rule '%s' is one-shot and must use Ignore re-entry" % rule.id)
+			continue
 		rule.emits = StringName(entry["emit"])
 		for spec in entry["steps"]:
 			var step := _build_step(stage.verbs, spec, catalog, inputs)
@@ -119,8 +145,9 @@ func _build_step(factory: CoreVerbs, spec: Dictionary, catalog: Array, inputs: D
 	var delay: String = spec.get("delay", "")
 	var source := "[[%s], %s]" % [", ".join(spec["args"]), delay if not delay.is_empty() else "0.0"]
 	# Expression accepts the StringName constructor in place of GDScript's &"..." literals.
-	var tokens := RegEx.create_from_string('(&?)("(?:[^"\\\\]|\\\\.)*")')
-	var matches := tokens.search_all(source)
+	if _string_token_pattern == null:
+		_string_token_pattern = RegEx.create_from_string('(&?)("(?:[^"\\\\]|\\\\.)*")')
+	var matches := _string_token_pattern.search_all(source)
 	matches.reverse()
 	for token in matches:
 		if token.get_string(1) != "":

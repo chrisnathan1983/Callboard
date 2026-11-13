@@ -11,6 +11,7 @@ func _initialize() -> void:
 	await process_frame
 
 	var ok := _check("stage loads and validates", stage.check().is_empty())
+	ok = (await _test_staging_verbs(stage)) and ok
 	var fired: Array[StringName] = []
 	stage.rule_fired.connect(func(id: StringName, _event: StringName) -> void: fired.append(id))
 	stage.activate()
@@ -102,6 +103,32 @@ func _test_player_and_bump(stage: Stage, fired: Array[StringName]) -> bool:
 		stage.is_set(&"treat_out") and fired.count(&"z1_treat") == 1
 		and fired.count(&"bump_prop") == 1) and ok
 	player.queue_free()
+	return ok
+
+func _test_staging_verbs(stage: Stage) -> bool:
+	var mesh := MeshInstance3D.new()
+	mesh.name = "EffectTestMesh"
+	mesh.material_override = Props.mat(Color(0.2, 0.4, 0.8))
+	stage.add_child(mesh)
+	var material := mesh.material_override as BaseMaterial3D
+	var base := material.albedo_color
+	var verbs := stage.verbs as StagingVerbs
+	var flash_step := verbs.flash(mesh)
+	var first_flash: Signal = flash_step.fn.call({})
+	await process_frame
+	var second_flash: Signal = flash_step.fn.call({})
+	await second_flash
+	var ok := _check("re-entered flash returns to its original material color",
+		material.albedo_color.is_equal_approx(base))
+	await verbs.jump(mesh).fn.call({})
+	ok = _check("jump restores its original material color and height",
+		material.albedo_color.is_equal_approx(base) and is_zero_approx(mesh.position.y)) and ok
+	verbs.say(mesh, "First line", 10.0).fn.call({})
+	verbs.say(mesh, "Replacement line", 10.0).fn.call({})
+	var speech := mesh.get_node_or_null("CallboardSpeech") as Label3D
+	ok = _check("say reuses one speech label for overlapping calls",
+		speech != null and speech.text == "Replacement line" and mesh.get_child_count() == 1) and ok
+	mesh.queue_free()
 	return ok
 
 func _test_game_scene() -> bool:

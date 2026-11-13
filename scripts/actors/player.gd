@@ -2,6 +2,8 @@ class_name Player extends CharacterBody3D
 ## Minimal player: WASD / arrows to move, E to interact with nearby TriggerAreas.
 
 const SPEED := 6.0
+const LAYER_PLAYER := 1 << 1
+const LAYER_TRIGGER := 1 << 2
 
 var stunned := false
 var _stun_timer: SceneTreeTimer
@@ -9,6 +11,8 @@ var _reach: Area3D
 var _mat := StandardMaterial3D.new()
 
 func _ready() -> void:
+	collision_layer = LAYER_PLAYER
+	collision_mask = 1
 	add_to_group(&"Player")
 	_mat.albedo_color = Color(0.85, 0.1, 0.1)
 	var body := MeshInstance3D.new()
@@ -25,6 +29,8 @@ func _ready() -> void:
 	shape.shape = cs
 	add_child(shape)
 	_reach = Area3D.new()
+	_reach.collision_layer = LAYER_PLAYER
+	_reach.collision_mask = LAYER_TRIGGER
 	var reach_shape := CollisionShape3D.new()
 	var sphere := SphereShape3D.new()
 	sphere.radius = 1.6
