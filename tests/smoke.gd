@@ -113,16 +113,25 @@ func _test_staging_verbs(stage: Stage) -> bool:
 	var material := mesh.material_override as BaseMaterial3D
 	var base := material.albedo_color
 	var verbs := stage.verbs as StagingVerbs
-	var flash_step := verbs.flash(mesh)
-	var first_flash: Signal = flash_step.fn.call({})
-	await process_frame
-	var second_flash: Signal = flash_step.fn.call({})
-	await second_flash
-	var ok := _check("re-entered flash returns to its original material color",
-		material.albedo_color.is_equal_approx(base))
-	await verbs.jump(mesh).fn.call({})
-	ok = _check("jump restores its original material color and height",
-		material.albedo_color.is_equal_approx(base) and is_zero_approx(mesh.position.y)) and ok
+	var flash_rule := Rule.new(&"test_flash", &"test_flash")
+	var completed: Array[bool] = []
+	flash_rule.steps.append(verbs.flash(mesh))
+	flash_rule.steps.append(Step.new(func(_ctx: Dictionary) -> void: completed.append(true)))
+	var jump_rule := Rule.new(&"test_jump", &"test_jump")
+	jump_rule.steps.append(verbs.jump(mesh))
+	stage.engine.rules.append_array([flash_rule, jump_rule])
+	stage.fire(&"test_flash")
+	stage.fire(&"test_jump")
+	await create_timer(1.0).timeout
+	var ok := _check("jump restores its original material color and height",
+		material.albedo_color.is_equal_approx(base) and is_zero_approx(mesh.position.y))
+	ok = _check("an interrupted flash advances the rule and clears its active state",
+		completed == [true] and stage.engine.active_snapshot().is_empty()) and ok
+	await verbs.flash(mesh).fn.call({})
+	ok = _check("a later flash returns to the original material color",
+		material.albedo_color.is_equal_approx(base)) and ok
+	stage.engine.rules.erase(flash_rule)
+	stage.engine.rules.erase(jump_rule)
 	verbs.say(mesh, "First line", 10.0).fn.call({})
 	verbs.say(mesh, "Replacement line", 10.0).fn.call({})
 	var speech := mesh.get_node_or_null("CallboardSpeech") as Label3D

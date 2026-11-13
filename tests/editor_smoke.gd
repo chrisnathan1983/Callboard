@@ -595,26 +595,34 @@ func _test_live_debug() -> bool:
 	var definition := load(DEFINITION_PATH) as StageDefinition
 	var stage := definition.instantiate()
 	root.add_child(stage)
-	stage.build()
 	var board := Callboard.new()
 	root.add_child(board)
 	board.bind_live(stage)
 	stage.engine.rules.clear()
 	var panel: CallboardLiveDebugPanel = board._live_debug_ui
-	for i in panel._calls.item_count:
-		if panel._calls.get_item_text(i) == "offer:decoy":
-			panel._calls.select(i)
-	var call_count := panel._calls.item_count
-	panel.fire_selected()
-	var traced_call := panel._trace_rows.get_child_count() == 1
-	if traced_call:
-		traced_call = "offer:decoy" in (panel._trace_rows.get_child(0) as Label).text
-	var live_controls := board._debug_button.visible and not board._connections_button.visible
+	var live_controls := board._debug_button.visible and board._connections_button.visible
+	board._connections_button.button_pressed = true
+	var panels_open := board._connections_panel.visible and panel.panel.visible
+	var call_card: Control = board._connection_cards.get("offer:decoy")
+	var relay_card: Control = board._connection_cards.get("relay:treat_out")
+	var fire_button := call_card.find_child("FireCall", true, false) as Button if call_card else null
+	var call_can_fire := fire_button != null and not fire_button.disabled
+	var traced_call := false
+	if call_can_fire:
+		fire_button.pressed.emit()
+		if panel._trace_rows.get_child_count() == 1:
+			var trace_row := panel._trace_rows.get_child(0)
+			for label in trace_row.find_children("*", "Label", true, false):
+				traced_call = traced_call or "offer:decoy" in label.text
+	var relay_has_no_fire := relay_card != null and relay_card.find_child("FireCall", true, false) == null
+	board._blackboard_button.button_pressed = true
+	var debug_still_open := panel.panel.visible and not board._connections_panel.visible
 	board.free()
 	stage.free()
-	var ok := _check("live debug launcher is shown", live_controls)
-	ok = _check("live panel lists declared Calls", call_count == 4) and ok
-	return _check("live panel records fired Calls", traced_call) and ok
+	var ok := _check("live debug and connections launchers are shown", live_controls)
+	ok = _check("debug stays open when switching between connections and Blackboard", panels_open and debug_still_open) and ok
+	ok = _check("live connections can fire Calls but not relays", call_can_fire and relay_has_no_fire) and ok
+	return _check("live debug records Calls fired from the connections panel", traced_call) and ok
 
 func _rule(d: Dictionary, id: String) -> Dictionary:
 	for r in d["rules"]:

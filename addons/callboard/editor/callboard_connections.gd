@@ -148,6 +148,7 @@ func _make_card(data: Dictionary, editable: bool, id: String) -> PanelContainer:
 		fire_hint.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		fire_row.add_child(fire_hint)
 		var fire := Button.new()
+		fire.name = "FireCall"
 		fire.text = "Fire"
 		fire.tooltip_text = "Fire '%s' on the live Stage" % id
 		fire.disabled = not _fire_handler.is_valid()

@@ -191,8 +191,36 @@ func _initialize() -> void:
 
 	ok = _test_restart() and ok
 	ok = _test_queue() and ok
+	ok = _test_retriggered_light() and ok
 	print("UNIT: ", "PASS" if ok else "FAIL")
 	quit(0 if ok else 1)
+
+func _test_retriggered_light() -> bool:
+	var bb := Blackboard.new()
+	bb.define(&"lamp_on", &"local", false)
+	var timers: Array[SceneTreeTimer] = []
+	var engine := RuleEngine.new(bb, {}, func(seconds: float) -> Signal:
+		var timer := create_timer(seconds)
+		timers.append(timer)
+		return timer.timeout)
+	var verbs := StagingVerbs.new(StepContext.new(bb, engine, null, Callable()))
+	var lamp := Node3D.new()
+	var rule := Rule.new(&"timed_light", &"light")
+	rule.reentry = Rule.ReentryPolicy.RESTART
+	rule.steps.append(verbs.light(lamp, true, 1.0))
+	engine.rules.append(rule)
+	engine.fire(&"light")
+	engine.fire(&"light")
+	var ok := _check("each light activation schedules a timeout", timers.size() == 2)
+	if ok:
+		timers[0].timeout.emit()
+		ok = _check("an older timeout leaves the latest light activation on",
+			lamp.visible and bb.is_set(&"lamp_on")) and ok
+		timers[1].timeout.emit()
+		ok = _check("the latest timeout switches the light and Blackboard key off",
+			not lamp.visible and not bb.is_set(&"lamp_on")) and ok
+	lamp.free()
+	return ok
 
 func _test_restart() -> bool:
 	var bb := Blackboard.new()
