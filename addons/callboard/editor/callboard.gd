@@ -159,7 +159,8 @@ func _init() -> void:
 	_settings_window.hide()
 	add_child(_settings_window)
 	_overlay_layout.setup(self, _file_tools, _create_tools, _left_tools, _blackboard_panel,
-		_connections_panel, _live_debug_panel, _connection_rows, _settings_window, blackboard, inspector, view)
+		_connections_panel, _live_debug_panel, _debug_button, _connection_rows, _settings_window,
+		blackboard, inspector, view)
 
 	resized.connect(_layout_overlays)
 	_layout_overlays.call_deferred()
@@ -182,21 +183,34 @@ func _make_left_tools() -> void:
 	_blackboard_panel = Style.panel(blackboard, Style.SURFACE, Vector2(12, 10), true)
 	_setup_connections_panel()
 	_live_debug_panel = _live_debug_ui.setup()
+	_live_debug_panel.hide()
 	_blackboard_button = _panel_launcher("Blackboard", "▤", _blackboard_panel, buttons)
 	_connections_button = _panel_launcher("Calls & relays", "⇄", _connections_panel, buttons)
-	_debug_button = _panel_launcher("Live debugging", "?", _live_debug_panel, buttons)
+	_debug_button = Button.new()
+	_debug_button.toggle_mode = true
+	_debug_button.text = "DEBUG"
+	_debug_button.custom_minimum_size = Vector2(78, 32)
+	_debug_button.accessibility_name = "Toggle live debugging"
+	_debug_button.tooltip_text = "Show or hide live debugging"
 	_debug_button.visible = false
+	if not Engine.is_editor_hint():
+		_debug_button.add_theme_stylebox_override("normal", Style.surface(Style.SURFACE, Style.BORDER, Vector2(9, 4)))
+		_debug_button.add_theme_stylebox_override("pressed", Style.surface(Color("#26394c"), Style.BORDER, Vector2(9, 4)))
+	_debug_button.toggled.connect(func(open: bool) -> void:
+		_live_debug_panel.visible = open
+		_layout_overlays.call_deferred())
 	_connections_button.toggled.connect(func(open: bool) -> void:
 		if open:
 			_refresh_connections())
 	launchers.add_child(_blackboard_button)
 	launchers.add_child(_connections_button)
-	launchers.add_child(_debug_button)
 	_left_tools.add_child(_blackboard_panel)
 	_left_tools.add_child(_connections_panel)
-	_left_tools.add_child(_live_debug_panel)
 	_left_tools.minimum_size_changed.connect(_layout_overlays, CONNECT_DEFERRED)
 	add_child(_left_tools)
+	_live_debug_panel.minimum_size_changed.connect(_layout_overlays, CONNECT_DEFERRED)
+	add_child(_live_debug_panel)
+	add_child(_debug_button)
 
 func _panel_launcher(title: String, glyph: String, panel: PanelContainer, buttons: ButtonGroup) -> Button:
 	var button := Button.new()
@@ -372,12 +386,15 @@ func _show(data: Dictionary, editable: bool) -> void:
 	for b in _edit_buttons:
 		b.visible = editable
 	_create_tools.visible = editable
-	_connections_button.visible = editable
+	_connections_button.visible = true
 	_debug_button.visible = not editable
 	if not _editable:
 		_connections_button.button_pressed = false
+		_debug_button.set_pressed_no_signal(true)
+		_live_debug_panel.show()
 	else:
-		_debug_button.button_pressed = false
+		_debug_button.set_pressed_no_signal(false)
+		_live_debug_panel.hide()
 	view.set_editable(_editable)
 	blackboard.show_data(data, _editable, not editable)
 	view.show_data(data)
@@ -391,7 +408,7 @@ func _update_status() -> void:
 	_undo_button.disabled = not _editable or not _history.can_undo()
 	_redo_button.disabled = not _editable or not _history.can_redo()
 	_event_button.disabled = not _editable
-	_connections_button.disabled = not _editable
+	_connections_button.disabled = false
 	var variable_count: int = _data["vars"].size()
 	var connection_count := RuleConnections.ids(_data).size()
 	_blackboard_button.text = "▤ %d" % variable_count
@@ -607,7 +624,12 @@ func add_call_name(event_id: String) -> bool:
 
 func _setup_connections_panel() -> void:
 	_connections_panel = _connections_ui.setup(self, _button("+ Call", _open_event_dialog),
-		_layout_overlays, rename_connection, delete_connection, _show_connection_error)
+		_layout_overlays, rename_connection, delete_connection, _show_connection_error, fire_live_call)
+
+func fire_live_call(event_id: String) -> void:
+	if _live == null or not is_instance_valid(_live) or _live.engine == null:
+		return
+	_live.fire(StringName(event_id))
 
 func _refresh_connections(preferred := "") -> void:
 	_connections_ui.refresh(_data, _editable, preferred)
@@ -838,7 +860,7 @@ func save() -> void:
 # --- Selection --------------------------------------------------------------------
 
 func _on_rule_selected(rule_id: String) -> void:
-	if _selecting_after_edit:
+	if _selecting_after_edit or not _editable:
 		return
 	var rd := _find_rule(rule_id)
 	if rd.is_empty():
@@ -859,7 +881,7 @@ func _reveal_selected_rule() -> void:
 		view.reveal_rule(_selected, _settings_window.get_rect())
 
 func _on_group_selected(group_name: String) -> void:
-	if _selecting_after_edit:
+	if _selecting_after_edit or not _editable:
 		return
 	for g in _data["groups"]:
 		if g["name"] == group_name:

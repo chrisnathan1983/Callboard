@@ -64,32 +64,37 @@ static func label(text: String, color := TEXT, font_size := 14) -> Label:
 
 static func panel(content: Control, fill := SURFACE, padding := Vector2(12, 10), opaque := false) -> PanelContainer:
 	var control := PanelContainer.new()
-	if Engine.is_editor_hint():
-		var refresh := _refresh_panel.bind(control, opaque, padding)
-		control.theme_changed.connect(refresh, CONNECT_DEFERRED)
-		control.ready.connect(refresh)
-	else:
-		control.add_theme_stylebox_override("panel", surface(fill, BORDER, padding))
+	var control_ref := weakref(control)
+	var refresh := _refresh_panel_from_ref.bind(control_ref, opaque, padding)
+	control.theme_changed.connect(refresh, CONNECT_DEFERRED)
+	control.ready.connect(refresh)
 	control.add_child(content)
 	return control
 
 static func entry(content: Control) -> PanelContainer:
 	var control := PanelContainer.new()
 	control.add_child(content)
-	var refresh := _refresh_entry.bind(control)
-	if Engine.is_editor_hint():
-		control.theme_changed.connect(refresh, CONNECT_DEFERRED)
-		control.ready.connect(refresh)
-	else:
-		refresh.call()
+	var control_ref := weakref(control)
+	var refresh := _refresh_entry_from_ref.bind(control_ref)
+	control.theme_changed.connect(refresh, CONNECT_DEFERRED)
+	control.ready.connect(refresh)
 	return control
+
+static func _refresh_entry_from_ref(control_ref: WeakRef) -> void:
+	var control := control_ref.get_ref() as PanelContainer
+	if control != null:
+		_refresh_entry(control)
+
+static func _refresh_panel_from_ref(control_ref: WeakRef, opaque: bool, padding: Vector2) -> void:
+	var control := control_ref.get_ref() as PanelContainer
+	if control != null:
+		_refresh_panel(control, opaque, padding)
 
 static func _refresh_entry(control: PanelContainer) -> void:
 	var fill := SURFACE
-	if Engine.is_editor_hint():
-		var toolbar := control.get_theme_stylebox(&"menu_panel", &"GraphEdit") as StyleBoxFlat
-		if toolbar != null:
-			fill = toolbar.bg_color
+	var toolbar := control.get_theme_stylebox(&"menu_panel", &"GraphEdit") as StyleBoxFlat
+	if toolbar != null:
+		fill = toolbar.bg_color
 	fill.a = 1.0
 	var text := resolve_color(control, TEXT)
 	var border := fill.lerp(text, 0.26)
@@ -101,7 +106,8 @@ static func _refresh_entry(control: PanelContainer) -> void:
 	control.add_theme_stylebox_override(&"panel", surface(fill, border, Vector2(9, 8) * scale, roundi(6 * scale)))
 
 static func _refresh_panel(control: PanelContainer, opaque: bool, padding: Vector2) -> void:
-	# Use the same surface as Godot's floating graph toolbar.
+	# Use the same native surface family as Godot's floating graph toolbar in both
+	# the editor and the live game view.
 	var panel_style := control.get_theme_stylebox(&"menu_panel", &"GraphEdit")
 	if not opaque:
 		if control.get_theme_stylebox(&"panel") != panel_style:
@@ -111,7 +117,7 @@ static func _refresh_panel(control: PanelContainer, opaque: bool, padding: Vecto
 	var fill := SURFACE
 	if native_flat != null:
 		fill = native_flat.bg_color
-	elif control.has_theme_color(&"base_color", &"Editor"):
+	elif Engine.is_editor_hint() and control.has_theme_color(&"base_color", &"Editor"):
 		fill = control.get_theme_color(&"base_color", &"Editor")
 	fill.a = 1.0
 	var current := control.get_theme_stylebox(&"panel") as StyleBoxFlat

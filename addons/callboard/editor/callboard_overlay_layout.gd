@@ -11,6 +11,7 @@ var _left_tools: Control
 var _blackboard_panel: Control
 var _connections_panel: Control
 var _live_debug_panel: Control
+var _debug_button: Control
 var _connection_rows: Control
 var _settings_window: Control
 var _blackboard: BlackboardPanel
@@ -18,8 +19,9 @@ var _inspector: RuleInspector
 var _view: RuleGraphView
 
 func setup(board: Control, file_tools: Control, create_tools: Control, left_tools: Control,
-		blackboard_panel: Control, connections_panel: Control, live_debug_panel: Control, connection_rows: Control,
-		settings_window: Control, blackboard: BlackboardPanel, inspector: RuleInspector,
+		blackboard_panel: Control, connections_panel: Control, live_debug_panel: Control,
+		debug_button: Control, connection_rows: Control, settings_window: Control,
+		blackboard: BlackboardPanel, inspector: RuleInspector,
 		view: RuleGraphView) -> void:
 	_board = board
 	_file_tools = file_tools
@@ -28,6 +30,7 @@ func setup(board: Control, file_tools: Control, create_tools: Control, left_tool
 	_blackboard_panel = blackboard_panel
 	_connections_panel = connections_panel
 	_live_debug_panel = live_debug_panel
+	_debug_button = debug_button
 	_connection_rows = connection_rows
 	_settings_window = settings_window
 	_blackboard = blackboard
@@ -60,8 +63,6 @@ func layout() -> void:
 		left_size.y = minf(available_height, left_size.y + _blackboard.rows_height())
 	elif _connections_panel.visible:
 		left_size.y = minf(available_height, left_size.y + _connection_rows.get_combined_minimum_size().y)
-	elif _live_debug_panel.visible:
-		left_size.y = minf(available_height, left_size.y + _live_debug_panel.get_combined_minimum_size().y)
 	_left_tools.size = left_size
 	_left_tools.position = Vector2(GUTTER, window_y)
 	var fit_right := _board.size.x - GUTTER * 2.0
@@ -70,6 +71,24 @@ func layout() -> void:
 		_settings_window.size = Vector2(_settings_window.get_combined_minimum_size().x, minf(settings_height, available_height))
 		_settings_window.position = Vector2(_board.size.x - _settings_window.size.x - GUTTER, window_y)
 		fit_right = _settings_window.position.x - GUTTER
+		_view.set_minimap_right_edge(_board.size.x - GUTTER)
+	elif _live_debug_panel.visible:
+		var debug_size := _live_debug_panel.get_combined_minimum_size()
+		var debug_width := minf(debug_size.x, maxf(_board.size.x - GUTTER * 2.0, 1.0))
+		var debug_height := maxf(_board.size.y - window_y - GUTTER, 32.0)
+		_live_debug_panel.size = Vector2(debug_width, debug_height)
+		_live_debug_panel.position = Vector2(_board.size.x - _live_debug_panel.size.x - GUTTER, window_y)
+		fit_right = _live_debug_panel.position.x - GUTTER
+		_view.set_minimap_right_edge(_live_debug_panel.position.x - GUTTER)
+	else:
+		_view.set_minimap_right_edge(_board.size.x - GUTTER)
+
+	if _debug_button.visible:
+		_debug_button.reset_size()
+		_debug_button.size = _debug_button.get_combined_minimum_size()
+		_debug_button.position = Vector2(
+			_board.size.x - _debug_button.size.x - GUTTER,
+			maxf(GUTTER, window_y - _debug_button.size.y - 6.0))
 
 	var fit_left := _left_tools.size.x + GUTTER * 2.0
 	# A narrow workspace can pan beneath the overlays.

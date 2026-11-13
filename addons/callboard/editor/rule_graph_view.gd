@@ -27,7 +27,6 @@ const COL_REQ := Style.SUCCESS
 const COL_FORBID := Style.ERROR
 const COL_CANCEL := Style.WARNING
 const COL_DIM := Style.MUTED
-const LIVE_ACTIVITY := Color("#fff3b2")
 
 var fit_area := Rect2()
 var _rule_nodes := {}    # rule id -> GraphNode
@@ -39,6 +38,7 @@ var _editable := true
 var _fit_requested := false
 var _inspected_node: GraphElement
 var _icon_material: ShaderMaterial
+var _minimap_control: Control
 
 func _init() -> void:
 	minimap_enabled = true
@@ -46,14 +46,6 @@ func _init() -> void:
 	show_zoom_label = true
 	grid_pattern = GRID_PATTERN_DOTS
 	connection_lines_thickness = 2.0
-	if not Engine.is_editor_hint():
-		var canvas := StyleBoxFlat.new()
-		canvas.bg_color = Color("#101621")
-		add_theme_stylebox_override("panel", canvas)
-		add_theme_stylebox_override("menu_panel", Style.surface(Style.SURFACE, Style.BORDER, Vector2(8, 5), 6))
-		add_theme_color_override("grid_minor", Color("#202b3a"))
-		add_theme_color_override("grid_major", Color("#293649"))
-		add_theme_color_override("activity", LIVE_ACTIVITY)
 	var fit := Button.new()
 	fit.text = "Fit all"
 	fit.tooltip_text = "Frame every Call, rule and group"
@@ -78,10 +70,39 @@ func set_editable(on: bool) -> void:
 	_editable = on
 	right_disconnects = on
 	if not on:
-		if Engine.is_editor_hint():
-			remove_theme_color_override("activity")
-		else:
-			add_theme_color_override("activity", LIVE_ACTIVITY)
+		remove_theme_color_override("activity")
+
+func _ready() -> void:
+	_minimap_control = _find_minimap_control(self)
+
+func _find_minimap_control(root: Node) -> Control:
+	for child in root.get_children(true):
+		if child.name == "_minimap" and child is Control:
+			return child as Control
+		var nested := _find_minimap_control(child)
+		if nested != null:
+			return nested
+	return null
+
+## Keep GraphEdit's built-in overview map clear of the floating right-side panel.
+func set_minimap_right_edge(right_edge: float) -> void:
+	if not is_instance_valid(_minimap_control):
+		_minimap_control = _find_minimap_control(self)
+	if _minimap_control == null:
+		return
+	var host := _minimap_control.get_parent() as Control
+	if host == null:
+		return
+	var map_size := _minimap_control.size
+	var right_offset := right_edge - host.size.x
+	_minimap_control.anchor_left = 1.0
+	_minimap_control.anchor_right = 1.0
+	_minimap_control.anchor_top = 1.0
+	_minimap_control.anchor_bottom = 1.0
+	_minimap_control.offset_left = right_offset - map_size.x
+	_minimap_control.offset_right = right_offset
+	_minimap_control.offset_top = -map_size.y - 8.0
+	_minimap_control.offset_bottom = -8.0
 
 func _position_view_tools() -> void:
 	var menu := get_menu_hbox().get_parent() as Control
@@ -158,11 +179,6 @@ func show_data(data: Dictionary) -> void:
 		f.autoshrink_enabled = false
 		f.autoshrink_margin = 24
 		f.resizable = _editable
-		if not Engine.is_editor_hint():
-			f.add_theme_stylebox_override("panel", Style.surface(Color("#1c27366b"), Color("#384c64"), Vector2.ZERO, 9))
-			f.add_theme_stylebox_override("panel_selected", Style.surface(Color("#233447a3"), COL_EVENT, Vector2.ZERO, 9))
-			f.add_theme_stylebox_override("titlebar", Style.surface(Color("#27374a"), Color("#384c64"), Vector2(12, 4), 7))
-			f.add_theme_stylebox_override("titlebar_selected", Style.surface(Color("#2a4655"), COL_EVENT, Vector2(12, 4), 7))
 		_style_title(f.get_titlebar_hbox(), Style.TEXT, &"Folder", 17)
 		_scale_card_padding(f, &"GraphFrame")
 		f.resize_request.connect(func(new_size: Vector2) -> void:
@@ -482,14 +498,12 @@ func _auto_layout(rules: Array) -> void:
 
 # --- Cards ------------------------------------------------------------------------
 
-func _row(text: String, color: Color, icon_name := &"", fill := Color.TRANSPARENT) -> Control:
+func _row(text: String, color: Color, icon_name := &"") -> Control:
 	var label := Style.label(text, color, 13)
 	_scale_card_label(label, 13)
 	label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	label.mouse_filter = Control.MOUSE_FILTER_PASS
 	label.tooltip_text = text
-	if fill.a > 0 and not Engine.is_editor_hint():
-		label.add_theme_stylebox_override("normal", Style.surface(fill, Color.TRANSPARENT, Vector2(7, 2), 4))
 	if not Engine.is_editor_hint() or icon_name == &"":
 		return label
 	var row := HBoxContainer.new()
@@ -557,14 +571,9 @@ func _style_title(titlebar: HBoxContainer, color: Color, icon_name: StringName, 
 		titlebar.add_child(icon)
 		titlebar.move_child(icon, 0)
 
-func _style_card(node: GraphNode, width: float, title_color: Color, header: Color, icon_name: StringName) -> void:
+func _style_card(node: GraphNode, width: float, title_color: Color, icon_name: StringName) -> void:
 	node.custom_minimum_size.x = width
 	node.add_theme_constant_override("separation", 5)
-	if not Engine.is_editor_hint():
-		node.add_theme_stylebox_override("panel", Style.surface(Style.SURFACE, Style.BORDER, Vector2(13, 9)))
-		node.add_theme_stylebox_override("panel_selected", Style.surface(Color("#1d2938"), COL_EVENT, Vector2(13, 9)))
-		node.add_theme_stylebox_override("titlebar", Style.surface(header, Style.BORDER, Vector2(12, 7), 6))
-		node.add_theme_stylebox_override("titlebar_selected", Style.surface(header.lightened(0.07), COL_EVENT, Vector2(12, 7), 6))
 	_style_title(node.get_titlebar_hbox(), title_color, icon_name)
 	_scale_card_padding(node, &"GraphNode")
 
@@ -611,14 +620,14 @@ func _make_rule_node(rd: Dictionary, problems: Array) -> GraphNode:
 	n.title = ("⚠ " if warned and not Engine.is_editor_hint() else "") + rd["id"]
 	n.tooltip_text = rd["id"]
 	n.position_offset = rd["pos"]
-	_style_card(n, CARD_WIDTH, Style.WARNING if warned else Style.TEXT, Color("#253347"), &"NodeWarning" if warned else &"GraphNode")
+	_style_card(n, CARD_WIDTH, Style.WARNING if warned else Style.TEXT, &"NodeWarning" if warned else &"GraphNode")
 
 	# Each row is one slot. Entries: [label, left_port, right_port, color]
 	var rows: Array = []
 	var trigger: String = rd["trigger"]
 	var trigger_text := "On  " + trigger if not trigger.is_empty() else "Connect a trigger"
 	var trigger_color := COL_RELAY if trigger.begins_with("relay:") else COL_EVENT
-	rows.append([_row(trigger_text, trigger_color, &"Signal", Color("#203341")), true, false, trigger_color])
+	rows.append([_row(trigger_text, trigger_color, &"Signal"), true, false, trigger_color])
 	if not rd["requires"].is_empty():
 		rows.append([_row("requires: " + ", ".join(rd["requires"]), COL_REQ, &"✓"), false, false, COL_DIM])
 	if not rd["forbids"].is_empty():
@@ -644,7 +653,7 @@ func _make_rule_node(rd: Dictionary, problems: Array) -> GraphNode:
 		if not last:
 			label = "Fires  " + relays[p]
 		var relay_icon := &"Signal" if relays[p] != "" else &"Add"
-		var row := _row(label, COL_RELAY if relays[p] != "" else COL_DIM, relay_icon, Color("#302b2a") if relays[p] != "" else Color.TRANSPARENT)
+		var row := _row(label, COL_RELAY if relays[p] != "" else COL_DIM, relay_icon)
 		if relays[p] == "":
 			row.tooltip_text = "Drag the output port to a rule to create a relay"
 		rows.append([row, false, true, COL_RELAY])
@@ -676,7 +685,7 @@ func _make_event_nodes(events: Array, rules: Array) -> void:
 		n.title = "External Call"
 		n.tooltip_text = event_id
 		n.position_offset = positions[event_id]
-		_style_card(n, 174.0, COL_EVENT, Color("#1e3947"), &"Signal")
+		_style_card(n, 174.0, COL_EVENT, &"Signal")
 		_add_card_rows(n, [[_row(event_id, Style.TEXT), false, true, COL_EVENT]])
 		add_child(n)
 		_event_nodes[event_id] = n

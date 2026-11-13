@@ -14,12 +14,15 @@ var _pending_delete := ""
 var _rename_handler: Callable
 var _delete_handler: Callable
 var _error_handler: Callable
+var _fire_handler: Callable
 
 func setup(parent: Node, create_call_button: Button, layout_changed: Callable,
-		rename_handler: Callable, delete_handler: Callable, error_handler: Callable) -> PanelContainer:
+		rename_handler: Callable, delete_handler: Callable, error_handler: Callable,
+		fire_handler: Callable) -> PanelContainer:
 	_rename_handler = rename_handler
 	_delete_handler = delete_handler
 	_error_handler = error_handler
+	_fire_handler = fire_handler
 	var fields := VBoxContainer.new()
 	fields.custom_minimum_size.x = Style.LIST_WIDTH
 	fields.add_theme_constant_override("separation", Style.ENTRY_GAP)
@@ -139,6 +142,20 @@ func _make_card(data: Dictionary, editable: bool, id: String) -> PanelContainer:
 		else:
 			expanded.erase(id))
 	card.add_child(details)
+	if not editable and not is_relay:
+		var fire_row := HBoxContainer.new()
+		var fire_hint := Style.label("Trigger this Call", Style.MUTED, 12)
+		fire_hint.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		fire_row.add_child(fire_hint)
+		var fire := Button.new()
+		fire.text = "Fire"
+		fire.tooltip_text = "Fire '%s' on the live Stage" % id
+		fire.disabled = not _fire_handler.is_valid()
+		fire.pressed.connect(func() -> void:
+			if _fire_handler.is_valid():
+				_fire_handler.call(id))
+		fire_row.add_child(fire)
+		card.add_child(fire_row)
 
 	var error := Style.label("", Style.WARNING, 13)
 	error.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
