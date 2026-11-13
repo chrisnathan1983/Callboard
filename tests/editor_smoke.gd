@@ -4,11 +4,13 @@ extends SceneTree
 const STAGE_PATH := "res://stages/stage_01/stage_01.gd"
 const DEFINITION_PATH := "res://stages/stage_01/stage_01.tres"
 const TMP_PATH := "res://.godot/stage_tmp.tres"
+const Settings := preload("res://addons/callboard/core/callboard_settings.gd")
 const ExportFilter := preload("res://addons/callboard/editor/export_plugin.gd")
 
 func _initialize() -> void:
 	var ok := _test_authored_resource_graph()
 	ok = _test_board_editing() and ok
+	ok = _test_additional_stage_locations() and ok
 	ok = (await _test_save_and_history()) and ok
 	ok = (await _test_debounced_history()) and ok
 	ok = (await _test_numeric_undo()) and ok
@@ -101,6 +103,24 @@ func _test_authored_resource_graph() -> bool:
 	gv.queue_free()
 
 
+	return ok
+
+func _test_additional_stage_locations() -> bool:
+	var previous: Variant = ProjectSettings.get_setting(
+		Settings.ADDITIONAL_STAGE_DIRECTORIES, PackedStringArray())
+	ProjectSettings.set_setting(Settings.ADDITIONAL_STAGE_DIRECTORIES,
+		PackedStringArray(["res://stages/stage_01/", "res://stages"]))
+	var directories := Settings.stage_directories()
+	var board := Callboard.new()
+	root.add_child(board)
+	var paths := board._collect_all_stage_definition_paths()
+	var ok := _check("additional stage directories are normalized and deduplicated",
+		directories == ["res://stages", "res://stages/stage_01"]
+		and paths.count(DEFINITION_PATH) == 1)
+	ok = _check("stage picker labels entries relative to their selected root",
+		Callboard._path_relative_to(DEFINITION_PATH, "res://stages") == "stage_01/stage_01.tres") and ok
+	board.queue_free()
+	ProjectSettings.set_setting(Settings.ADDITIONAL_STAGE_DIRECTORIES, previous)
 	return ok
 
 func _test_board_editing() -> bool:

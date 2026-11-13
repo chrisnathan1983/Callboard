@@ -281,15 +281,15 @@ func refresh() -> void:
 		return
 	var keep := _path
 	_picker.clear()
-	for path in _collect_stage_definition_paths():
-		_picker.add_item(path.trim_prefix(Settings.stages_directory() + "/"))
+	for path in _collect_all_stage_definition_paths():
+		_picker.add_item(_path_relative_to(path, _stage_directory_for_path(path)))
 		_picker.set_item_metadata(_picker.item_count - 1, path)
 		_picker.get_popup().set_item_tooltip(_picker.item_count - 1, path)
 	if _picker.item_count == 0:
 		_path = ""
 		_picker.text = "No stages"
 		_picker.disabled = true
-		_show({"error": "No stage definitions in " + Settings.stages_directory()}, false)
+		_show({"error": "No stage definitions in: " + ", ".join(Settings.stage_directories())}, false)
 		return
 	_picker.disabled = false
 	var idx := 0
@@ -298,6 +298,27 @@ func refresh() -> void:
 			idx = i
 	_picker.select(idx)
 	open_script(_picker.get_item_metadata(idx))
+
+func _collect_all_stage_definition_paths() -> Array[String]:
+	var paths: Array[String] = []
+	for directory in Settings.stage_directories():
+		for path in _collect_stage_definition_paths(directory):
+			if not paths.has(path):
+				paths.append(path)
+	paths.sort()
+	return paths
+
+func _stage_directory_for_path(path: String) -> String:
+	var matching := ""
+	for directory in Settings.stage_directories():
+		var prefix := directory if directory.ends_with("/") else directory + "/"
+		if path.begins_with(prefix) and prefix.length() > matching.length():
+			matching = directory
+	return matching if not matching.is_empty() else Settings.stages_directory()
+
+static func _path_relative_to(path: String, directory: String) -> String:
+	var prefix := directory if directory.ends_with("/") else directory + "/"
+	return path.trim_prefix(prefix) if path.begins_with(prefix) else path
 
 func _collect_stage_definition_paths(dir_path := "") -> Array[String]:
 	var paths: Array[String] = []
