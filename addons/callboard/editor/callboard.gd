@@ -93,7 +93,7 @@ func _init() -> void:
 			_picker.custom_minimum_size.x *= _picker.get_theme_default_base_scale())
 	_picker.item_selected.connect(_on_picker)
 	stage_tools.add_child(_picker)
-	_save_button = _file_button(&"Save", "💾", "Save stage", save)
+	_save_button = _file_button(&"Save", "Save", "Save stage", save)
 	_reload_button = _file_button(&"Reload", "↻", "Reload stage from disk", refresh)
 	stage_tools.add_child(_save_button)
 	stage_tools.add_child(_reload_button)

@@ -156,9 +156,6 @@ func apply_graph(stage: Stage) -> Array[String]:
 				# Keep an inert placeholder so following steps retain their metadata indices.
 				step = Step.new(func(_context: Dictionary) -> void: pass)
 				step.verb = spec.verb
-			else:
-				rule.steps.append(step)
-				continue
 			rule.steps.append(step)
 		built.append(rule)
 	stage.engine.rules.append_array(built)

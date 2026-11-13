@@ -34,6 +34,8 @@ func repeat_emit(interval: float, tick: StringName) -> Step:
 				return
 			var tick_context: Dictionary = c.duplicate(true)
 			tick_context.erase("_callboard_fire_depth")
+			tick_context.erase("_rule")
+			tick_context.erase("_run")
 			engine.fire("relay:" + tick, tick_context)
 	var step := Step.new(run)
 	step.emits = tick

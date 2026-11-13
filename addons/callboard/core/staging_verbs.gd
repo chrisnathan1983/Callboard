@@ -46,14 +46,22 @@ func light(n: Node3D, on: bool, duration := 0.0, key: StringName = &"lamp_on") -
 		n.visible = on
 		ctx.bb.write(key, on)
 		if on and duration > 0.0 and (rule == null or engine.alive(rule, gen)):
-			var turn_off := func() -> void:
+			var on_run_cancelled := Callable()
+			var turn_off := Callable()
+			turn_off = func() -> void:
+				var current := ctx.engine_ref.get_ref() as RuleEngine
+				if current != null:
+					if on_run_cancelled.is_valid() and current.run_cancelled.is_connected(on_run_cancelled):
+						current.run_cancelled.disconnect(on_run_cancelled)
+					if turn_off.is_valid() and current.all_cancelled.is_connected(turn_off):
+						current.all_cancelled.disconnect(turn_off)
 				var light_node := instance_from_id(node_id) as Node3D
 				if light_node != null and light_node.get_meta(LIGHT_ACTIVATION_META, 0) == activation:
 					light_node.set_meta(LIGHT_ACTIVATION_META, activation + 1)
 					light_node.hide()
 					ctx.bb.write(key, false)
 			var run: Dictionary = c.get("_run", {})
-			var on_run_cancelled := func(cancelled_rule_id: StringName) -> void:
+			on_run_cancelled = func(cancelled_rule_id: StringName) -> void:
 				if cancelled_rule_id == rule_id and run.get("cancelled", false):
 					turn_off.call()
 			if rule != null:
@@ -61,12 +69,6 @@ func light(n: Node3D, on: bool, duration := 0.0, key: StringName = &"lamp_on") -
 			engine.all_cancelled.connect(turn_off, CONNECT_ONE_SHOT)
 			var timeout: Signal = engine.wait_tracked(duration, rule_id, "light off")
 			timeout.connect(func() -> void:
-				var current := ctx.engine_ref.get_ref() as RuleEngine
-				if current != null:
-					if current.run_cancelled.is_connected(on_run_cancelled):
-						current.run_cancelled.disconnect(on_run_cancelled)
-					if current.all_cancelled.is_connected(turn_off):
-						current.all_cancelled.disconnect(turn_off)
 				turn_off.call(), CONNECT_ONE_SHOT)
 	var s := Step.new(f)
 	s.sets = [key]
