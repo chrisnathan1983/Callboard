@@ -10,7 +10,6 @@ signal layout_saved(path: String)
 const STAGES_DIR := "res://stages"
 const EDIT_FIELDS := ["external_calls", "vars", "rules", "groups"]
 const Style := preload("res://addons/callboard/editor/board_style.gd")
-const GUTTER := 12.0
 enum CreateAction { EVENT, RULE, GROUP }
 enum ContextAction { EDIT = 10, DUPLICATE, DELETE }
 
@@ -18,6 +17,7 @@ var view := RuleGraphView.new()
 var blackboard := BlackboardPanel.new()
 var inspector := RuleInspector.new()
 var _history := CallboardHistory.new()
+var _overlay_layout := CallboardOverlayLayout.new()
 var _picker := OptionButton.new()
 var _status := Label.new()
 var _status_note_cursor := 0
@@ -29,6 +29,10 @@ var _selected_group := ""
 var _dirty := false
 var _editable := true
 var _live: Stage
+var _analysis_stage: Stage
+var _analysis_source_key := ""
+var _analysis_debounce := Timer.new()
+var _pending_selection := ""
 var _accum := 0.0
 var _save_button: Button
 var _reload_button: Button
@@ -40,13 +44,12 @@ var _event_name := LineEdit.new()
 var _event_error := Label.new()
 var _blackboard_button: Button
 var _connections_button: Button
+var _connections_ui := CallboardConnections.new()
 var _connections_panel: PanelContainer
-var _connection_scroll := ScrollContainer.new()
-var _connection_rows := VBoxContainer.new()
-var _connection_cards := {}
-var _expanded_connections := {}
-var _delete_connection_dialog := ConfirmationDialog.new()
-var _pending_connection_delete := ""
+var _connection_rows: VBoxContainer = _connections_ui.rows
+var _connection_cards: Dictionary = _connections_ui.cards
+var _expanded_connections: Dictionary = _connections_ui.expanded
+var _delete_connection_dialog: ConfirmationDialog = _connections_ui.delete_dialog
 var _restoring := false
 var _spin_drag_active := false
 var _spin_refresh_pending := false
@@ -57,13 +60,26 @@ var _create_tools: PanelContainer
 var _left_tools: VBoxContainer
 var _blackboard_panel: PanelContainer
 var _settings_window: PanelContainer
-var _create_menu := PopupMenu.new()
-var _create_position := Vector2.ZERO
-var _context_target: Dictionary
+var _context_menu := CallboardContextMenu.new()
+var _create_menu: PopupMenu = _context_menu
+var _create_position: Vector2:
+	get:
+		return _context_menu.create_position
+	set(value):
+		_context_menu.create_position = value
+var _context_target: Dictionary:
+	get:
+		return _context_menu.context_target
+	set(value):
+		_context_menu.context_target = value
 
 func _init() -> void:
 	add_child(view)
 	view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_analysis_debounce.one_shot = true
+	_analysis_debounce.wait_time = 0.075
+	_analysis_debounce.timeout.connect(_flush_debounced_change)
+	add_child(_analysis_debounce)
 	var stage_tools := HBoxContainer.new()
 	_picker.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	_picker.fit_to_longest_item = false
@@ -118,9 +134,9 @@ func _init() -> void:
 				rd["group"] = g
 		_changed(_selected))
 	view.layout_changed.connect(_layout_changed)
-	blackboard.changed.connect(func() -> void: _changed(_selected))
+	blackboard.changed.connect(func() -> void: _schedule_change(_selected))
 	blackboard.numeric_changed.connect(func(spin: SpinBox) -> void: _changed(_selected, spin))
-	inspector.changed.connect(func(id: String) -> void: _changed(id))
+	inspector.changed.connect(_schedule_change)
 	inspector.numeric_changed.connect(_changed)
 	inspector.delete_requested.connect(delete_rule)
 	inspector.duplicate_requested.connect(duplicate_rule)
@@ -139,6 +155,8 @@ func _init() -> void:
 	_settings_window = Style.panel(settings, Style.SURFACE, Vector2(12, 10), true)
 	_settings_window.hide()
 	add_child(_settings_window)
+	_overlay_layout.setup(self, _file_tools, _create_tools, _left_tools, _blackboard_panel,
+		_connections_panel, _connection_rows, _settings_window, blackboard, inspector, view)
 
 	resized.connect(_layout_overlays)
 	_layout_overlays.call_deferred()
@@ -191,46 +209,7 @@ func _panel_launcher(title: String, glyph: String, panel: PanelContainer, button
 	return button
 
 func _layout_overlays() -> void:
-	if _settings_window == null:
-		return
-	for toolbar in [_file_tools, _create_tools]:
-		toolbar.reset_size()
-	_file_tools.position = Vector2(GUTTER, GUTTER)
-	var create_x := (size.x - _create_tools.size.x) * 0.5
-	var top_bottom := GUTTER + _file_tools.size.y
-	var create_y := GUTTER
-	var create_min_x := _file_tools.position.x + _file_tools.size.x + GUTTER
-	var create_max_x := size.x - GUTTER - _create_tools.size.x
-	if create_min_x <= create_max_x:
-		create_x = clampf(create_x, create_min_x, create_max_x)
-	elif create_x < create_min_x:
-		create_y = top_bottom + 6.0
-	_create_tools.position = Vector2(create_x, create_y)
-	if _create_tools.visible:
-		top_bottom = maxf(top_bottom, create_y + _create_tools.size.y)
-
-	var window_y := top_bottom + GUTTER
-	var available_height := maxf(size.y - window_y - 64.0, 32.0)
-	var left_size := _left_tools.get_combined_minimum_size()
-	if _blackboard_panel.visible:
-		left_size.y = minf(available_height, left_size.y + blackboard.rows_height())
-	elif _connections_panel.visible:
-		left_size.y = minf(available_height, left_size.y + _connection_rows.get_combined_minimum_size().y)
-	_left_tools.size = left_size
-	_left_tools.position = Vector2(GUTTER, window_y)
-	var fit_right := size.x - GUTTER * 2.0
-	if _settings_window.visible:
-		var settings_height := minf(inspector.content_height() + 60.0, 590.0)
-		_settings_window.size = Vector2(_settings_window.get_combined_minimum_size().x, minf(settings_height, available_height))
-		_settings_window.position = Vector2(size.x - _settings_window.size.x - GUTTER, window_y)
-		fit_right = _settings_window.position.x - GUTTER
-
-	var fit_left := _left_tools.size.x + GUTTER * 2.0
-	# A narrow workspace can pan beneath the overlays.
-	if fit_right - fit_left < size.x * 0.45:
-		fit_left = GUTTER * 2.0
-		fit_right = size.x - GUTTER * 2.0
-	view.fit_area = Rect2(fit_left, window_y, maxf(fit_right - fit_left, 1.0), maxf(size.y - window_y - 60.0, 1.0))
+	_overlay_layout.layout()
 
 func _button(text: String, cb: Callable, edit_only := true) -> Button:
 	var b := Button.new()
@@ -298,6 +277,7 @@ func _collect_stage_definition_paths(dir_path := STAGES_DIR) -> Array[String]:
 	return paths
 
 func open_script(path: String) -> void:
+	_clear_analysis_stage()
 	_path = path
 	_picker.tooltip_text = path
 	_dirty = false
@@ -314,6 +294,7 @@ func _on_picker(i: int) -> void:
 	open_script(_picker.get_item_metadata(i))
 
 func bind_live(stage: Stage) -> void:
+	_clear_analysis_stage()
 	if _live and is_instance_valid(_live) and _live.rule_fired.is_connected(_on_live_rule_fired):
 		_live.rule_fired.disconnect(_on_live_rule_fired)
 	_live = stage
@@ -338,12 +319,39 @@ func _process(delta: float) -> void:
 		_accum = 0.0
 		blackboard.refresh_live(_live)
 
+func _exit_tree() -> void:
+	_clear_analysis_stage()
+
+func _analyze_data() -> void:
+	_analysis_debounce.stop()
+	_pending_selection = ""
+	var definition: StageDefinition = _data["definition"]
+	var scene_source: String = definition.get_meta("_analysis_scene_source", definition.resource_path)
+	var script_path := definition.stage_script.resource_path if definition.stage_script else ""
+	var source_key := scene_source + "|" + script_path
+	if not _analysis_source_key.is_empty() and _analysis_source_key != source_key:
+		_clear_analysis_stage()
+	_analysis_stage = RuleGraphReader.analyze(_data, _analysis_stage, true)
+	_analysis_source_key = source_key if _analysis_stage != null else ""
+
+func _clear_analysis_stage() -> void:
+	if _analysis_stage != null and is_instance_valid(_analysis_stage):
+		if _analysis_stage.engine:
+			_analysis_stage.engine.cancel_all()
+		if _analysis_stage.get_parent():
+			_analysis_stage.get_parent().remove_child(_analysis_stage)
+		_analysis_stage.free()
+	_analysis_stage = null
+	_analysis_source_key = ""
+
 func _show(data: Dictionary, editable: bool) -> void:
 	if data.has("error"):
 		_show({"rules": [], "groups": [], "vars": [], "external_calls": [], "notes": [data["error"]]}, false)
 		_status.text = data["error"]
 		return
 	_data = data
+	_analysis_debounce.stop()
+	_pending_selection = ""
 	_expanded_connections.clear()
 	_clear_selection()
 	_editable = editable
@@ -438,12 +446,14 @@ func redo() -> void:
 	_restore_edit(_history.redo(_snapshot()))
 
 func _restore_edit(state: Dictionary) -> void:
+	_analysis_debounce.stop()
+	_pending_selection = ""
 	_restoring = true
 	# Release the old inspector controls before swapping in new model dictionaries.
 	inspector.clear()
 	for field in EDIT_FIELDS:
 		_data[field] = state[field].duplicate(true)
-	RuleGraphReader.analyze(_data)
+	_analyze_data()
 	blackboard.show_data(_data, true, false)
 	view.show_data(_data)
 	if not _find_rule(_selected).is_empty():
@@ -497,28 +507,9 @@ func _setup_create_menu() -> void:
 func _open_create_menu(pointer: Vector2) -> void:
 	if not _editable:
 		return
-	_create_position = (pointer + view.scroll_offset) / view.zoom
-	_context_target = view.context_target_at(pointer)
-	_create_menu.clear()
-	if _context_target.is_empty():
-		_create_menu.add_item("New Call", CreateAction.EVENT)
-		_create_menu.set_item_disabled(0, _event_button.disabled)
-		_create_menu.add_item("New rule", CreateAction.RULE)
-		_create_menu.add_item("New group", CreateAction.GROUP)
-	else:
-		var kind: String = _context_target["kind"]
-		_create_menu.add_item("Manage Call" if kind == "event" else "Edit " + kind, ContextAction.EDIT)
-		if kind == "rule":
-			_create_menu.add_item("Duplicate rule", ContextAction.DUPLICATE)
-		_create_menu.add_separator()
-		_create_menu.add_item("Delete " + kind, ContextAction.DELETE)
-		if kind == "event":
-			var error := RuleConnections.edit_error(_data, _context_target["id"])
-			var index := _create_menu.get_item_index(ContextAction.DELETE)
-			_create_menu.set_item_disabled(index, not error.is_empty())
-			_create_menu.set_item_tooltip(index, error)
-	_create_menu.position = Vector2i(view.get_screen_transform() * pointer)
-	_create_menu.popup()
+	_context_menu.open_for(_data, view, pointer, _event_button.disabled,
+		CreateAction.EVENT, CreateAction.RULE, CreateAction.GROUP,
+		ContextAction.EDIT, ContextAction.DUPLICATE, ContextAction.DELETE)
 
 func _on_context_action(action: int) -> void:
 	if not _editable:
@@ -598,153 +589,19 @@ func add_call_name(event_id: String) -> bool:
 	return true
 
 func _setup_connections_panel() -> void:
-	var fields := VBoxContainer.new()
-	fields.custom_minimum_size.x = Style.LIST_WIDTH
-	fields.add_theme_constant_override("separation", Style.ENTRY_GAP)
-	var header := HBoxContainer.new()
-	var title := Style.label("Calls & relays", Style.TEXT, 16)
-	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	header.add_child(title)
-	header.add_child(_button("+ Call", _open_event_dialog))
-	fields.add_child(header)
-	_connection_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	_connection_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_connection_rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_connection_rows.add_theme_constant_override("separation", Style.ENTRY_GAP)
-	_connection_rows.minimum_size_changed.connect(_layout_overlays, CONNECT_DEFERRED)
-	_connection_scroll.add_child(_connection_rows)
-	fields.add_child(_connection_scroll)
-	_connections_panel = Style.panel(fields, Style.SURFACE, Vector2(12, 10), true)
-
-	_delete_connection_dialog.title = "Delete Call or relay"
-	_delete_connection_dialog.ok_button_text = "Delete"
-	_delete_connection_dialog.confirmed.connect(_delete_selected_connection)
-	add_child(_delete_connection_dialog)
+	_connections_panel = _connections_ui.setup(self, _button("+ Call", _open_event_dialog),
+		_layout_overlays, rename_connection, delete_connection, _show_connection_error)
 
 func _refresh_connections(preferred := "") -> void:
-	for card in _connection_rows.get_children():
-		_connection_rows.remove_child(card)
-		card.queue_free()
-	_connection_cards.clear()
-	var ids := RuleConnections.ids(_data)
-	for id in _expanded_connections.keys():
-		if not ids.has(id):
-			_expanded_connections.erase(id)
-	if ids.has(preferred):
-		_expanded_connections[preferred] = true
-	for id in ids:
-		var card := _make_connection_card(id)
-		_connection_cards[id] = card
-		_connection_rows.add_child(card)
-	if ids.is_empty():
-		_connection_rows.add_child(Style.label("No Calls or relays.", Style.MUTED, 13))
-	if _connection_cards.has(preferred):
-		_reveal_connection.call_deferred(preferred)
-
-func _reveal_connection(id: String) -> void:
-	var card: Control = _connection_cards.get(id)
-	if card != null and _connections_panel.is_visible_in_tree():
-		_connection_scroll.ensure_control_visible(card)
-
-func _make_connection_card(id: String) -> PanelContainer:
-	var card := VBoxContainer.new()
-	card.add_theme_constant_override("separation", 6)
-	var is_relay := id.begins_with(RuleConnections.RELAY_PREFIX)
-	var edit_error := RuleConnections.edit_error(_data, id)
-	var name_edit := LineEdit.new()
-	name_edit.name = "ConnectionName"
-	name_edit.text = id.trim_prefix(RuleConnections.RELAY_PREFIX)
-	name_edit.tooltip_text = id
-	name_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	name_edit.editable = _editable and edit_error.is_empty() and id != "arrive"
-	var header := HBoxContainer.new()
-	header.add_child(name_edit)
-	var delete := _button("✕", func() -> void: _confirm_connection_delete(id), false)
-	delete.name = "DeleteConnection"
-	delete.disabled = not _editable or not edit_error.is_empty()
-	delete.tooltip_text = "Delete %s" % id if edit_error.is_empty() else edit_error
-	header.add_child(delete)
-	card.add_child(header)
-
-	var actions := HBoxContainer.new()
-	var kind := Style.label("Relay" if is_relay else "Call", Style.RELAY if is_relay else Style.EVENT, 13)
-	kind.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	actions.add_child(kind)
-	var affected := RuleConnections.impact(_data, id)
-	var details_button := Button.new()
-	details_button.text = "%d %s" % [affected.size(), "use" if affected.size() == 1 else "uses"]
-	details_button.tooltip_text = "Show or hide affected rules"
-	details_button.toggle_mode = true
-	details_button.button_pressed = _expanded_connections.has(id)
-	actions.add_child(details_button)
-	var rename := Button.new()
-	rename.text = "Rename"
-	rename.disabled = true
-	rename.visible = name_edit.editable
-	actions.add_child(rename)
-	card.add_child(actions)
-
-	var details_text := "\n".join(affected) if not affected.is_empty() else "No rule connections."
-	if id == "arrive":
-		details_text += "\n\nThe Stage lifecycle fires this built-in Call."
-	elif _data["external_calls"].has(id):
-		details_text += "\n\nUpdate any gameplay code or scene triggers that fire this ID."
-	var details := Style.label(details_text, Style.TEXT, 13)
-	details.name = "ConnectionDetails"
-	details.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	details.visible = details_button.button_pressed
-	details_button.toggled.connect(func(open: bool) -> void:
-		details.visible = open
-		if open:
-			_expanded_connections[id] = true
-		else:
-			_expanded_connections.erase(id))
-	card.add_child(details)
-
-	var error := Style.label("", Style.WARNING, 13)
-	error.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	error.hide()
-	card.add_child(error)
-	var commit := func() -> void:
-		if rename.disabled:
-			return
-		var new_name := name_edit.text.strip_edges()
-		var failure := rename_connection(id, new_name)
-		if failure.is_empty():
-			var new_id := RuleConnections.RELAY_PREFIX + new_name if is_relay else new_name
-			_refresh_connections(new_id)
-		else:
-			error.text = failure
-			error.show()
-	name_edit.text_changed.connect(func(value: String) -> void:
-		rename.disabled = value.strip_edges() == id.trim_prefix(RuleConnections.RELAY_PREFIX)
-		error.hide())
-	name_edit.text_submitted.connect(func(_value: String) -> void: commit.call())
-	rename.pressed.connect(commit)
-	return Style.entry(card)
+	_connections_ui.refresh(_data, _editable, preferred)
 
 func _confirm_connection_delete(id: String) -> void:
-	if not _editable or not RuleConnections.edit_error(_data, id).is_empty():
-		return
-	_pending_connection_delete = id
-	var affected := RuleConnections.impact(_data, id)
-	var prompt := "Delete '%s'?" % id
-	if not affected.is_empty():
-		prompt += "\n\nThese connections will be removed. Listed steps will be deleted.\n"
-		prompt += "\n".join(affected.slice(0, 6))
-		if affected.size() > 6:
-			prompt += "\n…and %d more. See the full list in Calls and Relays." % (affected.size() - 6)
-	_delete_connection_dialog.dialog_text = prompt
-	_delete_connection_dialog.popup_centered()
+	_connections_ui.confirm_delete(_data, _editable, id)
 
-func _delete_selected_connection() -> void:
-	var error := delete_connection(_pending_connection_delete)
-	_pending_connection_delete = ""
-	if not error.is_empty():
-		_status.text = error
-		_status.tooltip_text = error
-		Style.tint(_status, Style.WARNING)
-
+func _show_connection_error(message: String) -> void:
+	_status.text = message
+	_status.tooltip_text = message
+	Style.tint(_status, Style.WARNING)
 func rename_connection(id: String, new_name: String) -> String:
 	if not _editable:
 		return "The graph is read-only."
@@ -779,6 +636,8 @@ func _sync_layout() -> void:
 			g["rect"] = Rect2(rect.position.round(), rect.size.round())
 
 func _changed(select_id: String, spin: SpinBox = null) -> void:
+	_analysis_debounce.stop()
+	_pending_selection = ""
 	if not _editable or _restoring:
 		return
 	_sync_layout()
@@ -786,7 +645,7 @@ func _changed(select_id: String, spin: SpinBox = null) -> void:
 		_record_edit(spin)
 		_spin_refresh_pending = true
 		return
-	RuleGraphReader.analyze(_data)
+	_analyze_data()
 	view.show_data(_data)
 	_selected = select_id
 	if _find_rule(select_id).is_empty():
@@ -805,6 +664,22 @@ func _changed(select_id: String, spin: SpinBox = null) -> void:
 		view.select_rule(_selected)
 		_selecting_after_edit = false
 	_record_edit(spin)
+
+func _schedule_change(select_id: String) -> void:
+	if not _editable or _restoring:
+		return
+	if not Engine.is_editor_hint():
+		_changed(select_id)
+		return
+	_sync_layout()
+	_record_edit()
+	_pending_selection = select_id
+	_analysis_debounce.start()
+
+func _flush_debounced_change() -> void:
+	var select_id := _pending_selection
+	_pending_selection = ""
+	_changed(select_id)
 
 func _find_rule(id: String) -> Dictionary:
 	for rd in _data["rules"]:
@@ -923,7 +798,7 @@ func save() -> void:
 	if not _editable or _path == "":
 		return
 	_sync_layout()
-	RuleGraphReader.analyze(_data)
+	_analyze_data()
 	if not _data["compiles"]:
 		_status.text = "Not saved: check invalid steps or script errors."
 		Style.tint(_status, Style.WARNING)

@@ -57,6 +57,11 @@ func _initialize() -> void:
 	ok = _check("new_step fills required args with a compatible prop", nr["steps"][1]["args"] == ["guard"]) and ok
 	board._changed("new_rule")
 	ok = _check("add steps: clean again", d["notes"].is_empty() and d["compiles"]) and ok
+	var retained_stage: Stage = board._analysis_stage
+	var retained_prop_count := retained_stage.get_child_count()
+	board._changed("new_rule")
+	ok = _check("analysis reuses the built scene props between edits",
+		board._analysis_stage == retained_stage and retained_stage.get_child_count() == retained_prop_count) and ok
 
 	board.connect_wire({"rule": "z1_bark", "port": 0}, "new_rule")
 	ok = _check("wire: names the unnamed port and sets trigger", _rule(d, "z1_bark")["emit"] == "z1_bark_done" and nr["trigger"] == "relay:z1_bark_done") and ok

@@ -20,20 +20,39 @@ static func read(stage: Stage) -> Dictionary:
 	return data
 
 ## Builds and validates a draft stage, then copies step metadata back onto the model.
-static func analyze(data: Dictionary) -> void:
+## A retained instance can be passed by an editor session to avoid rebuilding scene props.
+static func analyze(data: Dictionary, cached_stage: Stage = null, retain_instance := false) -> Stage:
 	var draft := make_definition(data)
 	var tree := Engine.get_main_loop() as SceneTree
-	var instance := draft.instantiate_for_analysis(tree.root) if tree else draft.instantiate()
+	var instance: Stage
+	var reused := false
+	if cached_stage != null and is_instance_valid(cached_stage):
+		if cached_stage.can_reuse_analysis_props():
+			instance = cached_stage
+			if tree and instance.get_parent() != tree.root:
+				if instance.get_parent():
+					instance.get_parent().remove_child(instance)
+				tree.root.add_child(instance)
+			reused = instance.rebuild_for_analysis(draft)
+		if not reused:
+			if cached_stage.get_parent():
+				cached_stage.get_parent().remove_child(cached_stage)
+			cached_stage.free()
+	if not reused:
+		instance = draft.instantiate_for_analysis(tree.root) if tree else draft.instantiate()
 	if instance == null:
 		_read_results(data, null, false, ["Stage Script must extend Stage."])
-		return
+		return null
 	if instance.bb == null:
 		instance.build()
 	_read_results(data, instance, instance.graph_errors.is_empty(), instance.graph_errors + instance.check())
 	instance.engine.rules.clear()
 	if instance.get_parent():
 		instance.get_parent().remove_child(instance)
+	if retain_instance and instance.can_reuse_analysis_props():
+		return instance
 	instance.free()
+	return null
 
 static func make_definition(data: Dictionary) -> StageDefinition:
 	var original: StageDefinition = data["definition"]

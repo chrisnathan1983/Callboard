@@ -26,17 +26,41 @@ func _ready() -> void:
 
 ## Also used on an unparented instance by the Callboard.
 func build() -> void:
-	bb = Blackboard.new(saved_vars)
-	bb.changed.connect(var_changed.emit)
-	engine = RuleEngine.new(bb, fired, _wait)
-	engine.rule_fired.connect(rule_fired.emit)
-	verbs = _make_verbs(StepContext.new(bb, engine, self, scored.emit))
+	_create_runtime_services()
 	_build_props()
 	if definition:
 		definition.apply_blackboard(self)
 	_build_blackboard()
 	if definition:
 		graph_errors = definition.apply_graph(self)
+
+## Override only when `_build_props()` is independent of authored graph and Blackboard
+## data, and the props remain valid across repeated analysis passes.
+func can_reuse_analysis_props() -> bool:
+	return false
+
+## Reapply an authored draft to a retained editor-analysis scene. Props are built once;
+## Blackboard services and the graph are recreated for each validation pass.
+func rebuild_for_analysis(draft: StageDefinition) -> bool:
+	if not can_reuse_analysis_props():
+		return false
+	if engine:
+		engine.cancel_all()
+	saved_vars.clear()
+	fired.clear()
+	definition = draft
+	_create_runtime_services()
+	definition.apply_blackboard(self)
+	_build_blackboard()
+	graph_errors = definition.apply_graph(self)
+	return true
+
+func _create_runtime_services() -> void:
+	bb = Blackboard.new(saved_vars)
+	bb.changed.connect(var_changed.emit)
+	engine = RuleEngine.new(bb, fired, _wait)
+	engine.rule_fired.connect(rule_fired.emit)
+	verbs = _make_verbs(StepContext.new(bb, engine, self, scored.emit))
 
 func _make_verbs(context: StepContext) -> CoreVerbs:
 	return StagingVerbs.new(context)

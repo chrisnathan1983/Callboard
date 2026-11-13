@@ -19,11 +19,11 @@ Priorities: **P1** correctness or things that block other work, **P2** worthwhil
 - [x] **P1: Replace dictionaries with typed resources.** Authored rules, steps, variables, and groups now serialize as `RuleData`, `StepData`, `VariableData`, and `GroupData`. `_migrate()` converts legacy dictionaries and advances `format_version` to 3; Callboard history continues to snapshot its edit dictionaries.
 - [x] **P2: Break the circular layering.** Runtime catalog and expression helpers now live in `core/`; authoring helpers remain in `model/` and `editor/`. The demo HUD uses a late-bound debug overlay, and the export plugin strips editor/model/plugin files from release builds.
 - [x] **P2: Make the F1 live overlay debug-only.** The HUD loads the live Callboard only in debug builds; the export filter excludes editor code from release exports.
-- [ ] **P2: Split `Callboard` (~900 lines).**
+- [x] **P2: Split `Callboard` (~900 lines).**
   - [x] Extract undo/redo snapshot management into `CallboardHistory`.
-  - [ ] Extract the connections panel.
-  - [ ] Extract the context menu.
-  - [ ] Extract overlay layout.
+  - [x] Extract the Calls & relays panel UI into `CallboardConnections`; edits still route through Callboard.
+  - [x] Extract the context menu builder into `CallboardContextMenu`.
+  - [x] Extract overlay positioning into `CallboardOverlayLayout`.
 
 ## Runtime behavior
 
@@ -47,7 +47,10 @@ Priorities: **P1** correctness or things that block other work, **P2** worthwhil
 
 ## Editor experience
 
-- [ ] **P2: Debounce `analyze()` and update the graph incrementally.** Every edit instantiates the whole stage (including `_build_props()`) and `show_data()` recreates every graph node. Fine now, but it will lag with heavier props. Cache the built stage between edits where possible.
+- [ ] **P2: Debounce `analyze()` and update the graph incrementally.** The graph still recreates every node after analysis; this may lag with larger authored stages.
+  - [x] Reuse Stage 01's built scene props across edits; Blackboard services and rules are rebuilt for each analysis. Other stages opt in only when their props are safe to retain.
+  - [x] Debounce Blackboard and inspector text edits in editor mode; multiple changes within 75 ms share an analysis and graph refresh.
+  - [ ] Update graph nodes incrementally instead of rebuilding the whole view.
 - [x] **P2: Avoid rebuilding the graph during a numeric drag.** Numeric changes record undo snapshots during the gesture; analysis and graph refresh happen on release.
 - [x] **P2: Cache regexes used by compilation and renaming.** The step string, literal, and connection-name patterns now compile once per script class.
 - [ ] **P2: Live debugging tools.** In live mode, add a "fire this call" button, a rule-fired history with step-level trace, and a list of pending delays and loops.
