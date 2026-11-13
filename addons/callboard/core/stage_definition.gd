@@ -3,6 +3,7 @@ class_name StageDefinition extends Resource
 ## Authored data shared by the runtime and the Callboard.
 
 const CURRENT_FORMAT_VERSION := 3
+const ANALYSIS_SCENE_SOURCE_META := &"_analysis_scene_source"
 static var _string_token_pattern: RegEx
 
 @export var stage_script: GDScript
@@ -80,8 +81,12 @@ func instantiate() -> Stage:
 func analysis_scene_path() -> String:
 	if not preview_scene_path.is_empty():
 		return preview_scene_path
-	var source_path: String = get_meta("_analysis_scene_source", resource_path)
+	var source_path := analysis_source_path()
 	return source_path.get_basename() + ".tscn" if not source_path.is_empty() else ""
+
+func analysis_source_path() -> String:
+	# Saved definitions use their current path even if an older save included draft metadata.
+	return resource_path if not resource_path.is_empty() else get_meta(ANALYSIS_SCENE_SOURCE_META, "")
 
 ## Build a validation instance with scene-assigned props and @onready references.
 func instantiate_for_analysis(parent: Node) -> Stage:

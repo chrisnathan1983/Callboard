@@ -103,7 +103,6 @@ func _on_trace(entry: Dictionary) -> void:
 	while _trace_buffer.size() > MAX_TRACE_ROWS:
 		_trace_buffer.pop_front()
 	if panel == null or not panel.is_visible_in_tree():
-		_refresh_active()
 		return
 	_render_trace(entry)
 	_refresh_active()
@@ -126,7 +125,7 @@ func _render_trace(entry: Dictionary) -> void:
 func _on_visibility_changed() -> void:
 	if panel != null and panel.is_visible_in_tree():
 		_flush_trace_buffer()
-		_refresh_active()
+		refresh_runtime()
 
 func _flush_trace_buffer() -> void:
 	_clear_rows(_trace_rows)
@@ -141,6 +140,8 @@ func _scroll_content_to_end() -> void:
 		_content_scroll.scroll_vertical = int(_content_scroll.get_v_scroll_bar().max_value)
 
 func _on_pending_changed(entries: Array) -> void:
+	if panel == null or not panel.is_visible_in_tree():
+		return
 	_clear_rows(_pending_rows)
 	if entries.is_empty():
 		_add_empty(_pending_rows, "Nothing pending.")

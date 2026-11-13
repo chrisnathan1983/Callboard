@@ -130,8 +130,8 @@ func _build_rule() -> void:
 	one_shot.button_pressed = r[AuthoredData.FIELD_ONE_SHOT]
 	one_shot.toggled.connect(func(on: bool) -> void:
 		r[AuthoredData.FIELD_ONE_SHOT] = on
-		if on and r.get("reentry", Rule.ReentryPolicy.IGNORE) != Rule.ReentryPolicy.IGNORE:
-			r["reentry"] = Rule.ReentryPolicy.IGNORE
+		if on and r.get(AuthoredData.FIELD_REENTRY, Rule.ReentryPolicy.IGNORE) != Rule.ReentryPolicy.IGNORE:
+			r[AuthoredData.FIELD_REENTRY] = Rule.ReentryPolicy.IGNORE
 			policy.select(policy.get_item_index(Rule.ReentryPolicy.IGNORE))
 		for incompatible_policy in [Rule.ReentryPolicy.RESTART, Rule.ReentryPolicy.QUEUE]:
 			policy.get_popup().set_item_disabled(
@@ -152,23 +152,23 @@ func _build_rule() -> void:
 	menu.set_item_tooltip(2, "Run pending triggers in order once the active run ends. Unavailable for one-shot rules.")
 	for incompatible_policy in [Rule.ReentryPolicy.RESTART, Rule.ReentryPolicy.QUEUE]:
 		menu.set_item_disabled(policy.get_item_index(incompatible_policy), bool(r.get(AuthoredData.FIELD_ONE_SHOT, false)))
-	if bool(r.get(AuthoredData.FIELD_ONE_SHOT, false)) and r.get("reentry", Rule.ReentryPolicy.IGNORE) != Rule.ReentryPolicy.IGNORE:
-		r["reentry"] = Rule.ReentryPolicy.IGNORE
-	policy.select(policy.get_item_index(r.get("reentry", Rule.ReentryPolicy.IGNORE)))
+	if bool(r.get(AuthoredData.FIELD_ONE_SHOT, false)) and r.get(AuthoredData.FIELD_REENTRY, Rule.ReentryPolicy.IGNORE) != Rule.ReentryPolicy.IGNORE:
+		r[AuthoredData.FIELD_REENTRY] = Rule.ReentryPolicy.IGNORE
+	policy.select(policy.get_item_index(r.get(AuthoredData.FIELD_REENTRY, Rule.ReentryPolicy.IGNORE)))
 	policy.item_selected.connect(func(i: int) -> void:
 		if bool(r.get(AuthoredData.FIELD_ONE_SHOT, false)) and policy.get_item_id(i) != Rule.ReentryPolicy.IGNORE:
 			policy.select(policy.get_item_index(Rule.ReentryPolicy.IGNORE))
 			return
-		r["reentry"] = policy.get_item_id(i)
+		r[AuthoredData.FIELD_REENTRY] = policy.get_item_id(i)
 		changed.emit(r["id"]))
 	reentry.add_child(policy)
 	_box.add_child(reentry)
 	var overlap := CheckBox.new()
 	overlap.text = "Allow simultaneous rules"
 	overlap.tooltip_text = "Suppress shared-trigger overlap warnings for this rule. Use when concurrent runs are intentional."
-	overlap.button_pressed = bool(r.get("allow_overlap", false))
+	overlap.button_pressed = bool(r.get(AuthoredData.FIELD_ALLOW_OVERLAP, false))
 	overlap.toggled.connect(func(on: bool) -> void:
-		r["allow_overlap"] = on
+		r[AuthoredData.FIELD_ALLOW_OVERLAP] = on
 		changed.emit(r["id"]))
 	_box.add_child(overlap)
 
@@ -265,7 +265,7 @@ func _set_id(t: String) -> void:
 	if t == "" or AuthoredData.rule_ids(_data).has(t) or not t.is_valid_identifier():
 		_rebuild_later()   # reject: restore the old text
 		return
-	_rule["state_key"] = _rule.get("state_key", _rule["id"])
+	_rule[AuthoredData.FIELD_STATE_KEY] = _rule.get(AuthoredData.FIELD_STATE_KEY, _rule["id"])
 	_rule["id"] = t
 	changed.emit(t)
 

@@ -330,7 +330,7 @@ func bind_live(stage: Stage) -> void:
 	_live_debug_ui.bind_stage(stage)
 	_selected = ""
 	_dirty = false
-	_show(RuleGraphReader.read(stage), false)
+	_show(RuleGraphReader.read(stage), false, true)
 
 func _on_live_rule_fired(rule_id: StringName, event: StringName) -> void:
 	view.pulse(String(rule_id))
@@ -374,9 +374,10 @@ func _clear_analysis_stage() -> void:
 	_analysis_stage = null
 	_analysis_source_key = ""
 
-func _show(data: Dictionary, editable: bool) -> void:
+func _show(data: Dictionary, editable: bool, live := false) -> void:
 	if data.has("error"):
-		_show({"rules": [], "groups": [], "vars": [], "external_calls": [], "notes": [data["error"]]}, false)
+		_show({"rules": [], "groups": [], "vars": [], "external_calls": [],
+			"external_vars": [], "notes": [data["error"]]}, false)
 		_status.text = data["error"]
 		return
 	_data = data
@@ -389,16 +390,13 @@ func _show(data: Dictionary, editable: bool) -> void:
 		b.visible = editable
 	_create_tools.visible = editable
 	_connections_button.visible = true
-	_debug_button.visible = not editable
 	if not _editable:
 		_connections_button.button_pressed = false
-		_debug_button.set_pressed_no_signal(true)
-		_live_debug_panel.show()
-	else:
-		_debug_button.set_pressed_no_signal(false)
-		_live_debug_panel.hide()
+	_debug_button.visible = live
+	_debug_button.set_pressed_no_signal(live)
+	_live_debug_panel.visible = live
 	view.set_editable(_editable)
-	blackboard.show_data(data, _editable, not editable)
+	blackboard.show_data(data, _editable, live)
 	view.show_data(data)
 	_layout_overlays()
 	view.request_fit()
@@ -735,7 +733,7 @@ func add_rule(at := Vector2.INF) -> Dictionary:
 	var id := AuthoredData.unique_name(AuthoredData.rule_ids(_data), "new_rule")
 	var trigger: String = _data["external_calls"][0] if not _data["external_calls"].is_empty() else "arrive"
 	var rd := AuthoredData.new_rule(id, trigger)
-	rd["state_key"] = AuthoredData.new_state_key()
+	rd[AuthoredData.FIELD_STATE_KEY] = AuthoredData.new_state_key()
 	rd["pos"] = (view.view_center() - Vector2(125, 60) if at == Vector2.INF else at).round()
 	rd[AuthoredData.FIELD_HAS_POS] = true
 	_data["rules"].append(rd)
@@ -752,7 +750,7 @@ func duplicate_rule(id: String) -> void:
 		return
 	var rd: Dictionary = src.duplicate(true)
 	rd["id"] = AuthoredData.unique_name(AuthoredData.rule_ids(_data), id + "_copy")
-	rd["state_key"] = AuthoredData.new_state_key()
+	rd[AuthoredData.FIELD_STATE_KEY] = AuthoredData.new_state_key()
 	rd["pos"] = src["pos"] + Vector2(30, 30)
 	rd[AuthoredData.FIELD_HAS_POS] = true
 	_data["rules"].append(rd)
@@ -846,7 +844,7 @@ func save() -> void:
 		return
 	var draft := RuleGraphReader.make_definition(_data)
 	var previous_uid := ResourceLoader.get_resource_uid(_path)
-	draft._migrate()
+	draft.remove_meta(StageDefinition.ANALYSIS_SCENE_SOURCE_META)
 	var error := ResourceSaver.save(draft, _path)
 	if error != OK:
 		_status.text = "Save failed (error %d)" % error

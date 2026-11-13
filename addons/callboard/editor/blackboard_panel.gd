@@ -175,7 +175,7 @@ func _on_add(index: int) -> void:
 	var keys: Array = _data["vars"].map(func(x: Dictionary) -> String: return x["key"])
 	var value: Variant = TYPES[type_name]
 	var variable := AuthoredData.new_variable(AuthoredData.unique_name(keys, "new_var"), "local", value)
-	variable["state_key"] = AuthoredData.new_state_key()
+	variable[AuthoredData.FIELD_STATE_KEY] = AuthoredData.new_state_key()
 	_data["vars"].append(variable)
 	_rebuild()
 	changed.emit()

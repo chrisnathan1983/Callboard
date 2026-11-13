@@ -33,6 +33,15 @@ func _initialize() -> void:
 	bb.write(&"missing", true)
 	ok = _check("undeclared Blackboard writes are rejected in every build",
 		not bb.local.has(&"missing") and undeclared_changes == 0) and ok
+	var speed_changes: Array = []
+	bb.changed.connect(func(key: StringName, value: Variant) -> void:
+		if key == &"speed":
+			speed_changes.append(value))
+	bb.define(&"speed", &"saved", 0.0)
+	bb.write(&"speed", 1)
+	ok = _check("integer writes to float Blackboard keys store and emit a float",
+		typeof(bb.saved[&"speed"]) == TYPE_FLOAT and bb.saved[&"speed"] == 1.0
+		and speed_changes.size() == 1 and typeof(speed_changes[0]) == TYPE_FLOAT) and ok
 
 	var cycle_a := Rule.new(&"loop_a", &"relay:a")
 	var cycle_step := Step.new()

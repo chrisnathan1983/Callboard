@@ -5,11 +5,14 @@ class_name AuthoredData extends RefCounted
 const GUARDS := ["requires", "forbids", "cancel_if"]
 const FIELD_ONE_SHOT := "one_shot"
 const FIELD_HAS_POS := "has_pos"
+const FIELD_STATE_KEY := "state_key"
+const FIELD_REENTRY := "reentry"
+const FIELD_ALLOW_OVERLAP := "allow_overlap"
 
 static func new_rule(id: String, trigger: String) -> Dictionary:
 	return {
 		"id": id, "trigger": trigger, "requires": [], "forbids": [], "cancel_if": [],
-		FIELD_ONE_SHOT: false, "reentry": Rule.ReentryPolicy.IGNORE, "emit": "", "steps": [],
+		FIELD_ONE_SHOT: false, FIELD_REENTRY: Rule.ReentryPolicy.IGNORE, "emit": "", "steps": [],
 		"group": "", "pos": Vector2.ZERO, FIELD_HAS_POS: false,
 	}
 
@@ -41,7 +44,7 @@ static func new_state_key() -> String:
 static func rename_key(data: Dictionary, old: String, new_key: String) -> void:
 	for v in data["vars"]:
 		if v["key"] == old:
-			v["state_key"] = v.get("state_key", old)
+			v[FIELD_STATE_KEY] = v.get(FIELD_STATE_KEY, old)
 			var aliases: Array = v.get("aliases", [])
 			if not aliases.has(old):
 				aliases.append(old)

@@ -37,6 +37,8 @@ func _initialize() -> void:
 		changes == [[&"guard_calmed", true]] and stage.saved_vars[&"guard_calmed"]) and ok
 	ok = (await _test_player_and_bump(stage, fired)) and ok
 	stage.deactivate()
+	# Let the cancelled 3.5-second standoff loop unwind before freeing the Stage.
+	await create_timer(3.5).timeout
 	stage.queue_free()
 	await process_frame
 	ok = (await _test_game_scene()) and ok
@@ -130,6 +132,9 @@ func _test_staging_verbs(stage: Stage) -> bool:
 	await verbs.flash(mesh).fn.call({})
 	ok = _check("a later flash returns to the original material color",
 		material.albedo_color.is_equal_approx(base)) and ok
+	mesh.position.y = 2.0
+	await verbs.jump(mesh).fn.call({})
+	ok = _check("a later jump returns to the mesh's new height", is_equal_approx(mesh.position.y, 2.0)) and ok
 	stage.engine.rules.erase(flash_rule)
 	stage.engine.rules.erase(jump_rule)
 	verbs.say(mesh, "First line", 10.0).fn.call({})
@@ -152,6 +157,8 @@ func _test_game_scene() -> bool:
 	await process_frame
 	var ok := _check("the game manager updates the HUD after scoring",
 		game.score == 25 and hud.hud.text.begins_with("Score: 25"))
+	game.stage.deactivate()
+	await create_timer(3.5).timeout
 	game.queue_free()
 	await process_frame
 	return ok

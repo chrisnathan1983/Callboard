@@ -101,7 +101,8 @@ func move_to(n: Node3D, dest: Node3D, offset := Vector3.ZERO, duration := 0.7) -
 	var f := func(_c: Dictionary) -> Signal:
 		_kill_node_tween(n, POSITION_TWEEN_META)
 		var target_global := dest.global_position + offset
-		var target_local: Vector3 = target_global if n.get_parent() == null else n.get_parent().to_local(target_global)
+		var parent := n.get_parent_node_3d()
+		var target_local := target_global if parent == null or n.top_level else parent.to_local(target_global)
 		n.set_meta(BASE_Y_META, target_local.y)
 		var t := host.create_tween()
 		n.set_meta(POSITION_TWEEN_META, t)
@@ -136,10 +137,12 @@ func jump(m: MeshInstance3D) -> Step:
 		var set_color := _color_setter(m, material, color_tween)
 		color_tween.tween_method(set_color, base, tint, 0.08)
 		color_tween.tween_method(set_color, tint, base, 0.32)
+		var previous: Tween = m.get_meta(POSITION_TWEEN_META) if m.has_meta(POSITION_TWEEN_META) else null
+		var y := m.position.y
+		if previous and previous.is_running() and m.has_meta(BASE_Y_META):
+			y = float(m.get_meta(BASE_Y_META))
 		_kill_node_tween(m, POSITION_TWEEN_META)
-		if not m.has_meta(BASE_Y_META):
-			m.set_meta(BASE_Y_META, m.position.y)
-		var y := float(m.get_meta(BASE_Y_META))
+		m.set_meta(BASE_Y_META, y)
 		var t := host.create_tween()
 		m.set_meta(POSITION_TWEEN_META, t)
 		t.tween_property(m, "position:y", y + 0.6, 0.15)

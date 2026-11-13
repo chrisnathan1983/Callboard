@@ -39,11 +39,11 @@ Call `load_stage()` from a parent already in the scene tree. Keep a pair of dict
 | `deactivate() -> void` | Cancels the current engine runs and clears pending work from diagnostics. Stage exit also cancels runs. |
 | `fire(event: StringName, ctx := {}) -> void` | Dispatches an event and optional payload. Awaiting the rules is the engine's responsibility. Custom steps can read payload values from their `Dictionary` argument. |
 | `get_var(key: StringName) -> Variant` | Reads the resolved Blackboard value. An unknown key returns `null`. |
-| `write_var(key: StringName, value: Variant) -> void` | Writes a declared key using its exact Variant type. |
+| `write_var(key: StringName, value: Variant) -> void` | Writes a declared key using its Variant type. Integer inputs to float keys are converted to floats. |
 | `is_set(key: StringName) -> bool` | Returns the value's truthiness. |
 | `define_local(key, default_val = false, state_key = &"")` | Defines a key on the runtime Blackboard. Its initial value is rebuilt on each Stage load. |
 | `define_saved(key, default_val = false, state_key = &"")` | Defines a key backed by `saved_vars`. The optional stable key selects the entry in the save dictionary. |
-| `has_fired(rule_id: StringName) -> bool` | Checks whether a rule has a one-shot latch. |
+| `has_fired(rule_id: StringName) -> bool` | Checks whether a rule has a one-shot latch. Pass the current rule ID after a rename. |
 | `fire_relay_once(relay, latch, source_id, source_event) -> bool` | Uses a declared Boolean Blackboard key as a latch. If it is false, writes true, emits `rule_fired(source_id, source_event)`, then dispatches `relay:<relay>`. Returns false for an empty relay, missing latch, or already truthy latch. Pass the bare relay name. |
 | `check() -> Array[String]` | Runs the rule validator on the built Stage. |
 
@@ -87,7 +87,7 @@ Step arguments and delays are evaluated at graph compilation using Godot's [Expr
 | Method | Behavior |
 | --- | --- |
 | `define(key, scope, default, state_key = &"")` | Uses the default value's Variant type as the schema. Scope is `&"local"` or `&"saved"`. |
-| `get_var(key)`, `write(key, value)` | Read or write a declared value. Writes to undeclared keys produce an error. Type mismatches warn and discard the write. Saved values with an outdated type revert to the declared default during setup. |
+| `get_var(key)`, `write(key, value)` | Read or write a declared value. Writes to undeclared keys produce an error. Integer writes to float keys are converted. Other type mismatches warn and discard the write. Saved values with an outdated type revert to the declared default during setup. |
 | `has(key)`, `is_set(key)` | Test whether a key is declared or whether its value is truthy. |
 | `alias(old_key, new_key)`, `resolve_key(key)` | Support renamed keys. Callboard records aliases when it renames authored variables. |
 

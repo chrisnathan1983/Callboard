@@ -101,7 +101,7 @@ func _make_card(data: Dictionary, editable: bool, id: String) -> PanelContainer:
 	name_edit.editable = editable and edit_error.is_empty() and id != "arrive"
 	var header := HBoxContainer.new()
 	header.add_child(name_edit)
-	var delete := _button("?", func() -> void: confirm_delete(data, editable, id))
+	var delete := _button("✕", func() -> void: confirm_delete(data, editable, id))
 	delete.name = "DeleteConnection"
 	delete.disabled = not editable or not edit_error.is_empty()
 	delete.tooltip_text = "Delete %s" % id if edit_error.is_empty() else edit_error

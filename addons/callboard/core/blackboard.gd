@@ -39,6 +39,8 @@ func write(key: StringName, value: Variant) -> void:
 		push_error("Undeclared Blackboard key '%s'" % key)
 		return
 	var entry: Dictionary = schema.get(key, {})
+	if entry["type"] == TYPE_FLOAT and typeof(value) == TYPE_INT:
+		value = float(value)
 	if typeof(value) != entry["type"]:
 		push_warning("Blackboard write to '%s' rejected: expected type %d, got %d." % [key, entry["type"], typeof(value)])
 		return

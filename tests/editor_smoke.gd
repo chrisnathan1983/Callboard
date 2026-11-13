@@ -257,6 +257,8 @@ func _test_scene_assigned_props() -> bool:
 	if ok:
 		board.add_call_name("preview_fixture_call")
 		board.save()
+		ok = _check("Callboard saves omit the transient analysis source",
+			not "metadata/_analysis_scene_source" in FileAccess.get_file_as_string(TMP_PATH)) and ok
 		board.open_script(TMP_PATH)
 		var reloaded: StageDefinition = board._data.get("definition")
 		ok = _check("Callboard save preserves the explicit preview scene",
@@ -607,6 +609,8 @@ func _test_live_debug() -> bool:
 	root.add_child(stage)
 	var board := Callboard.new()
 	root.add_child(board)
+	board._show({"error": "No stage definitions"}, false)
+	var load_error_hides_debug := not board._debug_button.visible and not board._live_debug_panel.visible
 	board.bind_live(stage)
 	stage.engine.rules.clear()
 	var panel: CallboardLiveDebugPanel = board._live_debug_ui
@@ -627,9 +631,19 @@ func _test_live_debug() -> bool:
 	var relay_has_no_fire := relay_card != null and relay_card.find_child("FireCall", true, false) == null
 	board._blackboard_button.button_pressed = true
 	var debug_still_open := panel.panel.visible and not board._connections_panel.visible
+	board._debug_button.button_pressed = false
+	var active_row := panel._active_rows.get_child(0)
+	var trace_count := panel._trace_rows.get_child_count()
+	stage.fire(&"deliver")
+	var hidden_rows_unchanged := panel._active_rows.get_child(0) == active_row \
+		and panel._trace_rows.get_child_count() == trace_count
+	board._debug_button.button_pressed = true
+	var buffered_trace_rendered := panel._trace_rows.get_child_count() == trace_count + 1
 	board.free()
 	stage.free()
 	var ok := _check("live debug and connections launchers are shown", live_controls)
+	ok = _check("editor load errors keep the live debug controls hidden", load_error_hides_debug) and ok
+	ok = _check("hidden debug buffers traces without rebuilding rows", hidden_rows_unchanged and buffered_trace_rendered) and ok
 	ok = _check("debug stays open when switching between connections and Blackboard", panels_open and debug_still_open) and ok
 	ok = _check("live connections can fire Calls but not relays", call_can_fire and relay_has_no_fire) and ok
 	return _check("live debug records Calls fired from the connections panel", traced_call) and ok

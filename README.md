@@ -93,7 +93,11 @@ Add a `show_node` or `move_to` step to make a scene prop respond. Step arguments
 | **One-shot** | Latches when the rule starts. The latch survives reloads when your game reuses the `fired` dictionary. |
 | **Re-entry** | **Ignore** drops another trigger during a run. **Restart** keeps the newest payload and replaces the run at a cancellation check. **Queue** retains payloads in arrival order and rechecks guards before each run. One-shot rules use **Ignore**. |
 
-Use **Calls & relays** to manage connections. Renaming updates authored references. Update Call names in gameplay code and scene triggers separately. Blackboard renames preserve aliases for existing gameplay references. Select a rule to edit its guards, steps, and relay. Use the toolbar to save, reload, undo, or redo. Validation checks step expressions and surfaces issues such as relay cycles and overlapping guards.
+### Edit and rename authored data
+
+Use **Calls & relays** to manage connections. Renaming updates authored references. Update Call names in gameplay code and scene triggers separately. Blackboard renames preserve aliases for existing gameplay references.
+
+Select a rule to edit its guards, steps, and relay. Rule renames preserve saved one-shot latches. Pass the current rule ID to `Stage.has_fired()`. Use the toolbar to save, reload, undo, or redo. Validation checks step expressions and surfaces issues such as relay cycles and overlapping guards.
 
 ## Live debugging
 

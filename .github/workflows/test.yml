@@ -35,10 +35,17 @@ jobs:
       - name: Install Godot
         run: |
           binary="Godot_v${GODOT_VERSION}_linux.x86_64"
+          release_url="https://github.com/godotengine/godot-builds/releases/download/${GODOT_VERSION}"
           curl --fail --silent --show-error --location --retry 3 \
-            "https://github.com/godotengine/godot-builds/releases/download/${GODOT_VERSION}/${binary}.zip" \
-            --output "$RUNNER_TEMP/godot.zip"
-          unzip -q "$RUNNER_TEMP/godot.zip" -d "$RUNNER_TEMP/godot"
+            "$release_url/$binary.zip" --output "$RUNNER_TEMP/$binary.zip"
+          curl --fail --silent --show-error --location --retry 3 \
+            "$release_url/SHA512-SUMS.txt" --output "$RUNNER_TEMP/SHA512-SUMS.txt"
+          (
+            cd "$RUNNER_TEMP"
+            awk -v archive="$binary.zip" '$2 == archive || $2 == ("*" archive)' SHA512-SUMS.txt |
+              sha512sum --check --strict
+          )
+          unzip -q "$RUNNER_TEMP/$binary.zip" -d "$RUNNER_TEMP/godot"
           mv "$RUNNER_TEMP/godot/$binary" "$RUNNER_TEMP/godot/godot"
           chmod +x "$RUNNER_TEMP/godot/godot"
           echo "$RUNNER_TEMP/godot" >> "$GITHUB_PATH"
@@ -88,6 +95,6 @@ jobs:
             exit 1
           fi
           timeout 120s godot --headless --path "$temp_project" --script res://tests/smoke.gd 2>&1 | tee "$RUNNER_TEMP/godot-runtime-boundary.log"
-          if grep -F 'SCRIPT ERROR' "$RUNNER_TEMP/godot-runtime-boundary.log"; then
+          if grep -E '^(SCRIPT )?ERROR:' "$RUNNER_TEMP/godot-runtime-boundary.log"; then
             exit 1
           fi

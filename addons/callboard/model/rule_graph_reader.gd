@@ -60,7 +60,7 @@ static func make_definition(data: Dictionary) -> StageDefinition:
 	var draft := StageDefinition.new()
 	draft.stage_script = original.stage_script
 	draft.preview_scene_path = original.preview_scene_path
-	draft.set_meta("_analysis_scene_source", original.get_meta("_analysis_scene_source", original.resource_path))
+	draft.set_meta(StageDefinition.ANALYSIS_SCENE_SOURCE_META, original.analysis_source_path())
 	draft.external_calls = PackedStringArray(data["external_calls"])
 	draft.external_vars = PackedStringArray(data.get("external_vars", Array(original.external_vars)))
 	draft.variables = data["vars"].map(func(v: Dictionary) -> VariableData: return VariableData.from_dictionary(v))
