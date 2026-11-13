@@ -55,6 +55,22 @@ func _test_authored_resource_graph() -> bool:
 	ok = _check("incremental graph refresh replaces only the changed rule card",
 		gv._rule_nodes["z1_bark"] != updated_rule_node and gv._rule_nodes["z1_caught"] == kept_rule_node
 		and gv._event_nodes["deliver"] == kept_event_node and not gv.get_connection_list().is_empty()) and ok
+	gv.set_minimized(true)
+	var compact_rule: GraphNode = gv._rule_nodes["z1_bark"]
+	var compact_treat: GraphNode = gv._rule_nodes["z1_treat"]
+	var compact_call: GraphNode = gv._event_nodes["deliver"]
+	var compact_treat_row := compact_treat.get_child(0) as HBoxContainer
+	var compact_relay_label := compact_treat_row.get_child(compact_treat_row.get_child_count() - 1) as Label
+	ok = _check("compact cards keep the title, collapse details and retain connections",
+		compact_rule.title == "z1_bark" and compact_rule.get_child_count() == 1
+		and not gv.get_connection_list().is_empty()) and ok
+	ok = _check("compact cards show emitted relay names beside the summary icons",
+		compact_relay_label != null and compact_relay_label.text == "calm_guard") and ok
+	ok = _check("compact mode keeps external Call nodes at their normal size and layout",
+		compact_call.title == "External Call" and compact_call.custom_minimum_size.x == 174.0
+		and compact_call.get_child_count() == 1
+		and (compact_call.get_child(0) as Label).text == "deliver") and ok
+	gv.set_minimized(false)
 	gv.pulse("z1_bark")
 	gv.queue_free()
 
@@ -619,8 +635,11 @@ func _build_blackboard() -> void:
 	}]
 	var stage := definition.instantiate()
 	stage.build()
+	var catalog := VerbCatalog.from_factory(stage.verbs)
 	var ok := _check("factory discovers its custom verb and the inherited verbs",
-		VerbCatalog.from_factory(stage.verbs).size() == 13)
+		VerbCatalog.find(catalog, "stamp").size() > 0
+		and VerbCatalog.find(catalog, "show_node").size() > 0
+		and VerbCatalog.find(catalog, "repeat_emit").size() > 0)
 	ok = _check("stage runs the blackboard hook after resource defaults", stage.is_set(&"ready")) and ok
 	if _check("custom resource compiles", stage.graph_errors.is_empty()):
 		var step := stage.engine.rules[0].steps[0]

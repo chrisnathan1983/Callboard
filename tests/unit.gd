@@ -143,7 +143,7 @@ func _initialize() -> void:
 	light_rule.cancel_if = [&"stop_latched"]
 	var light_node := Node3D.new()
 	light_node.hide()
-	var light_step := light_factory.light(light_node, true, 2.0, &"lamp_on")
+	var light_step := light_factory._light(light_node, true, 2.0, &"lamp_on")
 	light_rule.steps.append(light_step)
 	light_rule.steps.append(Step.new(func(_ctx: Dictionary) -> void: pass).after(1.0))
 	light_engine.rules.append(light_rule)
@@ -220,7 +220,7 @@ func _test_retriggered_light() -> bool:
 	var lamp := Node3D.new()
 	var rule := Rule.new(&"timed_light", &"light")
 	rule.reentry = Rule.ReentryPolicy.RESTART
-	rule.steps.append(verbs.light(lamp, true, 1.0))
+	rule.steps.append(verbs._light(lamp, true, 1.0, &"lamp_on"))
 	engine.rules.append(rule)
 	engine.fire(&"light")
 	engine.fire(&"light")
@@ -243,7 +243,7 @@ func _test_light_from_restarted_run() -> bool:
 		return light_timer.timeout if seconds == 10.0 else clock_tick)
 	var verbs := StagingVerbs.new(StepContext.new(bb, engine, null, Callable()))
 	var lamp := Node3D.new()
-	var light_step := verbs.light(lamp, true, 10.0)
+	var light_step := verbs._light(lamp, true, 10.0, &"lamp_on")
 	var rule := Rule.new(&"timed_light", &"light")
 	rule.reentry = Rule.ReentryPolicy.RESTART
 	var starts: Array[bool] = []

@@ -815,8 +815,12 @@ func connect_wire(source: Dictionary, to_id: String) -> void:
 		var from := _find_rule(source["rule"])
 		if from.is_empty():
 			return
-		var relays := RuleGraphView.output_relays(from)
-		var relay: String = relays[clampi(source["port"], 0, relays.size() - 1)]
+		var relay: String
+		if source.has("relay"):
+			relay = source["relay"]
+		else:
+			var relays := RuleGraphView.output_relays(from)
+			relay = relays[clampi(source["port"], 0, relays.size() - 1)]
 		if relay == "":
 			# The unnamed rule-level port: name it after the rule.
 			relay = AuthoredData.unique_name(_all_relays(), from["id"] + "_done")

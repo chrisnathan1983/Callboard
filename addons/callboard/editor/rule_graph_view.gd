@@ -13,7 +13,7 @@ class_name RuleGraphView extends GraphEdit
 signal rule_selected(rule_id: String)
 signal group_selected(group_name: String)
 signal selection_cleared
-signal wire_added(source: Dictionary, to_rule: String)   # source: {"event": name} or {"rule": id, "port": int}
+signal wire_added(source: Dictionary, to_rule: String)   # source: {"event": name}, {"rule": id, "port": int}, or {"rule": id, "relay": name}
 signal wire_removed(to_rule: String)
 signal rules_delete_requested(ids: Array)
 signal rules_linked_to_group(ids: Array, group_name: String)
@@ -21,6 +21,7 @@ signal layout_changed
 
 const Style := preload("res://addons/callboard/editor/board_style.gd")
 const CARD_WIDTH := 264.0
+const COMPACT_CARD_WIDTH := CARD_WIDTH
 const COL_EVENT := Style.EVENT
 const COL_RELAY := Style.RELAY
 const COL_REQ := Style.SUCCESS
@@ -39,6 +40,9 @@ var _fit_requested := false
 var _inspected_node: GraphElement
 var _icon_material: ShaderMaterial
 var _minimap_control: Control
+var _compact_button: Button
+var _minimized := false
+var _last_data: Dictionary = {}
 
 func _init() -> void:
 	minimap_enabled = true
@@ -51,6 +55,12 @@ func _init() -> void:
 	fit.tooltip_text = "Frame every Call, rule and group"
 	fit.pressed.connect(request_fit)
 	get_menu_hbox().add_child(fit)
+	_compact_button = Button.new()
+	_compact_button.text = "Compact"
+	_compact_button.toggle_mode = true
+	_compact_button.tooltip_text = "Show compact rule nodes with title-bar icons"
+	_compact_button.toggled.connect(set_minimized)
+	get_menu_hbox().add_child(_compact_button)
 	var menu := get_menu_hbox().get_parent() as Control
 	menu.minimum_size_changed.connect(_position_view_tools, CONNECT_DEFERRED)
 	_position_view_tools.call_deferred()
@@ -71,6 +81,21 @@ func set_editable(on: bool) -> void:
 	right_disconnects = on
 	if not on:
 		remove_theme_color_override("activity")
+
+func set_minimized(on: bool) -> void:
+	if _minimized == on:
+		return
+	var selected_rule := String(_inspected_node.get_meta("rule_id", "")) if is_instance_valid(_inspected_node) else ""
+	var selected_group := String(_inspected_node.get_meta("group_name", "")) if is_instance_valid(_inspected_node) else ""
+	_minimized = on
+	if is_instance_valid(_compact_button):
+		_compact_button.set_pressed_no_signal(on)
+	if not _last_data.is_empty():
+		show_data(_last_data)
+		if not selected_rule.is_empty():
+			select_rule(selected_rule)
+		elif not selected_group.is_empty():
+			select_group(selected_group)
 
 func _ready() -> void:
 	_minimap_control = _find_minimap_control(self)
@@ -164,6 +189,7 @@ func clear_view() -> void:
 	_rule_signatures.clear()
 
 func show_data(data: Dictionary) -> void:
+	_last_data = data
 	clear_view()
 	var rules: Array = data["rules"]
 	var problems: Array = data["notes"]
@@ -439,7 +465,31 @@ func _on_connection_request(from_node: StringName, from_port: int, to_node: Stri
 	if src.has_meta("event"):
 		wire_added.emit({"event": src.get_meta("event")}, dst.get_meta("rule_id"))
 	elif src.has_meta("rule_id"):
-		wire_added.emit({"rule": src.get_meta("rule_id"), "port": from_port}, dst.get_meta("rule_id"))
+		var source_id: String = src.get_meta("rule_id")
+		var target_id: String = dst.get_meta("rule_id")
+		if _minimized:
+			_request_compact_wire(source_id, target_id)
+		else:
+			wire_added.emit({"rule": source_id, "port": from_port}, target_id)
+
+func _request_compact_wire(source_id: String, target_id: String) -> void:
+	var source_rule: Dictionary = _last_data["rules"].filter(
+		func(rule: Dictionary) -> bool: return rule["id"] == source_id).front()
+	var choices: Array[String] = []
+	for relay in output_relays(source_rule):
+		if not choices.has(relay):
+			choices.append(relay)
+	if choices.size() <= 1:
+		wire_added.emit({"rule": source_id, "relay": choices[0]}, target_id)
+		return
+	var popup := PopupMenu.new()
+	add_child(popup)
+	for relay in choices:
+		popup.add_item("(new relay)" if relay.is_empty() else relay)
+	popup.id_pressed.connect(func(id: int) -> void:
+		wire_added.emit({"rule": source_id, "relay": choices[id]}, target_id))
+	popup.popup_hide.connect(func() -> void: popup.queue_free())
+	popup.popup(Rect2i(get_global_mouse_position(), Vector2i.ZERO))
 
 func _on_disconnection_request(_from_node: StringName, _from_port: int, to_node: StringName, _to_port: int) -> void:
 	var dst := _node_of(to_node)
@@ -476,6 +526,8 @@ func _safe(s: String) -> String:
 
 ## Rules with no "# @node" comment get a column by relay depth so new rules are never stacked.
 func _auto_layout(rules: Array) -> void:
+	var node_width := COMPACT_CARD_WIDTH if _minimized else CARD_WIDTH
+	var row_spacing := 88.0 if _minimized else 220.0
 	var depth := {}
 	for rd in rules:
 		depth[rd["id"]] = 0
@@ -493,8 +545,8 @@ func _auto_layout(rules: Array) -> void:
 			continue
 		var d: int = depth[rd["id"]]
 		var y: float = col_y.get(d, 40.0)
-		rd["pos"] = Vector2(40 + d * (CARD_WIDTH + 42.0), y)
-		col_y[d] = y + 220.0
+		rd["pos"] = Vector2(40 + d * (node_width + 42.0), y)
+		col_y[d] = y + row_spacing
 
 # --- Cards ------------------------------------------------------------------------
 
@@ -620,13 +672,26 @@ func _make_rule_node(rd: Dictionary, problems: Array) -> GraphNode:
 	n.title = ("⚠ " if warned and not Engine.is_editor_hint() else "") + rd["id"]
 	n.tooltip_text = rd["id"]
 	n.position_offset = rd["pos"]
-	_style_card(n, CARD_WIDTH, Style.WARNING if warned else Style.TEXT, &"NodeWarning" if warned else &"GraphNode")
+	_style_card(n, COMPACT_CARD_WIDTH if _minimized else CARD_WIDTH,
+		Style.WARNING if warned else Style.TEXT, &"NodeWarning" if warned else &"GraphNode")
 
-	# Each row is one slot. Entries: [label, left_port, right_port, color]
+	# Each row is one slot: [control, left_port, right_port, color, optional_right_color].
 	var rows: Array = []
 	var trigger: String = rd["trigger"]
 	var trigger_text := "On  " + trigger if not trigger.is_empty() else "Connect a trigger"
 	var trigger_color := COL_RELAY if trigger.begins_with("relay:") else COL_EVENT
+	var relays := output_relays(rd)
+	if _minimized:
+		var compact_row := HBoxContainer.new()
+		compact_row.custom_minimum_size = Vector2(0, 22)
+		compact_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		compact_row.add_theme_constant_override("separation", 0)
+		_add_compact_title_icons(compact_row, rd)
+		_add_compact_relay_label(compact_row, relays)
+		var has_output: bool = _editable or relays.any(func(relay: String) -> bool: return relay != "")
+		rows.append([compact_row, true, has_output, trigger_color, COL_RELAY])
+		_add_card_rows(n, rows)
+		return n
 	rows.append([_row(trigger_text, trigger_color, &"Signal"), true, false, trigger_color])
 	if not rd["requires"].is_empty():
 		rows.append([_row("requires: " + ", ".join(rd["requires"]), COL_REQ, &"✓"), false, false, COL_DIM])
@@ -644,7 +709,6 @@ func _make_rule_node(rd: Dictionary, problems: Array) -> GraphNode:
 		var step_icon := &"Timer" if s["delay"] != "" else &"Play"
 		rows.append([_row(prefix + "%s(%s)" % [s["verb"], ", ".join(PackedStringArray(s["args"]))], Style.TEXT, step_icon), false, false, COL_DIM])
 		i += 1
-	var relays := output_relays(rd)
 	for p in relays.size():
 		var last := p == relays.size() - 1
 		if not _editable and relays[p] == "":
@@ -661,20 +725,80 @@ func _make_rule_node(rd: Dictionary, problems: Array) -> GraphNode:
 	_add_card_rows(n, rows)
 	return n
 
+func _add_compact_title_icons(row: HBoxContainer, rd: Dictionary) -> void:
+	if not rd["requires"].is_empty():
+		_add_title_icon(row, &"", "✓", COL_REQ,
+			"Requires: " + ", ".join(rd["requires"]))
+	if not rd["forbids"].is_empty():
+		_add_title_icon(row, &"GuiClose", "×", COL_FORBID,
+			"Forbids: " + ", ".join(rd["forbids"]))
+	if not rd["cancel_if"].is_empty():
+		_add_title_icon(row, &"Stop", "■", COL_CANCEL,
+			"Cancel if: " + ", ".join(rd["cancel_if"]))
+	if not rd["steps"].is_empty():
+		var action_names: Array[String] = []
+		for step in rd["steps"]:
+			action_names.append(step["verb"])
+		_add_title_icon(row, &"Play", "▶", Style.TEXT,
+			"Steps: " + ", ".join(action_names))
+		var delayed: Array = rd["steps"].filter(func(step: Dictionary) -> bool: return step["delay"] != "")
+		if not delayed.is_empty():
+			var delay_details: Array[String] = []
+			for step in delayed:
+				delay_details.append(step["delay"] + "s")
+			_add_title_icon(row, &"Timer", "◷", Style.EVENT,
+				"Step delays: " + ", ".join(delay_details))
+	if rd[AuthoredData.FIELD_ONE_SHOT]:
+		_add_title_icon(row, &"Lock", "●", COL_DIM, "One-shot")
+
+func _add_compact_relay_label(row: HBoxContainer, relays: Array) -> void:
+	var emitted: Array[String] = []
+	for relay in relays:
+		if relay != "" and not emitted.has(relay):
+			emitted.append(relay)
+	var detail := ", ".join(emitted) if not emitted.is_empty() else "not set"
+	var label_text := ", ".join(emitted) if not emitted.is_empty() else "Add relay"
+	var relay_color := COL_RELAY if not emitted.is_empty() else COL_DIM
+	_add_title_icon(row, &"Signal", "↗", relay_color, "Emits: " + detail)
+	var label := Style.label(label_text, relay_color, 11)
+	label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	label.tooltip_text = "Emits: " + detail
+	label.mouse_filter = Control.MOUSE_FILTER_PASS
+	row.add_child(label)
+
+func _add_title_icon(row: HBoxContainer, icon_name: StringName, fallback: String,
+		color: Color, tooltip: String) -> void:
+	var control: Control
+	if icon_name != &"" and row.has_theme_icon(icon_name, &"EditorIcons"):
+		control = _editor_icon(icon_name, color)
+		control.mouse_filter = Control.MOUSE_FILTER_PASS
+	else:
+		var label := Style.label(fallback, color, 13)
+		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		label.custom_minimum_size.x = 16
+		control = label
+	control.tooltip_text = tooltip
+	control.mouse_filter = Control.MOUSE_FILTER_PASS
+	row.add_child(control)
 func _add_card_rows(node: GraphNode, rows: Array) -> void:
 	for row in rows:
 		node.add_child(row[0])
 	for i in rows.size():
 		var row: Array = rows[i]
-		node.set_slot(i, row[1], 0, row[3], row[2], 0, row[3])
+		var left_color: Color = row[3]
+		var right_color: Color = row[4] if row.size() > 4 else row[3]
+		node.set_slot(i, row[1], 0, left_color, row[2], 0, right_color)
 	if Engine.is_editor_hint():
 		node.theme_changed.connect(func() -> void:
 			for i in rows.size():
 				var row: Array = rows[i]
+				var left_color: Color = row[3]
+				var right_color: Color = row[4] if row.size() > 4 else row[3]
 				if row[1]:
-					node.set_slot_color_left(i, Style.resolve_color(node, row[3]))
+					node.set_slot_color_left(i, Style.resolve_color(node, left_color))
 				if row[2]:
-					node.set_slot_color_right(i, Style.resolve_color(node, row[3])))
+					node.set_slot_color_right(i, Style.resolve_color(node, right_color)))
 
 func _make_event_nodes(events: Array, rules: Array) -> void:
 	var positions := _event_positions(events, rules)
@@ -722,7 +846,7 @@ func _connect_all(rules: Array) -> void:
 				continue
 			for b in rules:
 				if b["trigger"] == "relay:" + relays[port] and b["id"] != a["id"]:
-					_wire(_rule_nodes[a["id"]].name, port, _rule_nodes[b["id"]].name)
+					_wire(_rule_nodes[a["id"]].name, 0 if _minimized else port, _rule_nodes[b["id"]].name)
 
 func _wire(from_node: StringName, from_port: int, to_node: StringName) -> void:
 	var err := connect_node(from_node, from_port, to_node, 0)
