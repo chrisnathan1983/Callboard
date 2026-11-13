@@ -52,13 +52,14 @@ func _init() -> void:
 	connection_lines_thickness = 2.0
 	var fit := Button.new()
 	fit.text = "Fit all"
+	Style.button_icon(fit, &"ZoomReset", "", true)
 	fit.tooltip_text = "Frame every Call, rule and group"
 	fit.pressed.connect(request_fit)
 	get_menu_hbox().add_child(fit)
 	_compact_button = Button.new()
 	_compact_button.text = "Compact"
 	_compact_button.toggle_mode = true
-	_compact_button.tooltip_text = "Show compact rule nodes with title-bar icons"
+	_compact_button.tooltip_text = "Collapse rule details"
 	_compact_button.toggled.connect(set_minimized)
 	get_menu_hbox().add_child(_compact_button)
 	var menu := get_menu_hbox().get_parent() as Control
@@ -119,7 +120,7 @@ func set_minimap_right_edge(right_edge: float) -> void:
 	if host == null:
 		return
 	var map_size := _minimap_control.size
-	var right_offset := right_edge - host.size.x
+	var right_offset := maxf(right_edge, map_size.x + 12.0) - host.size.x
 	_minimap_control.anchor_left = 1.0
 	_minimap_control.anchor_right = 1.0
 	_minimap_control.anchor_top = 1.0
@@ -335,6 +336,14 @@ func reveal_rule(rule_id: String, obstruction: Rect2) -> void:
 	var left := maxf(0.0, obstruction.position.x - 12.0 - bounds.size.x)
 	scroll_offset.x += maxf(0.0, bounds.position.x - left)
 
+func reveal_rule_in_canvas(rule_id: String) -> void:
+	var card: GraphNode = _rule_nodes.get(rule_id)
+	if card == null or not fit_area.has_area():
+		return
+	var bounds := Rect2(card.position_offset * zoom - scroll_offset, card.size * zoom)
+	if not fit_area.encloses(bounds):
+		scroll_offset += bounds.get_center() - fit_area.get_center()
+
 func context_target_at(pointer: Vector2) -> Dictionary:
 	# Cards draw over frames. Within each layer, the last child draws on top.
 	var children := get_children()
@@ -354,10 +363,17 @@ func context_target_at(pointer: Vector2) -> Dictionary:
 				return {"kind": "group", "id": element.get_meta("group_name")}
 	return {}
 
-func select_rule(id: String) -> void:
+func clear_selection() -> void:
+	_deselect_elements()
+	_clear_deselected()
+
+func _deselect_elements() -> void:
 	for c in get_children():
 		if c is GraphElement:
 			c.selected = false
+
+func select_rule(id: String) -> void:
+	_deselect_elements()
 	if _rule_nodes.has(id):
 		_inspected_node = _rule_nodes[id]
 		_inspected_node.selected = true
@@ -770,7 +786,7 @@ func _add_compact_relay_label(row: HBoxContainer, relays: Array) -> void:
 func _add_title_icon(row: HBoxContainer, icon_name: StringName, fallback: String,
 		color: Color, tooltip: String) -> void:
 	var control: Control
-	if icon_name != &"" and row.has_theme_icon(icon_name, &"EditorIcons"):
+	if icon_name != &"" and Engine.is_editor_hint():
 		control = _editor_icon(icon_name, color)
 		control.mouse_filter = Control.MOUSE_FILTER_PASS
 	else:

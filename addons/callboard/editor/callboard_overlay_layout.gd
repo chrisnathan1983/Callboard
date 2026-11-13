@@ -57,7 +57,9 @@ func layout() -> void:
 		top_bottom = maxf(top_bottom, create_y + _create_tools.size.y)
 
 	var window_y := top_bottom + GUTTER
-	var available_height := maxf(_board.size.y - window_y - 64.0, 32.0)
+	var view_toolbar := _view.get_menu_hbox().get_parent() as Control
+	var footer_height := view_toolbar.get_combined_minimum_size().y + GUTTER * 2.0
+	var available_height := maxf(_board.size.y - window_y - footer_height, 32.0)
 	var left_size := _left_tools.get_combined_minimum_size()
 	if _blackboard_panel.visible:
 		left_size.y = minf(available_height, left_size.y + _blackboard.rows_height())
@@ -71,7 +73,6 @@ func layout() -> void:
 		_settings_window.size = Vector2(_settings_window.get_combined_minimum_size().x, minf(settings_height, available_height))
 		_settings_window.position = Vector2(_board.size.x - _settings_window.size.x - GUTTER, window_y)
 		fit_right = _settings_window.position.x - GUTTER
-		_view.set_minimap_right_edge(_board.size.x - GUTTER)
 	elif _live_debug_panel.visible:
 		var debug_size := _live_debug_panel.get_combined_minimum_size()
 		var debug_width := minf(debug_size.x, maxf(_board.size.x - GUTTER * 2.0, 1.0))
@@ -79,9 +80,8 @@ func layout() -> void:
 		_live_debug_panel.size = Vector2(debug_width, debug_height)
 		_live_debug_panel.position = Vector2(_board.size.x - _live_debug_panel.size.x - GUTTER, window_y)
 		fit_right = _live_debug_panel.position.x - GUTTER
-		_view.set_minimap_right_edge(_live_debug_panel.position.x - GUTTER)
-	else:
-		_view.set_minimap_right_edge(_board.size.x - GUTTER)
+	_view.set_minimap_right_edge(fit_right if _settings_window.visible or _live_debug_panel.visible
+		else _board.size.x - GUTTER)
 
 	if _debug_button.visible:
 		_debug_button.reset_size()
@@ -95,4 +95,4 @@ func layout() -> void:
 	if fit_right - fit_left < _board.size.x * 0.45:
 		fit_left = GUTTER * 2.0
 		fit_right = _board.size.x - GUTTER * 2.0
-	_view.fit_area = Rect2(fit_left, window_y, maxf(fit_right - fit_left, 1.0), maxf(_board.size.y - window_y - 60.0, 1.0))
+	_view.fit_area = Rect2(fit_left, window_y, maxf(fit_right - fit_left, 1.0), available_height)

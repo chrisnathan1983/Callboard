@@ -44,6 +44,8 @@ func clear() -> void:
 	_group = {}
 
 func show_rule(rule: Dictionary, data: Dictionary, read_only := false) -> void:
+	if not is_same(_rule, rule):
+		scroll_vertical = 0
 	_rule = rule
 	_group = {}
 	_data = data
@@ -51,6 +53,8 @@ func show_rule(rule: Dictionary, data: Dictionary, read_only := false) -> void:
 	_build_rule()
 
 func show_group(group: Dictionary, data: Dictionary, read_only := false) -> void:
+	if not is_same(_group, group):
+		scroll_vertical = 0
 	_group = group
 	_rule = {}
 	_data = data
@@ -109,8 +113,9 @@ func _build_rule() -> void:
 	trig.add_child(_name_label("Trigger"))
 	trig.add_child(trig_edit)
 	var pick := MenuButton.new()
-	pick.text = "▾"
+	Style.button_icon(pick, &"GuiDropdown", "▾")
 	pick.flat = false
+	pick.accessibility_name = "Pick trigger"
 	pick.tooltip_text = "Pick a declared Call or an emitted relay"
 	var options := _trigger_options()
 	for o in options:
@@ -222,15 +227,6 @@ func _build_rule() -> void:
 	buttons.add_child(del)
 	_box.add_child(buttons)
 
-	var mine: Array = _data["notes"].filter(func(p: String) -> bool: return ("'%s'" % r["id"]) in p)
-	if not mine.is_empty():
-		_title("Problems")
-		for p in mine:
-			var l := Label.new()
-			l.text = "⚠ " + p
-			l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-			Style.tint(l, Style.WARNING)
-			_box.add_child(l)
 	if _read_only:
 		_lock(_box)
 
@@ -359,7 +355,7 @@ func _step_panel(idx: int) -> Control:
 	var params: Array = verb.get("args", [])
 	var vb := VBoxContainer.new()
 	vb.add_theme_constant_override("separation", 6)
-	var panel := Style.panel(vb, Color("#1b2635"), Vector2(8, 8))
+	var panel := Style.entry(vb)
 
 	var head := HBoxContainer.new()
 	var num := Style.label("%02d" % (idx + 1), Style.EVENT, 12)
@@ -381,19 +377,23 @@ func _step_panel(idx: int) -> Control:
 		changed.emit(_rule["id"])
 		_rebuild_later())
 	head.add_child(ob)
-	for spec in [["▲", -1], ["▼", 1]]:
+	for offset in [-1, 1]:
 		var b := Button.new()
-		b.text = spec[0]
-		b.disabled = (idx == 0 and spec[1] < 0) or (idx == _rule["steps"].size() - 1 and spec[1] > 0)
+		Style.button_icon(b, &"MoveUp" if offset < 0 else &"MoveDown", "↑" if offset < 0 else "↓")
+		b.tooltip_text = "Move step up" if offset < 0 else "Move step down"
+		b.accessibility_name = b.tooltip_text
+		b.disabled = idx + offset < 0 or idx + offset >= _rule["steps"].size()
 		b.pressed.connect(func() -> void:
 			var steps: Array = _rule["steps"]
 			steps.remove_at(idx)
-			steps.insert(idx + spec[1], step)
+			steps.insert(idx + offset, step)
 			changed.emit(_rule["id"])
 			_rebuild_later())
 		head.add_child(b)
 	var rm := Button.new()
-	rm.text = "✕"
+	Style.button_icon(rm, &"Remove", "✕")
+	rm.tooltip_text = "Remove step"
+	rm.accessibility_name = rm.tooltip_text
 	rm.pressed.connect(func() -> void:
 		_rule["steps"].remove_at(idx)
 		changed.emit(_rule["id"])

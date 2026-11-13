@@ -9,7 +9,7 @@ const ExportFilter := preload("res://addons/callboard/editor/export_plugin.gd")
 func _initialize() -> void:
 	var ok := _test_authored_resource_graph()
 	ok = _test_board_editing() and ok
-	ok = _test_save_and_history() and ok
+	ok = (await _test_save_and_history()) and ok
 	ok = (await _test_debounced_history()) and ok
 	ok = (await _test_numeric_undo()) and ok
 	ok = (await _test_event_and_relay_edits()) and ok
@@ -159,6 +159,7 @@ func _test_save_and_history() -> bool:
 	var b2 := Callboard.new()
 	root.add_child(b2)
 	b2.open_script(TMP_PATH)
+	await process_frame
 	var d2: Dictionary = b2._data
 	ok = _check("adding an event creates a wireable event card",
 		b2.add_call_name("  doorbell  ") and b2.view._event_nodes.has("doorbell")) and ok
@@ -200,14 +201,19 @@ func _test_save_and_history() -> bool:
 	b2._changed("z1_standoff")
 	ok = _check("broken edit: compile failure detected", not d2["compiles"]) and ok
 	b2._on_rule_selected("z1_calm")
-	var status_click := InputEventMouseButton.new()
-	status_click.button_index = MOUSE_BUTTON_LEFT
-	status_click.pressed = true
-	b2._on_status_gui_input(status_click)
-	ok = _check("status click selects a rule named by its validation notes",
-		b2._selected == "z1_standoff") and ok
+	var note_index: int = d2["notes"].find_custom(func(note: String) -> bool: return "'z1_standoff'" in note)
+	if note_index >= 0:
+		b2._notes_button.get_popup().index_pressed.emit(note_index)
+	ok = _check("choosing a validation note selects the affected rule",
+		b2._notes_button.visible and note_index >= 0 and b2._selected == "z1_standoff") and ok
 	b2.save()
 	ok = _check("broken edit: save refused, file untouched", FileAccess.get_file_as_string(TMP_PATH) == original) and ok
+	b2._request_reload()
+	ok = _check("reload prompts before discarding unsaved edits",
+		b2._reload_dialog.visible and b2.is_dirty()) and ok
+	b2._reload_dialog.hide()
+	ok = _check("canceling reload leaves the draft intact",
+		_rule(d2, "z1_standoff")["steps"][0]["args"][0] == "@@") and ok
 	_rule(d2, "z1_standoff")["steps"][0]["args"][0] = "4.0"
 	var added: Dictionary = b2.add_rule()
 	added["steps"].append(VerbCatalog.new_step(d2, "score"))
@@ -334,15 +340,21 @@ func _test_layer_export_filter() -> bool:
 
 func _test_canvas_actions() -> bool:
 	var board := Callboard.new()
+	board.size = Vector2(1280, 720)
 	root.add_child(board)
 	board.open_script(DEFINITION_PATH)
 	await process_frame
 	var view := board.view
 	var ok := _check("rule settings starts hidden", not board._settings_window.visible)
+	var overview := view._minimap_control
+	var overview_right := overview.get_rect().end.x if overview != null else 0.0
 	view.select_rule("z1_bark")
 	var rule: GraphNode = view._rule_nodes["z1_bark"]
 	ok = _check("canvas selection opens rule settings",
 		board._settings_window.visible and board.inspector._rule.get("id") == "z1_bark") and ok
+	ok = _check("the minimap moves clear of the settings panel",
+		overview != null and overview.get_rect().end.x < overview_right
+		and overview.get_rect().end.x <= board._settings_window.position.x) and ok
 	var other_rule: GraphNode = view._rule_nodes["z1_calm"]
 	other_rule.selected = true
 	other_rule.selected = false
@@ -353,6 +365,14 @@ func _test_canvas_actions() -> bool:
 	await process_frame
 	ok = _check("canvas deselection clears and hides rule settings",
 		board._selected.is_empty() and board.inspector._rule.is_empty() and not board._settings_window.visible) and ok
+	view.select_rule("z1_bark")
+	board._debounce_edits = true
+	board._schedule_change("z1_bark")
+	board._close_settings()
+	board._flush_debounced_change()
+	ok = _check("close clears graph selection and stays closed after pending analysis",
+		not rule.selected and board._selected.is_empty() and not board._settings_window.visible) and ok
+	board._debounce_edits = false
 
 	view.zoom = 0.75
 	view.scroll_offset = Vector2(80, -40)
@@ -700,11 +720,15 @@ func _test_live_debug() -> bool:
 		and panel._trace_rows.get_child_count() == trace_count
 	board._debug_button.button_pressed = true
 	var buffered_trace_rendered := panel._trace_rows.get_child_count() == trace_count + 1
+	for i in CallboardLiveDebugPanel.MAX_TRACE_ROWS + 1:
+		stage.fire(&"deliver")
+	var trace_is_bounded := panel._trace_rows.get_child_count() == CallboardLiveDebugPanel.MAX_TRACE_ROWS
 	board.free()
 	stage.free()
 	var ok := _check("live debug and connections launchers are shown", live_controls)
 	ok = _check("editor load errors keep the live debug controls hidden", load_error_hides_debug) and ok
 	ok = _check("hidden debug buffers traces without rebuilding rows", hidden_rows_unchanged and buffered_trace_rendered) and ok
+	ok = _check("visible debug keeps only the latest trace rows", trace_is_bounded) and ok
 	ok = _check("debug stays open when switching between connections and Blackboard", panels_open and debug_still_open) and ok
 	ok = _check("live connections can fire Calls but not relays", call_can_fire and relay_has_no_fire) and ok
 	return _check("live debug records Calls fired from the connections panel", traced_call) and ok

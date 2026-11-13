@@ -101,9 +101,13 @@ func _make_card(data: Dictionary, editable: bool, id: String) -> PanelContainer:
 	name_edit.editable = editable and edit_error.is_empty() and id != "arrive"
 	var header := HBoxContainer.new()
 	header.add_child(name_edit)
-	var delete := _button("✕", func() -> void: confirm_delete(data, editable, id))
+	var delete := Button.new()
+	Style.button_icon(delete, &"Remove", "✕")
+	delete.accessibility_name = "Delete %s" % id
+	delete.pressed.connect(func() -> void: confirm_delete(data, editable, id))
 	delete.name = "DeleteConnection"
 	delete.disabled = not editable or not edit_error.is_empty()
+	delete.visible = editable
 	delete.tooltip_text = "Delete %s" % id if edit_error.is_empty() else edit_error
 	header.add_child(delete)
 	card.add_child(header)
@@ -185,9 +189,3 @@ func _delete_selected() -> void:
 	_pending_delete = ""
 	if not error.is_empty():
 		_error_handler.call(error)
-
-func _button(text: String, callback: Callable) -> Button:
-	var button := Button.new()
-	button.text = text
-	button.pressed.connect(callback)
-	return button

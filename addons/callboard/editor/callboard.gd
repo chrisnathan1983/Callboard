@@ -20,7 +20,9 @@ var _history := CallboardHistory.new()
 var _overlay_layout := CallboardOverlayLayout.new()
 var _picker := OptionButton.new()
 var _status := Label.new()
-var _status_note_cursor := 0
+var _notes_button := MenuButton.new()
+var _reload_dialog := ConfirmationDialog.new()
+var _settings_title: Label
 var _edit_buttons: Array[Button] = []
 var _data := {}
 var _path := ""
@@ -93,26 +95,38 @@ func _init() -> void:
 			_picker.custom_minimum_size.x *= _picker.get_theme_default_base_scale())
 	_picker.item_selected.connect(_on_picker)
 	stage_tools.add_child(_picker)
-	_save_button = _file_button(&"Save", "Save", "Save stage", save)
-	_reload_button = _file_button(&"Reload", "↻", "Reload stage from disk", refresh)
+	_save_button = _icon_button(&"Save", "Save", "Save stage (Ctrl/Cmd+S)", save)
+	_reload_button = _icon_button(&"Reload", "Reload", "Reload stage from disk", _request_reload)
+	_reload_dialog.title = "Reload Stage"
+	_reload_dialog.dialog_text = "Discard unsaved changes and reload this stage from disk?"
+	_reload_dialog.ok_button_text = "Reload"
+	_reload_dialog.confirmed.connect(refresh)
+	add_child(_reload_dialog)
 	stage_tools.add_child(_save_button)
 	stage_tools.add_child(_reload_button)
-	_undo_button = _button("↶", undo)
+	_undo_button = _icon_button(&"Undo", "Undo", "Undo (Ctrl/Cmd+Z)", undo)
 	_undo_button.accessibility_name = "Undo"
-	_undo_button.tooltip_text = "Undo (Ctrl/Cmd+Z)"
-	_redo_button = _button("↷", redo)
+	_redo_button = _icon_button(&"Redo", "Redo", "Redo (Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y)", redo)
 	_redo_button.accessibility_name = "Redo"
-	_redo_button.tooltip_text = "Redo (Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y)"
+	_edit_buttons.append_array([_undo_button, _redo_button])
 	stage_tools.add_child(_undo_button)
 	stage_tools.add_child(_redo_button)
 	var file_tools := VBoxContainer.new()
 	file_tools.add_child(stage_tools)
+	var status_row := HBoxContainer.new()
 	_status.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	Style.fallback_font_size(_status, 13)
-	_status.custom_minimum_size.x = 320
-	_status.mouse_filter = Control.MOUSE_FILTER_PASS
-	_status.gui_input.connect(_on_status_gui_input)
-	file_tools.add_child(_status)
+	_status.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_status.mouse_filter = Control.MOUSE_FILTER_STOP
+	status_row.add_child(_status)
+	_notes_button.flat = false
+	_notes_button.focus_mode = Control.FOCUS_ALL
+	_notes_button.tooltip_text = "Show validation notes"
+	Style.button_icon(_notes_button, &"NodeWarning", "", true)
+	_notes_button.get_popup().index_pressed.connect(_on_note_selected)
+	_notes_button.hide()
+	status_row.add_child(_notes_button)
+	file_tools.add_child(status_row)
 	_file_tools = _floating_toolbar(file_tools)
 
 	var create_tools := HBoxContainer.new()
@@ -153,7 +167,12 @@ func _init() -> void:
 	blackboard.content_size_changed.connect(_layout_overlays, CONNECT_DEFERRED)
 	var settings := VBoxContainer.new()
 	settings.add_theme_constant_override("separation", 10)
-	settings.add_child(Style.label("Rule settings", Style.TEXT, 16))
+	var settings_header := HBoxContainer.new()
+	_settings_title = Style.label("Rule Settings", Style.TEXT, 16)
+	_settings_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	settings_header.add_child(_settings_title)
+	settings_header.add_child(_icon_button(&"GuiClose", "Close", "Close settings", _close_settings))
+	settings.add_child(settings_header)
 	inspector.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	settings.add_child(inspector)
 	_settings_window = Style.panel(settings, Style.SURFACE, Vector2(12, 10), true)
@@ -185,8 +204,8 @@ func _make_left_tools() -> void:
 	_setup_connections_panel()
 	_live_debug_panel = _live_debug_ui.setup()
 	_live_debug_panel.hide()
-	_blackboard_button = _panel_launcher("Blackboard", "▤", _blackboard_panel, buttons)
-	_connections_button = _panel_launcher("Calls & relays", "⇄", _connections_panel, buttons)
+	_blackboard_button = _panel_launcher("Blackboard", &"Dictionary", _blackboard_panel, buttons)
+	_connections_button = _panel_launcher("Calls & relays", &"Signal", _connections_panel, buttons)
 	_debug_button = Button.new()
 	_debug_button.toggle_mode = true
 	_debug_button.text = "DEBUG"
@@ -213,12 +232,12 @@ func _make_left_tools() -> void:
 	add_child(_live_debug_panel)
 	add_child(_debug_button)
 
-func _panel_launcher(title: String, glyph: String, panel: PanelContainer, buttons: ButtonGroup) -> Button:
+func _panel_launcher(title: String, icon_name: StringName, panel: PanelContainer, buttons: ButtonGroup) -> Button:
 	var button := Button.new()
 	button.toggle_mode = true
 	button.button_group = buttons
 	button.custom_minimum_size = Vector2(36, 32)
-	button.text = glyph
+	Style.button_icon(button, icon_name, "", true)
 	button.accessibility_name = title
 	button.tooltip_text = title
 	if not Engine.is_editor_hint():
@@ -242,19 +261,20 @@ func _button(text: String, cb: Callable, edit_only := true) -> Button:
 		_edit_buttons.append(b)
 	return b
 
-func _file_button(icon_name: StringName, fallback: String, title: String, action: Callable) -> Button:
+func _icon_button(icon_name: StringName, fallback: String, title: String, action: Callable) -> Button:
 	var button := _button(fallback, action, false)
 	button.accessibility_name = title
 	button.tooltip_text = title
-	if Engine.is_editor_hint():
-		var refresh_icon := func() -> void:
-			button.icon = button.get_theme_icon(icon_name, &"EditorIcons") if button.has_theme_icon(icon_name, &"EditorIcons") else null
-			button.text = "" if button.icon != null else fallback
-		button.ready.connect(refresh_icon)
-		button.theme_changed.connect(refresh_icon, CONNECT_DEFERRED)
+	Style.button_icon(button, icon_name, fallback)
 	return button
 
 # --- Loading ----------------------------------------------------------------------
+
+func _request_reload() -> void:
+	if _dirty:
+		_reload_dialog.popup_centered()
+	else:
+		refresh()
 
 func refresh() -> void:
 	if _live:
@@ -267,8 +287,11 @@ func refresh() -> void:
 		_picker.get_popup().set_item_tooltip(_picker.item_count - 1, path)
 	if _picker.item_count == 0:
 		_path = ""
+		_picker.text = "No stages"
+		_picker.disabled = true
 		_show({"error": "No stage definitions in " + Settings.stages_directory()}, false)
 		return
+	_picker.disabled = false
 	var idx := 0
 	for i in _picker.item_count:
 		if _picker.get_item_metadata(i) == keep:
@@ -316,7 +339,7 @@ func _on_picker(i: int) -> void:
 		for k in _picker.item_count:
 			if _picker.get_item_metadata(k) == _path:
 				_picker.select(k)
-		_status.text = "Unsaved changes: Save or press Reload first."
+		_set_status("Save or reload before switching stages.", Style.WARNING)
 		return
 	open_script(_picker.get_item_metadata(i))
 
@@ -381,7 +404,7 @@ func _show(data: Dictionary, editable: bool, live := false) -> void:
 	if data.has("error"):
 		_show({"rules": [], "groups": [], "vars": [], "external_calls": [],
 			"external_vars": [], "notes": [data["error"]]}, false)
-		_status.text = data["error"]
+		_set_status(data["error"], Style.ERROR)
 		return
 	_data = data
 	_analysis_debounce.stop()
@@ -414,38 +437,48 @@ func _update_status() -> void:
 	_connections_button.disabled = false
 	var variable_count: int = _data["vars"].size()
 	var connection_count := RuleConnections.ids(_data).size()
-	_blackboard_button.text = "▤ %d" % variable_count
+	_blackboard_button.text = "Blackboard %d" % variable_count
 	_blackboard_button.tooltip_text = "Blackboard (%d)" % variable_count
-	_connections_button.text = "⇄ %d" % connection_count
+	_connections_button.text = "Calls & relays %d" % connection_count
 	_connections_button.tooltip_text = "Calls & relays (%d)" % connection_count
 	if _connections_panel.visible:
 		_refresh_connections()
-	var n: int = _data["notes"].size()
-	var t := "%d rules · %d variables · " % [_data["rules"].size(), _data["vars"].size()]
-	t += "No notes" if n == 0 else "%d %s" % [n, "note" if n == 1 else "notes"]
+	var rules: int = _data["rules"].size()
+	var t := "%d %s" % [rules, "rule" if rules == 1 else "rules"]
 	if _dirty:
 		t = "Unsaved · " + t
 	if is_instance_valid(_live):
 		t = "Live · " + t
-	_status.text = t
-	_status.tooltip_text = t + ("\nClick to select affected rules.\n" + "\n".join(_data["notes"]) if n > 0 else "")
-	Style.tint(_status, Style.WARNING if n > 0 or _dirty else Style.SUCCESS)
+	_set_status(t, Style.WARNING if _dirty else Style.MUTED)
+	var notes: Array = _data["notes"]
+	_notes_button.visible = not notes.is_empty()
+	_notes_button.text = "%d %s" % [notes.size(), "note" if notes.size() == 1 else "notes"]
+	Style.tint(_notes_button, Style.WARNING)
+	var popup := _notes_button.get_popup()
+	popup.clear()
+	for note: String in notes:
+		var preview := note.get_slice("\n", 0)
+		if preview != note or preview.length() > 84:
+			preview = preview.left(83) + "…"
+		popup.add_item(preview)
+		popup.set_item_tooltip(popup.item_count - 1, note)
 
-func _on_status_gui_input(event: InputEvent) -> void:
-	if not event is InputEventMouseButton or not event.pressed or event.button_index != MOUSE_BUTTON_LEFT:
+func _set_status(message: String, color: Color) -> void:
+	_status.text = message
+	_status.tooltip_text = message
+	Style.tint(_status, color)
+
+func _on_note_selected(index: int) -> void:
+	var notes: Array = _data.get("notes", [])
+	if index < 0 or index >= notes.size():
 		return
-	var affected: Array[String] = []
+	_set_status(notes[index], Style.WARNING)
 	for rule in _data.get("rules", []):
 		var id: String = rule.get("id", "")
-		if not id.is_empty() and _data.get("notes", []).any(func(note: String) -> bool:
-			return ("'%s'" % id) in note):
-			affected.append(id)
-	if affected.is_empty():
-		return
-	var target := affected[_status_note_cursor % affected.size()]
-	_status_note_cursor += 1
-	view.select_rule(target)
-	accept_event()
+		if not id.is_empty() and ("'%s'" % id) in notes[index]:
+			view.select_rule(id)
+			view.reveal_rule_in_canvas.call_deferred(id)
+			return
 
 # --- History ----------------------------------------------------------------------
 
@@ -525,7 +558,7 @@ func is_dirty() -> bool:
 	return _history.is_dirty()
 
 func _shortcut_input(event: InputEvent) -> void:
-	if not _editable or not is_visible_in_tree() or _event_dialog.visible or _delete_connection_dialog.visible or _create_menu.visible:
+	if not _editable or not is_visible_in_tree() or _event_dialog.visible or _delete_connection_dialog.visible or _create_menu.visible or _reload_dialog.visible:
 		return
 	var focus := get_viewport().gui_get_focus_owner()
 	if focus and (not is_ancestor_of(focus) or focus is LineEdit or focus is TextEdit):
@@ -647,9 +680,7 @@ func _confirm_connection_delete(id: String) -> void:
 	_connections_ui.confirm_delete(_data, _editable, id)
 
 func _show_connection_error(message: String) -> void:
-	_status.text = message
-	_status.tooltip_text = message
-	Style.tint(_status, Style.WARNING)
+	_set_status(message, Style.WARNING)
 func rename_connection(id: String, new_name: String) -> String:
 	if not _editable:
 		return "The graph is read-only."
@@ -855,16 +886,14 @@ func save() -> void:
 		_sync_layout()
 		_analyze_data()
 	if not _data["compiles"]:
-		_status.text = "Not saved: check invalid steps or script errors."
-		Style.tint(_status, Style.WARNING)
+		_set_status("Fix invalid steps or script errors before saving.", Style.WARNING)
 		return
 	var draft := RuleGraphReader.make_definition(_data)
 	var previous_uid := ResourceLoader.get_resource_uid(_path)
 	draft.remove_meta(StageDefinition.ANALYSIS_SCENE_SOURCE_META)
 	var error := ResourceSaver.save(draft, _path)
 	if error != OK:
-		_status.text = "Save failed (error %d)" % error
-		Style.tint(_status, Style.WARNING)
+		_set_status("Save failed (%s)" % error_string(error), Style.ERROR)
 		return
 	if previous_uid != ResourceUID.INVALID_ID:
 		var uid_error := ResourceSaver.set_uid(_path, previous_uid)
@@ -877,7 +906,7 @@ func save() -> void:
 	_history.mark_saved(_snapshot())
 	_dirty = false
 	_update_status()
-	_status.text = "Saved %s.  %s" % [_path.get_file(), _status.text]
+	_set_status("Stage saved", Style.SUCCESS)
 	layout_saved.emit(_path)
 
 # --- Selection --------------------------------------------------------------------
@@ -890,6 +919,7 @@ func _on_rule_selected(rule_id: String) -> void:
 		return
 	_selected = rule_id
 	_selected_group = ""
+	_settings_title.text = "Rule Settings"
 	inspector.show_rule(rd, _data, not _editable)
 	_settings_window.show()
 	_layout_overlays()
@@ -910,6 +940,7 @@ func _on_group_selected(group_name: String) -> void:
 		if g["name"] == group_name:
 			_selected = ""
 			_selected_group = group_name
+			_settings_title.text = "Group Settings"
 			inspector.show_group(g, _data, not _editable)
 			_settings_window.show()
 			_layout_overlays()
@@ -922,3 +953,10 @@ func _clear_selection() -> void:
 	inspector.clear()
 	_settings_window.hide()
 	_layout_overlays()
+
+func _close_settings() -> void:
+	var focus := get_viewport().gui_get_focus_owner()
+	if focus != null and inspector.is_ancestor_of(focus):
+		focus.release_focus()
+	_pending_selection = ""
+	view.clear_selection()

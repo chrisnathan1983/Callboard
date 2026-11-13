@@ -30,9 +30,31 @@ static func resolve_color(control: Control, fallback: Color) -> Color:
 
 static func tint(control: Control, fallback: Color) -> void:
 	if Engine.is_editor_hint() and not control.has_meta(&"_board_tint"):
-		control.theme_changed.connect(_refresh_tint.bind(control), CONNECT_DEFERRED)
+		control.theme_changed.connect(_refresh_tint_from_ref.bind(weakref(control)), CONNECT_DEFERRED)
 	control.set_meta(&"_board_tint", fallback)
 	_refresh_tint(control)
+
+static func _refresh_tint_from_ref(control_ref: WeakRef) -> void:
+	var control := control_ref.get_ref() as Control
+	if control != null:
+		_refresh_tint(control)
+
+static func button_icon(button: Button, icon_name: StringName, fallback: String, keep_text := false) -> void:
+	if not keep_text:
+		button.text = fallback
+	if not Engine.is_editor_hint():
+		return
+	var refresh := _refresh_button_icon.bind(weakref(button), icon_name, fallback, keep_text)
+	button.ready.connect(refresh)
+	button.theme_changed.connect(refresh, CONNECT_DEFERRED)
+
+static func _refresh_button_icon(button_ref: WeakRef, icon_name: StringName, fallback: String, keep_text: bool) -> void:
+	var button := button_ref.get_ref() as Button
+	if button == null:
+		return
+	button.icon = button.get_theme_icon(icon_name, &"EditorIcons") if button.has_theme_icon(icon_name, &"EditorIcons") else null
+	if not keep_text:
+		button.text = "" if button.icon != null else fallback
 
 static func _refresh_tint(control: Control) -> void:
 	var color := resolve_color(control, control.get_meta(&"_board_tint"))

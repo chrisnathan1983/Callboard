@@ -77,6 +77,7 @@ func _make_row(v: Dictionary) -> Control:
 	card.add_child(head)
 	var key := LineEdit.new()
 	key.text = v["key"]
+	key.accessibility_name = "Variable name"
 	key.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	key.editable = _editable
 	key.tooltip_text = v["key"]
@@ -86,7 +87,8 @@ func _make_row(v: Dictionary) -> Control:
 	head.add_child(key)
 	if _editable:
 		var del := Button.new()
-		del.text = "✕"
+		Style.button_icon(del, &"Remove", "✕")
+		del.accessibility_name = "Delete variable"
 		del.tooltip_text = "Delete variable (rules that use it will show a warning)"
 		del.pressed.connect(func() -> void:
 			_data["vars"].erase(v)
@@ -97,8 +99,11 @@ func _make_row(v: Dictionary) -> Control:
 	var row := HBoxContainer.new()
 	card.add_child(row)
 	var scope := OptionButton.new()
+	scope.accessibility_name = "Variable scope"
 	scope.add_item("Saved")
 	scope.add_item("Local")
+	scope.get_popup().set_item_tooltip(0, "Keep this variable in saved Stage state.")
+	scope.get_popup().set_item_tooltip(1, "Reset this variable when the Stage is restored.")
 	scope.select(0 if v["scope"] == "saved" else 1)
 	scope.disabled = not _editable
 	Style.tint(scope, COL_SAVED if v["scope"] == "saved" else COL_LOCAL)
@@ -186,7 +191,7 @@ func refresh_live(stage: Stage) -> void:
 		var l: Label = _live_labels[key]
 		l.text = "Live: " + str(value)
 		l.tooltip_text = l.text
-		l.add_theme_color_override("font_color", Color(0.4, 1.0, 0.5) if bool(value) else Color(0.75, 0.75, 0.75))
+		Style.tint(l, Style.SUCCESS if value is bool and value else Style.TEXT)
 	var latched: PackedStringArray = []
 	for rule in stage.engine.rules:
 		if rule.one_shot and stage.fired.has(rule.latch_key()):

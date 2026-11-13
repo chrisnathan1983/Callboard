@@ -12,6 +12,8 @@ var _active_rows := VBoxContainer.new()
 var _pending_rows := VBoxContainer.new()
 var _content_scroll: ScrollContainer
 var _trace_buffer: Array[Dictionary] = []
+var _active_lines := PackedStringArray()
+var _pending_lines := PackedStringArray()
 
 func setup() -> PanelContainer:
 	var fields := VBoxContainer.new()
@@ -21,7 +23,6 @@ func setup() -> PanelContainer:
 	var title := Style.label("Live debugging", Style.TEXT, 16)
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(title)
-	header.add_child(Style.entry(Style.label("LIVE", Style.SUCCESS, 11)))
 	var clear_button := Button.new()
 	clear_button.text = "Clear trace"
 	clear_button.tooltip_text = "Clear the recent trace entries"
@@ -76,6 +77,8 @@ func bind_stage(stage: Stage) -> void:
 	_clear_rows(_active_rows)
 	_clear_rows(_pending_rows)
 	_clear_rows(_trace_rows)
+	_active_lines.clear()
+	_pending_lines.clear()
 	_trace_buffer.clear()
 	if _stage == null or not is_instance_valid(_stage) or _stage.engine == null:
 		_add_empty(_active_rows, "No live Stage attached.")
@@ -108,8 +111,14 @@ func _on_trace(entry: Dictionary) -> void:
 	_refresh_active()
 
 func _render_trace(entry: Dictionary) -> void:
+	var bar := _content_scroll.get_v_scroll_bar()
+	var at_end := bar.value + bar.page >= bar.max_value - 2.0
 	if _trace_rows.get_child_count() == 1 and _trace_rows.get_child(0).has_meta("empty"):
 		_clear_rows(_trace_rows)
+	if _trace_rows.get_child_count() >= MAX_TRACE_ROWS:
+		var oldest := _trace_rows.get_child(0)
+		_trace_rows.remove_child(oldest)
+		oldest.queue_free()
 	var label := Style.label(_format_trace(entry), Style.TEXT, 12)
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -117,7 +126,7 @@ func _render_trace(entry: Dictionary) -> void:
 	row.add_child(Style.label(">", _trace_color(entry["kind"]), 13))
 	row.add_child(label)
 	_trace_rows.add_child(Style.entry(row))
-	if _content_scroll.is_inside_tree():
+	if at_end and _content_scroll.is_inside_tree():
 		var process_frame := _content_scroll.get_tree().process_frame
 		if not process_frame.is_connected(_scroll_content_to_end):
 			process_frame.connect(_scroll_content_to_end, CONNECT_ONE_SHOT)
@@ -142,29 +151,36 @@ func _scroll_content_to_end() -> void:
 func _on_pending_changed(entries: Array) -> void:
 	if panel == null or not panel.is_visible_in_tree():
 		return
-	_clear_rows(_pending_rows)
-	if entries.is_empty():
-		_add_empty(_pending_rows, "Nothing pending.")
-		return
+	var lines := PackedStringArray()
 	for entry in entries:
 		var remaining: float = entry["remaining"]
 		var time_text := "" if remaining < 0.0 else " - %.1fs" % remaining
-		_add_row(_pending_rows, "%s - %s%s" % [entry["rule"], entry["label"], time_text], Style.TEXT)
+		lines.append("%s - %s%s" % [entry["rule"], entry["label"], time_text])
+	_update_snapshot(_pending_rows, lines, _pending_lines, "Nothing pending.")
+	_pending_lines = lines
 
 func _refresh_active() -> void:
-	_clear_rows(_active_rows)
 	if _stage == null or not is_instance_valid(_stage) or _stage.engine == null:
-		_add_empty(_active_rows, "No live Stage attached.")
 		return
-	var active := _stage.engine.active_snapshot()
-	if active.is_empty():
-		_add_empty(_active_rows, "No running rules.")
-		return
-	for entry in active:
+	var lines := PackedStringArray()
+	for entry in _stage.engine.active_snapshot():
 		var suffix := " - %d queued" % entry["queued"] if entry["queued"] > 0 else ""
 		if entry["restarting"]:
 			suffix += " - restarting"
-		_add_row(_active_rows, "%s%s" % [entry["rule"], suffix], Style.TEXT)
+		lines.append("%s%s" % [entry["rule"], suffix])
+	_update_snapshot(_active_rows, lines, _active_lines, "No running rules.")
+	_active_lines = lines
+
+func _update_snapshot(rows: VBoxContainer, lines: PackedStringArray,
+		previous: PackedStringArray, empty_text: String) -> void:
+	if rows.get_child_count() > 0 and lines == previous:
+		return
+	_clear_rows(rows)
+	if lines.is_empty():
+		_add_empty(rows, empty_text)
+		return
+	for line in lines:
+		_add_row(rows, line, Style.TEXT)
 
 func _trace_color(kind: String) -> Color:
 	match kind:
