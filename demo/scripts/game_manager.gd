@@ -8,7 +8,6 @@ var saved_vars := {}     # persists across reloads (StageManager.stage_states[st
 var fired_rules := {}    # persists across reloads for one-shot rules
 var stage: Stage
 var score := 0
-var log_lines: Array[String] = []
 @onready var hud: GameHud = $HUD
 
 func _ready() -> void:
@@ -26,12 +25,10 @@ func load_stage_scene(scene: PackedScene) -> void:
 	stage.fired = fired_rules
 	add_child(stage)
 	stage.scored.connect(_on_scored)
-	stage.rule_fired.connect(_on_rule_fired)
 	# Bind listeners before activate() dispatches the arrival Call. That lets the
 	# debugger and HUD see rules that fire immediately on arrival.
 	hud.bind_stage(stage)
 	stage.activate()
-	_log("stage loaded")
 
 func unload_stage() -> void:
 	# Cancel the old graph's work before replacing its scene.
@@ -49,11 +46,3 @@ func clear_stage(reset: bool) -> void:
 
 func _on_scored(points: int) -> void:
 	score += points
-
-func _on_rule_fired(rule_id: StringName, event: StringName) -> void:
-	_log("%s  <-  %s" % [rule_id, event])
-
-func _log(text: String) -> void:
-	log_lines.append(text)
-	if log_lines.size() > 8:
-		log_lines.pop_front()

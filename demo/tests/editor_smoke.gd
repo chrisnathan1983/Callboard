@@ -27,9 +27,9 @@ func _test_authored_resource_graph() -> bool:
 	var definition := load(DEFINITION_PATH) as StageDefinition
 	var data := RuleGraphReader.inspect_definition(DEFINITION_PATH)
 	ok = _check("resource stores events, variables, rules and groups",
-		definition.external_calls.size() == 4 and definition.variables.size() == 3
+		definition.external_calls.has("file:permit") and definition.variables.size() == 4
 		and not definition.rules.is_empty() and definition.rules.size() == data.rules.size()
-		and definition.groups.size() == 3 and definition.variables[0] is VariableData
+		and definition.groups.size() == 4 and definition.variables[0] is VariableData
 		and definition.rules[0] is RuleData and definition.rules[0].steps[0] is StepData
 		and definition.groups[0] is GroupData) and ok
 	ok = _check("reader: compiles with no problems", data.errors.is_empty() and data.warnings.is_empty()) and ok
@@ -47,12 +47,8 @@ func _test_authored_resource_graph() -> bool:
 	gv.show_data(data)
 	ok = _check("graph: rule nodes and wires built",
 		gv._rule_nodes.size() == data.rules.size() and not gv.get_connection_list().is_empty()) and ok
-	var min_rule_x: float = INF
-	for rule in data.rules:
-		min_rule_x = minf(min_rule_x, rule.pos.x)
-	ok = _check("external Calls are arranged close to the rule column",
-		is_equal_approx(gv._event_nodes["deliver"].position_offset.x + RuleGraphView.CALL_WIDTH,
-			min_rule_x - RuleGraphView.CALL_GAP)) and ok
+	ok = _check("authored Calls keep their saved position by the delivery branch",
+		gv._event_nodes["deliver"].position_offset == definition.call_positions["deliver"]) and ok
 	var fresh_data := _copy_draft(data)
 	fresh_data.call_positions = {}
 	for rule in fresh_data.rules:
@@ -176,7 +172,8 @@ func _test_board_editing() -> bool:
 
 	# Blackboard editing
 	board.blackboard._on_add(0)
-	ok = _check("add variable (bool, local)", d.variables.size() == 4 and d.variables[3].key == "new_var" and d.variables[3].scope == "local") and ok
+	ok = _check("add variable (bool, local)", d.variables.size() == definition.variables.size() + 1
+		and d.variables.back().key == "new_var" and d.variables.back().scope == "local") and ok
 	ok = _check("added variable is generated", RuleGraphReader.make_definition(d).variables[3].default_value == false) and ok
 	AuthoredData.rename_key(d, "lamp_on", "alarm_on")
 	board._changed("")
@@ -189,11 +186,12 @@ func _test_board_editing() -> bool:
 
 	# Groups
 	board.add_group()
-	ok = _check("add group", d.groups.size() == 4) and ok
+	ok = _check("add group", d.groups.size() == definition.groups.size() + 1) and ok
 	_rule(d, "z1_standoff").group = "Group"
 	board._changed("z1_standoff")
 	board.delete_group("Group")
-	ok = _check("delete group clears membership", d.groups.size() == 3 and _rule(d, "z1_standoff").group == "") and ok
+	ok = _check("delete group clears membership", d.groups.size() == definition.groups.size()
+		and _rule(d, "z1_standoff").group == "") and ok
 	board.queue_free()
 
 
@@ -241,9 +239,11 @@ func _test_save_and_history() -> bool:
 		b2.view.get_group_rects()["Delivery"].size == frame_size.round() + Vector2(30, 30)) and ok
 	b2.undo()
 	b2.blackboard._on_add(0)
-	ok = _check("new edit clears redo", b2._redo_button.disabled and d2.variables.size() == 4) and ok
+	var original_variable_count := (load(DEFINITION_PATH) as StageDefinition).variables.size()
+	ok = _check("new edit clears redo", b2._redo_button.disabled
+		and d2.variables.size() == original_variable_count + 1) and ok
 	b2.undo()
-	ok = _check("undo restores blackboard rows", d2.variables.size() == 3) and ok
+	ok = _check("undo restores blackboard rows", d2.variables.size() == original_variable_count) and ok
 
 	b2.connect_wire({"event": "doorbell"}, "z1_decoy")
 	ok = _check("wire uses new event", _rule(d2, "z1_decoy").trigger == "doorbell") and ok
@@ -574,7 +574,8 @@ func _test_rename_saved_state() -> bool:
 		and not stage.saved_vars.has(&"guard_relaxed")) and ok
 	stage.write_var(&"guard_relaxed", false)
 	ok = _check("writes still use the original saved storage key",
-		stage.saved_vars == {&"guard_calmed": false}) and ok
+		stage.saved_vars[&"guard_calmed"] == false
+		and not stage.saved_vars.has(&"guard_relaxed")) and ok
 	stage.free()
 
 	board.duplicate_rule("parcel_delivered")

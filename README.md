@@ -15,9 +15,11 @@
 
 Open [project.godot](project.godot) in Godot **4.7** and press **F5**. The plugin is already enabled. Open the **Callboard** editor tab and select `stage_01/stage_01.tres` to inspect the same rules that drive the demo. The project includes `res://demo/stages` in `callboard/stage_scan_folders` so the stage picker can find it. CI uses Godot **4.7.2**.
 
-1. Walk toward the doorway. The guard barks and the lamp flashes. Interact while the lamp is on to see the caught rule.
-2. Interact by the red shelter to offer a decoy, or walk into the blue pad to release a treat. Either path calms the guard.
-3. Return to the doorway with the lamp off and interact to collect the delivery reward.
+**The Duck Stops Here.** City Hall is expecting a rubber duck, Inspector Biscuit is taking his job very seriously, and the clerk requires a permit for indoor quacking.
+
+1. Offer a decoy at the red shelter or step on the blue biscuit pad to get Inspector Biscuit off duty.
+2. Get a squeak permit at the yellow desk. You can do this before or after distracting the inspector.
+3. Deliver the duck at City Hall to earn 200 points and meet the new deputy. Try the door early to see what the clerk says when the inspection lamp is on, the inspector is still on duty, or the permit is missing.
 
 | Control | Action |
 | --- | --- |
@@ -27,22 +29,11 @@ Open [project.godot](project.godot) in Godot **4.7** and press **F5**. The plugi
 | **R** | Reload the Stage and reset local variables |
 | **X** | Clear saved variables, one-shot latches, and score, then reload |
 
-```mermaid
-flowchart LR
-	offer["Offer decoy"] --> calm["Calm guard"]
-	treat["Release treat"] --> calm
-	calm --> off["Turn lamp off"]
-	call["Deliver at the doorway"] --> delivery{"Lamp on at delivery?"}
-	off -.->|Updates lamp state| delivery
-	delivery -->|Yes| caught["Stun player"]
-	delivery -->|No| reward["Award 200 points once"]
-```
+Search for `deliver` in the Callboard toolbar and toggle **Isolate** to follow the four rules that share the Call. The two distractions converge on `calm_guard`, while a successful delivery emits `duck_delivered` to cue both the clerk and the inspector.
 
-The two calming paths emit the same `calm_guard` relay. The two delivery rules share the `deliver` Call and use opposite checks on `lamp_on`.
+Open [Stage 01's scene](demo/stages/stage_01/stage_01.tscn) to inspect the placed props and the Calls assigned to **DeliveryArea**, **DecoyArea**, and **PermitArea**. The [annotated stage script](demo/stages/stage_01/stage_01.gd) shows how to expose scene nodes to the graph and build the biscuit and decoy in code from scene markers.
 
-Open [Stage 01’s scene](demo/stages/stage_01/stage_01.tscn) to inspect the placed props. Select the Stage root to see the guard and lamp assignments. Select **DeliveryArea** or **DecoyArea** to see which Call each area fires. The [annotated stage script](demo/stages/stage_01/stage_01.gd) shows how to expose these scene nodes to the graph and how to build the treat and decoy in code from scene markers.
-
-Press **F1** during play and open **DEBUG** to follow a Call through its rules, waits, and relays. After delivering, press **R** to see the saved guard state and one-shot delivery latch restore the scene. Press **X** to start fresh.
+Press **F1** during play and open **DEBUG** to follow a Call through its rules, waits, and relays. After delivering, press **R** to see the saved permit, guard state, and one-shot delivery latch restore the scene. Press **X** to start fresh.
 
 ## Install in your project
 

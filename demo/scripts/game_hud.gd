@@ -38,12 +38,18 @@ func _process(_delta: float) -> void:
 	if board_panel and board_panel.visible:
 		hud.text = "F1: hide Callboard"
 		return
+	var stage := manager.stage
 	hud.text = (
-		"Score: %d\n\n"
-		+ "WASD / arrows: move    E: interact (shelter = offer decoy, doorway = deliver)\n"
-		+ "Bump the blue pad for the treat.    R: reset the stage    X: strike the show%s\n\n"
-		+ "saved vars (persist): %s\n"
-		+ "local vars (reset on reload): %s\n\n"
-		+ "rules fired:\n%s"
-	) % [manager.score, "    F1: Callboard" if board_panel else "",
-		manager.stage.saved_vars, manager.stage.bb.local, "\n".join(manager.log_lines)]
+		"Score: %d  |  THE DUCK STOPS HERE\n"
+		+ "%s\n"
+		+ "WASD / arrows: move    E: interact    R: reload    X: start fresh%s"
+	) % [manager.score, _objective(stage), "    F1: Callboard" if board_panel else ""]
+
+func _objective(stage: Stage) -> String:
+	if stage.has_fired(&"z1_delivered"):
+		return "Delivered. Deputy Duck takes office immediately."
+	if not stage.is_set(&"guard_calmed"):
+		return "Distract Inspector Biscuit with the decoy or the biscuit pad."
+	if not stage.is_set(&"permit_stamped"):
+		return "Get a squeak permit at the yellow desk."
+	return "Deliver the licensed duck at City Hall."

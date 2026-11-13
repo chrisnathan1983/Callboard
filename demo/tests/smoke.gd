@@ -24,6 +24,16 @@ func _initialize() -> void:
 	stage.activate()
 	ok = _check("activating twice starts only one standoff loop", fired.count(&"z1_standoff") == 1) and ok
 	stage.fire(&"deliver")
+	ok = _check("a dark lamp still requires the guard to be off duty",
+		fired.has(&"z1_on_duty") and not stage.has_fired(&"z1_delivered")) and ok
+	var changes: Array = []
+	stage.var_changed.connect(func(key: StringName, value: Variant) -> void:
+		changes.append([key, value]))
+	stage.write_var(&"guard_calmed", true)
+	ok = _check("stage forwards Blackboard writes to gameplay listeners",
+		changes == [[&"guard_calmed", true]] and stage.saved_vars[&"guard_calmed"]) and ok
+	stage.fire(&"file:permit")
+	stage.fire(&"deliver")
 	stage.fire(&"deliver")
 	await process_frame
 
@@ -35,12 +45,6 @@ func _initialize() -> void:
 		delivered_count == 1 and stage.fired.has(&"z1_delivered")) and ok
 	ok = _check("deliver guard prevents the caught rule", not fired.has(&"z1_caught")) and ok
 
-	var changes: Array = []
-	stage.var_changed.connect(func(key: StringName, value: Variant) -> void:
-		changes.append([key, value]))
-	stage.write_var(&"guard_calmed", true)
-	ok = _check("stage forwards Blackboard writes to gameplay listeners",
-		changes == [[&"guard_calmed", true]] and stage.saved_vars[&"guard_calmed"]) and ok
 	ok = (await _test_player_and_bump(stage, fired)) and ok
 	stage.deactivate()
 	# Let the cancelled 3.5-second standoff loop unwind before freeing the Stage.
@@ -212,6 +216,9 @@ func _test_demo_paths(game: GameManager) -> bool:
 	var player := game.get_node("WorldManager/Player") as Player
 	var delivery := stage.get_node("DeliveryArea") as TriggerArea
 	var shelter := stage.get_node("DecoyArea") as TriggerArea
+	var permit_area := stage.get_node("PermitArea") as TriggerArea
+	var fired: Array[StringName] = []
+	stage.rule_fired.connect(func(id: StringName, _event: StringName) -> void: fired.append(id))
 	# Simulate a standoff tick without waiting for the ambient loop's first interval.
 	stage.fire(&"relay:standoff_tick")
 	await create_timer(0.4).timeout
@@ -235,15 +242,32 @@ func _test_demo_paths(game: GameManager) -> bool:
 	for frame in range(3):
 		await physics_frame
 	player.interact()
+	ok = _check("delivery without a permit gets a refusal after the guard calms",
+		fired.has(&"z1_permit_needed") and not stage.reward.visible and game.score == 125) and ok
+	player.global_position = permit_area.global_position
+	for frame in range(3):
+		await physics_frame
+	player.interact()
+	player.interact()
+	ok = _check("the placed desk stamps once and acknowledges a repeat interaction",
+		stage.permit.visible and stage.is_set(&"permit_stamped")
+		and fired.count(&"z1_stamp_permit") == 1 and fired.count(&"z1_permit_repeat") == 1) and ok
+	player.global_position = delivery.global_position
+	for frame in range(3):
+		await physics_frame
+	player.interact()
+	player.interact()
 	await create_timer(0.9).timeout
-	ok = _check("delivery reveals the scene reward and awards its one-shot score",
-		stage.reward.visible and stage.has_fired(&"z1_delivered") and game.score == 325) and ok
+	ok = _check("delivery reveals Deputy Duck, awards points once, and cues both reactions",
+		stage.reward.visible and stage.has_fired(&"z1_delivered") and game.score == 325
+		and fired.count(&"z1_receipt") == 1 and fired.count(&"z1_audit") == 1) and ok
 	game.clear_stage(false)
 	stage = game.stage as Stage01
 	(stage.get_node("DeliveryArea") as TriggerArea).interact()
 	ok = _check("stage reload restores saved props and leaves local props hidden",
 		stage.reward.visible and stage.guard.global_position.is_equal_approx(
 			stage.shelter.global_position + Stage01.GUARD_REST_OFFSET)
+		and stage.permit.visible and stage.is_set(&"permit_stamped")
 		and not stage.decoy.visible and not stage.is_set(&"lamp_on") and game.score == 325) and ok
 	game.clear_stage(true)
 	stage = game.stage as Stage01
@@ -253,7 +277,11 @@ func _test_demo_paths(game: GameManager) -> bool:
 	ok = _check("a fresh run can use the placed bump pad to reveal the scripted treat",
 		stage.treat.visible and stage.is_set(&"treat_out") and stage.is_set(&"guard_calmed")
 		and not stage.reward.visible and not stage.has_fired(&"z1_delivered")
-		and game.score == 0) and ok
+		and not stage.permit.visible and not stage.is_set(&"permit_stamped") and game.score == 0) and ok
+	(stage.get_node("PermitArea") as TriggerArea).interact()
+	(stage.get_node("DeliveryArea") as TriggerArea).interact()
+	ok = _check("the biscuit route can also deliver the duck",
+		stage.reward.visible and stage.has_fired(&"z1_delivered") and game.score == 200) and ok
 	return ok
 
 func _check(label: String, condition: bool) -> bool:

@@ -24,6 +24,8 @@ const GUARD_REST_OFFSET := Vector3(0, -0.1, 1.5)
 @onready var shelter: MeshInstance3D = $Shelter
 @onready var window: MeshInstance3D = $Window
 @onready var reward: MeshInstance3D = $Reward
+@onready var permit_desk: MeshInstance3D = $PermitDesk
+@onready var permit: MeshInstance3D = $PermitDesk/Permit
 
 # Option 3: Declare a typed field here and assign it in _build_props(). These props
 # are absent from the scene tree in the editor, but available in the rule graph.
@@ -42,8 +44,8 @@ func _build_props() -> void:
 	treat.hide()
 	decoy.hide()
 
-	# The scene-placed DeliveryArea and DecoyArea use TriggerArea in Interact mode.
-	# Their Event fields match the external Calls "deliver" and "offer:decoy".
+	# DeliveryArea, DecoyArea, and PermitArea use TriggerArea in Interact mode.
+	# Their Event fields match the external Calls in the StageDefinition.
 	# BumpPad is another scene-placed prop. It calls Stage.fire_relay_once() with
 	# "treat_out", using the local Blackboard key of the same name as its latch.
 	# Both the decoy and treat paths eventually emit the "calm_guard" relay.
@@ -63,9 +65,9 @@ func _restore_state() -> void:
 	# The game manager supplies the saved Blackboard values and one-shot latches
 	# before adding this Stage to the tree. This hook runs after build() and before
 	# the manager calls activate(), which dispatches the "arrive" Call.
-	# Restore the visible result directly so a reload doesn't replay the delivery
-	# animation or award the score a second time.
+	# Restore the visible results directly. The rules own the animations and score.
 	if get_var(&"guard_calmed"):
 		guard.global_position = shelter.global_position + GUARD_REST_OFFSET
+	permit.visible = is_set(&"permit_stamped")
 	if has_fired(&"z1_delivered"):
 		reward.show()
