@@ -10,6 +10,7 @@ func _initialize() -> void:
 	ok = _test_layer_export_filter() and ok
 	ok = _test_factory() and ok
 	ok = _test_debug_panel() and ok
+	ok = await _test_connection_focus() and ok
 	ok = _test_project_settings() and ok
 	print("ADDON EDITOR: ", "PASS" if ok else "FAIL")
 	quit(0 if ok else 1)
@@ -148,6 +149,70 @@ func _test_debug_panel() -> bool:
 	panel.free()
 	first.free()
 	second.free()
+	return ok
+
+func _test_connection_focus() -> bool:
+	var board := Callboard.new()
+	root.add_child(board)
+	var data := GraphDraft.new()
+	data.external_calls.assign(["go", "unused"])
+	data.rules.assign([
+		RuleData.from_dictionary({"id": "producer", "trigger": "go", "emit": "other", "steps": [{"verb": "fire"}]}),
+		RuleData.from_dictionary({"id": "listener", "trigger": "relay:ready"}),
+		RuleData.from_dictionary({"id": "other_listener", "trigger": "relay:other"}),
+		RuleData.from_dictionary({"id": "completion_producer", "trigger": "go", "emit": "ready"}),
+	])
+	var step := data.rules[0].steps[0]
+	var analysis := GraphDraft.StepAnalysis.new()
+	analysis.relay = "ready"
+	data.step_metadata[step] = analysis
+	board._show(data, true)
+	var graph := board.view
+	var positions := graph.get_positions()
+	var call_positions := graph.get_call_positions()
+	graph._fill_focus_results("GO")
+	graph._focus_search.text_submitted.emit("GO")
+	var ok := _check("search focuses a Call and dims unrelated rules without hiding them",
+		graph._focused_connection == "go" and graph._event_nodes["go"].modulate == Color.WHITE
+		and graph._rule_nodes["producer"].modulate == Color.WHITE
+		and graph._rule_nodes["listener"].modulate.a < 1.0 and graph._rule_nodes["listener"].visible
+		and graph.get_connection_list().size() == 5)
+	graph._fill_focus_results("ready")
+	graph._focus_results.item_clicked.emit(0, Vector2.ZERO, MOUSE_BUTTON_LEFT)
+	graph._focus_mode.select(1)
+	graph._focus_mode.item_selected.emit(1)
+	await process_frame
+	ok = _check("Isolate keeps step and completion emitters and only the selected relay's wires",
+		graph._rule_nodes["producer"].visible and graph._rule_nodes["completion_producer"].visible
+		and graph._rule_nodes["listener"].visible and not graph._rule_nodes["other_listener"].visible
+		and not graph._event_nodes["go"].visible and graph.get_connection_list().size() == 2) and ok
+	graph.set_minimized(true)
+	await process_frame
+	ok = _check("Compact preserves focus and the isolated wires",
+		graph._focused_connection == "relay:ready" and graph.get_connection_list().size() == 2) and ok
+	graph._clear_focus_button.pressed.emit()
+	ok = _check("clearing focus restores connections and leaves the authored layout and history intact",
+		graph._rule_nodes["other_listener"].visible and graph._event_nodes["go"].visible
+		and graph.get_connection_list().size() == 5 and graph.get_positions() == positions
+		and graph.get_call_positions() == call_positions and not board.is_dirty()
+		and not board._history.can_undo()) and ok
+	graph.set_connection_focus("unused")
+	ok = _check("an unused Call remains visible by itself in Isolate",
+		graph._event_nodes["unused"].visible and not graph._rule_nodes["producer"].visible
+		and graph.get_connection_list().is_empty()) and ok
+	data.external_calls.erase("unused")
+	graph.update_data(data)
+	ok = _check("removing a focused Call restores the full view",
+		graph._focused_connection.is_empty() and graph.get_connection_list().size() == 5) and ok
+	board._show(data, false, true)
+	graph.set_connection_focus("relay:ready")
+	graph.pulse("other_listener")
+	graph.pulse("producer")
+	ok = _check("live activity highlights focused rules without changing isolation",
+		not graph._rule_nodes["other_listener"].visible
+		and graph._rule_nodes["producer"].self_modulate != Color.WHITE
+		and graph.get_connection_list().size() == 2) and ok
+	board.free()
 	return ok
 
 func _test_project_settings() -> bool:

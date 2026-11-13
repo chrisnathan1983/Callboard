@@ -105,6 +105,8 @@ Add a `show_node` or `move_to` step to make a scene prop respond. Step arguments
 
 Use **Calls & relays** to manage connections. Renaming updates authored references. Update event IDs in gameplay code and scene triggers separately. Blackboard renames preserve aliases for existing gameplay references.
 
+Use **Focus** in the graph toolbar to search for a Call or relay. A Call shows its listeners. A relay shows the rules that emit it, including step emissions, and its listeners. **Highlight** dims the rest of the board, while **Isolate** hides unrelated cards and wires. **Fit focus** frames the matching cards. Use the clear button next to **Focus** to return to the full board. Focus is also available on the live board.
+
 Select a rule to edit its guards, steps, and relay. Rule renames preserve saved one-shot latches. Pass the current rule ID to `Stage.has_fired()`. Use the toolbar to save, reload, undo, or redo. Validation checks step expressions and surfaces issues such as relay cycles and overlapping guards.
 
 The diagnostics menu shows separate **Error** and **Warning** entries. Select an entry to jump to its rule when one is identified. Errors block saving or activation. Warnings identify issues to review and allow saving.

@@ -441,6 +441,8 @@ func _show(data: GraphDraft, editable: bool, live := false, reuse_graph := false
 	_debug_button.visible = live
 	_debug_button.set_pressed_no_signal(live)
 	_live_debug_panel.visible = live
+	if not reuse_graph:
+		view.set_connection_focus("", false)
 	view.set_editable(_editable)
 	blackboard.show_data(data, _editable, live)
 	if reuse_graph:
@@ -508,6 +510,7 @@ func _on_note_selected(index: int) -> void:
 	for rule in _data.rules:
 		var id := String(rule.id)
 		if not id.is_empty() and ("'%s'" % id) in message:
+			view.reveal_rule_from_isolation(id)
 			view.select_rule(id)
 			view.reveal_rule_in_canvas.call_deferred(id)
 			return
@@ -798,6 +801,7 @@ func _flush_debounced_change() -> void:
 func add_rule(at := Vector2.INF) -> RuleData:
 	if not _editable:
 		return null
+	view.set_connection_focus("", false)
 	_sync_layout()
 	var id := AuthoredData.unique_name(AuthoredData.rule_ids(_data), "new_rule")
 	var trigger: String = _data.external_calls[0] if not _data.external_calls.is_empty() else "arrive"
@@ -816,6 +820,7 @@ func duplicate_rule(id: String) -> void:
 	var src := _data.find_rule(id)
 	if src == null:
 		return
+	view.set_connection_focus("", false)
 	var rd: RuleData = src.duplicate(true)
 	rd.id = AuthoredData.unique_name(AuthoredData.rule_ids(_data), id + "_copy")
 	rd.state_key = AuthoredData.new_state_key()
@@ -841,6 +846,7 @@ func _delete_rules(ids: Array) -> void:
 func add_group(at := Vector2.INF) -> void:
 	if not _editable:
 		return
+	view.set_connection_focus("", false)
 	_sync_layout()
 	var names: Array = _data.groups.map(func(g: GroupData) -> String: return g.name)
 	var origin := view.view_center() - Vector2(150, 100) if at == Vector2.INF else at

@@ -30,6 +30,7 @@ const COL_REQ := Style.SUCCESS
 const COL_FORBID := Style.ERROR
 const COL_CANCEL := Style.WARNING
 const COL_DIM := Style.MUTED
+const UNRELATED_TINT := Color(0.68, 0.68, 0.68, 0.32)
 
 var fit_area := Rect2()
 var _rule_nodes := {}    # rule id -> GraphNode
@@ -45,6 +46,18 @@ var _minimap_control: Control
 var _compact_button: Button
 var _minimized := false
 var _last_data: GraphDraft
+var _fit_button := Button.new()
+var _focus_button := Button.new()
+var _clear_focus_button := Button.new()
+var _focus_popup := PopupPanel.new()
+var _focus_search := LineEdit.new()
+var _focus_results := ItemList.new()
+var _focus_mode := OptionButton.new()
+var _focused_connection := ""
+var _focused_nodes: Dictionary[StringName, bool] = {}
+var _focused_wire_targets: Dictionary[StringName, bool] = {}
+var _hide_unrelated := false
+var _connection_ids: Array = []
 
 func _init() -> void:
 	minimap_enabled = true
@@ -52,12 +65,11 @@ func _init() -> void:
 	show_zoom_label = true
 	grid_pattern = GRID_PATTERN_DOTS
 	connection_lines_thickness = 2.0
-	var fit := Button.new()
-	fit.text = "Fit all"
-	Style.button_icon(fit, &"ZoomReset", "", true)
-	fit.tooltip_text = "Frame every Call, rule and group"
-	fit.pressed.connect(request_fit)
-	get_menu_hbox().add_child(fit)
+	_fit_button.text = "Fit all"
+	Style.button_icon(_fit_button, &"ZoomReset", "", true)
+	_fit_button.tooltip_text = "Frame every Call, rule and group"
+	_fit_button.pressed.connect(request_fit)
+	get_menu_hbox().add_child(_fit_button)
 	var arrange := Button.new()
 	arrange.text = "Arrange"
 	arrange.tooltip_text = "Arrange rules by relay flow and place Calls beside them"
@@ -69,6 +81,7 @@ func _init() -> void:
 	_compact_button.tooltip_text = "Collapse rule details"
 	_compact_button.toggled.connect(set_minimized)
 	get_menu_hbox().add_child(_compact_button)
+	_setup_focus_picker()
 	var menu := get_menu_hbox().get_parent() as Control
 	menu.minimum_size_changed.connect(_position_view_tools, CONNECT_DEFERRED)
 	_position_view_tools.call_deferred()
@@ -83,12 +96,9 @@ func _init() -> void:
 	graph_elements_linked_to_frame_request.connect(_on_linked_to_frame)
 
 func set_editable(on: bool) -> void:
-	if _editable and not on:
-		_apply_wire_focus(&"")
 	_editable = on
 	right_disconnects = on
-	if not on:
-		remove_theme_color_override("activity")
+	_refresh_wire_focus()
 
 func set_minimized(on: bool) -> void:
 	if _minimized == on:
@@ -141,6 +151,140 @@ func _position_view_tools() -> void:
 	var menu := get_menu_hbox().get_parent() as Control
 	menu.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT, Control.PRESET_MODE_MINSIZE, 12)
 
+func _setup_focus_picker() -> void:
+	_focus_button.text = "Focus"
+	_focus_button.disabled = true
+	_focus_button.tooltip_text = "Find a Call or relay and focus its direct connections"
+	Style.button_icon(_focus_button, &"Search", "", true)
+	_focus_button.pressed.connect(_open_focus_picker)
+	get_menu_hbox().add_child(_focus_button)
+	Style.button_icon(_clear_focus_button, &"GuiClose", "Clear")
+	_clear_focus_button.tooltip_text = "Clear connection focus"
+	_clear_focus_button.accessibility_name = "Clear connection focus"
+	_clear_focus_button.pressed.connect(set_connection_focus.bind(""))
+	_clear_focus_button.hide()
+	get_menu_hbox().add_child(_clear_focus_button)
+
+	add_child(_focus_popup)
+	var margin := MarginContainer.new()
+	for side in [&"margin_left", &"margin_top", &"margin_right", &"margin_bottom"]:
+		margin.add_theme_constant_override(side, 8)
+	_focus_popup.add_child(margin)
+	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	var fields := VBoxContainer.new()
+	margin.add_child(fields)
+	_focus_search.placeholder_text = "Search Calls and relays"
+	_focus_search.accessibility_name = "Search Calls and relays"
+	_focus_search.clear_button_enabled = true
+	_focus_search.text_changed.connect(_fill_focus_results)
+	_focus_search.text_submitted.connect(func(_query: String) -> void:
+		if _focus_results.item_count > 0:
+			_choose_focus_result(0))
+	fields.add_child(_focus_search)
+	_focus_results.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_focus_results.accessibility_name = "Calls and relays"
+	_focus_results.item_clicked.connect(func(index: int, _at: Vector2, mouse_button: int) -> void:
+		if mouse_button == MOUSE_BUTTON_LEFT:
+			_choose_focus_result(index))
+	_focus_results.item_activated.connect(_choose_focus_result)
+	fields.add_child(_focus_results)
+	_focus_mode.accessibility_name = "Connection focus mode"
+	_focus_mode.add_item("Highlight")
+	_focus_mode.add_item("Isolate")
+	_focus_mode.get_popup().set_item_tooltip(0, "Dim unrelated cards and wires")
+	_focus_mode.get_popup().set_item_tooltip(1, "Hide unrelated cards and wires")
+	_focus_mode.item_selected.connect(func(index: int) -> void:
+		_hide_unrelated = index == 1
+		if not _focused_connection.is_empty():
+			_refresh_connection_focus()
+			request_fit())
+	fields.add_child(_focus_mode)
+
+func _open_focus_picker() -> void:
+	_focus_search.clear()
+	_fill_focus_results("")
+	var popup_size := Vector2i(Vector2(360, 290) * get_theme_default_base_scale())
+	var anchor := Vector2i(_focus_button.get_screen_transform().origin)
+	_focus_popup.popup(Rect2i(anchor - Vector2i(0, popup_size.y + 6), popup_size))
+	_focus_search.grab_focus()
+
+func _fill_focus_results(query: String) -> void:
+	_focus_results.clear()
+	var search := query.strip_edges()
+	for id: String in _connection_ids:
+		var relay := id.begins_with(RuleConnections.RELAY_PREFIX)
+		var label := ("Relay  " if relay else "Call  ") + id.trim_prefix(RuleConnections.RELAY_PREFIX)
+		if search.is_empty() or label.containsn(search) or id.containsn(search):
+			var index := _focus_results.add_item(label)
+			_focus_results.set_item_metadata(index, id)
+			_focus_results.set_item_tooltip(index, id)
+			if id == _focused_connection:
+				_focus_results.select(index)
+	if _focus_results.item_count == 0:
+		_focus_results.add_item("No matching Calls or relays")
+		_focus_results.set_item_disabled(0, true)
+
+func _choose_focus_result(index: int) -> void:
+	if _focus_results.is_item_disabled(index):
+		return
+	set_connection_focus(_focus_results.get_item_metadata(index))
+	_focus_popup.hide()
+
+func set_connection_focus(id: String, fit := true) -> void:
+	if _focused_connection == id or (not id.is_empty() and not _connection_ids.has(id)):
+		return
+	_focused_connection = id
+	_refresh_connection_focus()
+	if fit:
+		request_fit()
+
+func reveal_rule_from_isolation(rule_id: String) -> void:
+	var node: GraphNode = _rule_nodes.get(rule_id)
+	if node != null and not node.visible:
+		set_connection_focus("", false)
+
+func _refresh_connection_focus() -> void:
+	_connection_ids = RuleConnections.ids(_last_data)
+	if not _connection_ids.has(_focused_connection):
+		_focused_connection = ""
+	var has_focus := not _focused_connection.is_empty()
+	var isolate := has_focus and _hide_unrelated
+	_focused_nodes.clear()
+	_focused_wire_targets.clear()
+	if has_focus:
+		var source: GraphNode = _event_nodes.get(_focused_connection)
+		if source != null:
+			_focused_nodes[source.name] = true
+		var relay := _focused_connection.trim_prefix(RuleConnections.RELAY_PREFIX)
+		var is_relay := relay != _focused_connection
+		for rule in _last_data.rules:
+			var node: GraphNode = _rule_nodes[rule.id]
+			if rule.trigger == _focused_connection:
+				# Each rule has one trigger, so all wires into this port share its event ID.
+				_focused_wire_targets[node.name] = true
+				_focused_nodes[node.name] = true
+			elif is_relay and output_relays(rule, _last_data).has(relay):
+				_focused_nodes[node.name] = true
+	for nodes in [_event_nodes, _rule_nodes, _frames]:
+		for element: GraphElement in nodes.values():
+			var unrelated := has_focus and not _focused_nodes.has(element.name)
+			element.modulate = UNRELATED_TINT if unrelated else Color.WHITE
+			element.visible = not (isolate and unrelated)
+			if not element.visible:
+				element.selected = false
+	_clear_deselected()
+	clear_connections()
+	_connect_all(_last_data.rules, isolate)
+	_refresh_wire_focus()
+	_focus_button.disabled = _connection_ids.is_empty()
+	_focus_button.text = "Focus: " + _focused_connection if has_focus else "Focus"
+	_focus_button.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_focus_button.custom_minimum_size.x = 174 * get_theme_default_base_scale() if has_focus else 80
+	_focus_button.tooltip_text = _focused_connection if has_focus else "Find a Call or relay and focus its direct connections"
+	_clear_focus_button.visible = has_focus
+	_fit_button.text = "Fit focus" if has_focus else "Fit all"
+	_fit_button.tooltip_text = "Frame the focused cards" if has_focus else "Frame every Call, rule and group"
+
 func request_fit() -> void:
 	_fit_requested = true
 	_queue_fit()
@@ -158,6 +302,8 @@ func _fit_all() -> void:
 	var has_elements := false
 	for nodes in [_event_nodes, _rule_nodes, _frames]:
 		for element: GraphElement in nodes.values():
+			if not _focused_connection.is_empty() and not _focused_nodes.has(element.name):
+				continue
 			var rect := Rect2(element.position_offset, element.size)
 			bounds = bounds.merge(rect) if has_elements else rect
 			has_elements = true
@@ -231,7 +377,7 @@ func show_data(data: GraphDraft) -> void:
 			attach_graph_element_to_frame(n.name, _frames[rd.group].name)
 
 	_make_event_nodes(data.external_calls, rules, data.call_positions)
-	_connect_all(rules)
+	_refresh_connection_focus()
 	_cache_rule_signatures(rules, data)
 
 ## Updates stable graph structures in place. A structural change falls back to a full build;
@@ -245,7 +391,6 @@ func update_data(data: GraphDraft) -> void:
 		show_data(data)
 		return
 
-	clear_connections()
 	for group in data.groups:
 		var frame: GraphFrame = _frames[group.name]
 		frame.position_offset = group.rect.position
@@ -274,8 +419,7 @@ func update_data(data: GraphDraft) -> void:
 	var event_positions := _event_positions(data.external_calls, rules, data.call_positions)
 	for event_id in _event_nodes:
 		(_event_nodes[event_id] as GraphNode).position_offset = event_positions[event_id]
-	_connect_all(rules)
-	_refresh_wire_focus()
+	_refresh_connection_focus()
 
 func _same_ids(nodes: Dictionary, ids: Array) -> bool:
 	if nodes.size() != ids.size():
@@ -389,36 +533,39 @@ func _deselect_elements() -> void:
 
 func select_rule(id: String) -> void:
 	_deselect_elements()
-	if _rule_nodes.has(id):
-		_inspected_node = _rule_nodes[id]
+	var node: GraphNode = _rule_nodes.get(id)
+	if node != null and node.visible:
+		_inspected_node = node
 		_inspected_node.selected = true
 
 func select_group(group_name: String) -> bool:
 	var frame: GraphFrame = _frames.get(group_name)
-	if frame == null:
+	if frame == null or not frame.visible:
 		return false
 	_inspected_node = frame
 	frame.selected = true
 	return true
 
 func _refresh_wire_focus() -> void:
-	if not _editable:
-		return
+	var has_focus := not _focused_connection.is_empty()
 	var focused := &""
-	if is_instance_valid(_inspected_node) and _inspected_node.selected and _inspected_node.has_meta("rule_id"):
+	if _editable and not has_focus and is_instance_valid(_inspected_node) and _inspected_node.selected and _inspected_node.has_meta("rule_id"):
 		focused = _inspected_node.name
-	if focused != &"":
+	if has_focus or focused != &"":
 		var canvas := get_theme_stylebox("panel") as StyleBoxFlat
 		var dim_color := canvas.bg_color if canvas != null else Style.SURFACE
-		dim_color.a = 0.55
+		dim_color.a = 0.25 if has_focus else 0.55
 		if get_theme_color("activity") != dim_color:
 			add_theme_color_override("activity", dim_color)
-	_apply_wire_focus(focused)
-
-func _apply_wire_focus(focused: StringName) -> void:
+	elif has_theme_color_override("activity"):
+		remove_theme_color_override("activity")
 	for wire in get_connection_list():
-		var unrelated: bool = focused != &"" and wire["from_node"] != focused and wire["to_node"] != focused
-		set_connection_activity(wire["from_node"], wire["from_port"], wire["to_node"], wire["to_port"], 0.65 if unrelated else 0.0)
+		var activity := 0.0
+		if has_focus and not _focused_wire_targets.has(wire["to_node"]):
+			activity = 0.9
+		elif focused != &"" and wire["from_node"] != focused and wire["to_node"] != focused:
+			activity = 0.65
+		set_connection_activity(wire["from_node"], wire["from_port"], wire["to_node"], wire["to_port"], activity)
 
 ## Port layout of a rule card: relays fired by its steps, then the rule's own `emits`.
 static func output_relays(rd: RuleData, data: GraphDraft) -> Array:
@@ -434,9 +581,11 @@ static func output_relays(rd: RuleData, data: GraphDraft) -> Array:
 
 func pulse(rule_id: String) -> void:
 	var n: GraphNode = _rule_nodes.get(rule_id)
-	if n == null:
+	if n == null or not _can_flash(n):
 		return
 	_flash_node(n)
+	if not _focused_connection.is_empty():
+		return
 	var wires: Array = []
 	for c in get_connection_list():
 		if c["from_node"] == n.name:
@@ -445,18 +594,25 @@ func pulse(rule_id: String) -> void:
 	var t := n.create_tween()
 	t.tween_interval(1.0)
 	t.tween_callback(func() -> void:
+		if not _focused_connection.is_empty():
+			return
 		for c in wires:
-			set_connection_activity(c["from_node"], c["from_port"], c["to_node"], c["to_port"], 0.0))
+			if is_node_connected(c["from_node"], c["from_port"], c["to_node"], c["to_port"]):
+				set_connection_activity(c["from_node"], c["from_port"], c["to_node"], c["to_port"], 0.0))
 
 func pulse_event(event: String) -> void:
 	var n: GraphNode = _event_nodes.get(event)
-	if n:
+	if n != null and _can_flash(n):
 		_flash_node(n)
 
+func _can_flash(node: GraphNode) -> bool:
+	return _focused_connection.is_empty() or _focused_nodes.has(node.name)
+
 func _flash_node(n: GraphNode) -> void:
-	n.modulate = Color(2.0, 1.8, 0.7)
+	# Keep the flash independent from the focus tint applied to the whole card.
+	n.self_modulate = Color(2.0, 1.8, 0.7)
 	var t := n.create_tween()
-	t.tween_property(n, "modulate", Color.WHITE, 1.0)
+	t.tween_property(n, "self_modulate", Color.WHITE, 1.0)
 
 # --- Gestures -> signals ----------------------------------------------------------
 
@@ -911,19 +1067,24 @@ func _event_positions(events: Array, rules: Array[RuleData], saved_positions: Di
 		positions[event_id] = Vector2(min_x - CALL_WIDTH - CALL_GAP, y)
 	return positions
 
-func _connect_all(rules: Array[RuleData]) -> void:
-	for ev in _event_nodes:
-		for b in rules:
-			if b.trigger == ev:
-				_wire(_event_nodes[ev].name, 0, _rule_nodes[b.id].name)
-	for a in rules:
-		var relays := output_relays(a, _last_data)
+func _connect_all(rules: Array[RuleData], isolate: bool) -> void:
+	var listeners := {}
+	for rule in rules:
+		if not isolate or rule.trigger == _focused_connection:
+			if not listeners.has(rule.trigger):
+				listeners[rule.trigger] = []
+			listeners[rule.trigger].append(rule.id)
+	for call_id in _event_nodes:
+		for listener in listeners.get(call_id, []):
+			_wire(_event_nodes[call_id].name, 0, _rule_nodes[listener].name)
+	for source in rules:
+		var relays := output_relays(source, _last_data)
 		for port in relays.size():
 			if relays[port] == "":
 				continue
-			for b in rules:
-				if b.trigger == "relay:" + relays[port] and b.id != a.id:
-					_wire(_rule_nodes[a.id].name, 0 if _minimized else port, _rule_nodes[b.id].name)
+			for listener in listeners.get(RuleConnections.RELAY_PREFIX + relays[port], []):
+				if listener != source.id:
+					_wire(_rule_nodes[source.id].name, 0 if _minimized else port, _rule_nodes[listener].name)
 
 func _wire(from_node: StringName, from_port: int, to_node: StringName) -> void:
 	var err := connect_node(from_node, from_port, to_node, 0)
