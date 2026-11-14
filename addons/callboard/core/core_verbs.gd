@@ -50,6 +50,67 @@ func score(points: int) -> Step:
 	var emit_score := context.score
 	return Step.new(func(_c: Dictionary) -> void: emit_score.call(points))
 
+## Immediately emit a relay from this point in the sequence. An empty field_map
+## forwards the full input payload; otherwise each {output_name: input_name}
+## pair selects or renames one incoming field.
+func emit_relay(relay: StringName, field_map: Dictionary = {}) -> Step:
+	var ctx := context
+	var step := Step.new(func(c: Dictionary) -> void:
+		if relay.is_empty():
+			push_warning("Callboard emit_relay skipped: relay name is empty.")
+			return
+		var engine := ctx.engine_ref.get_ref() as RuleEngine
+		if engine == null:
+			return
+		var input_payload: Dictionary = c.get("payload", {})
+		var output_payload: Dictionary = input_payload.duplicate(true)
+		if not field_map.is_empty():
+			output_payload.clear()
+			for output_field: Variant in field_map:
+				var input_field: Variant = field_map[output_field]
+				if not _is_payload_field_name(output_field) or not _is_payload_field_name(input_field):
+					push_warning("Callboard emit_relay skipped: field mappings must use String or StringName field names.")
+					return
+				var output_name := StringName(String(output_field))
+				var input_name := StringName(String(input_field))
+				if not output_name.is_valid_identifier():
+					push_warning("Callboard emit_relay skipped: '%s' is not a valid output field name." % output_name)
+					return
+				if input_payload.has(input_name):
+					output_payload[String(output_name)] = input_payload[input_name].duplicate(true) if input_payload[input_name] is Array or input_payload[input_name] is Dictionary else input_payload[input_name]
+				elif input_payload.has(String(input_name)):
+					var value: Variant = input_payload[String(input_name)]
+					output_payload[String(output_name)] = value.duplicate(true) if value is Array or value is Dictionary else value
+		var relay_event := StringName("relay:" + String(relay))
+		if not field_map.is_empty() and not _mapped_payload_matches_schema(engine, relay_event, output_payload):
+			return
+		var callboard: Dictionary = c.get("_callboard", {})
+		var run: Dictionary = callboard.get("run", {})
+		engine.fire_from_context(relay_event, output_payload, run.get("context", {})))
+	step.emits = relay
+	step.emit_arg = 0
+	return step
+
+func _is_payload_field_name(value: Variant) -> bool:
+	return value is String or value is StringName
+
+func _mapped_payload_matches_schema(engine: RuleEngine, relay_event: StringName,
+		payload: Dictionary) -> bool:
+	var schema: Dictionary = engine.payload_schema.get(relay_event, {})
+	if schema.is_empty():
+		return true
+	for field: Variant in payload:
+		var key := StringName(String(field))
+		if not schema.has(key):
+			push_warning("Callboard emit_relay skipped: output field '%s' is not declared for '%s'." % [key, relay_event])
+			return false
+		var expected_type: int = schema[key]
+		if expected_type != TYPE_NIL and typeof(payload[field]) != expected_type:
+			push_warning("Callboard emit_relay skipped: output field '%s' has type %s, expected %s for '%s'." % [
+				key, type_string(typeof(payload[field])), type_string(expected_type), relay_event])
+			return false
+	return true
+
 ## Stops when the running rule is cancelled or its engine deactivates.
 func repeat_emit(interval: float, tick: StringName) -> Step:
 	var ctx := context

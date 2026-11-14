@@ -69,6 +69,14 @@ Use `payload.action == "confirm"`, `payload.accepted == true`, or `payload.count
 
 The inspector lists the selected trigger's declared fields and guard payload references separately. When a trigger schema exists, Callboard validates field names, literal types, and operators against it. Without a schema, runtime comparison still checks the actual Variant type. Relays emitted by rules and `repeat_emit` forward the original authored payload.
 
+Use the built-in `emit_relay(relay, field_map = {})` verb to dispatch a relay immediately at a chosen point in a rule's ordered steps. Pass the bare relay name. An empty mapping forwards a deep copy of the complete incoming payload. A non-empty mapping selects and optionally renames fields, with output field names as keys and input field names as values:
+
+```gdscript
+emit_relay(&"parcel_ready", {"item": "gift_id", "accepted": "approved"})
+```
+
+Missing input fields are omitted from the emitted payload. When input and output schemas are declared, authoring validation checks mapped field names and types; the runtime checks supplied values against the output schema before dispatch. The relay dispatch carries the current event ancestry, so recursive relay chains remain subject to the same depth and per-frame dispatch limits. The rule board draws the step as a relay emitter, and live step traces include its relay name and argument position.
+
 ### Blackboard change triggers
 
 Use the reserved trigger ID `on_change` to run a rule after a declared Blackboard value commits a different value. Its payload contains `key` (String), `previous`, `value`, `scope` (String), and `writer` (String). `previous` and `value` retain the Blackboard key's declared Variant type, so numeric, Boolean, String, and other supported values can be compared or consumed by a step. For example, add `payload.key == "garage_open"` to Requires to filter a listener to one key, then inspect `context["payload"]["previous"]` and `context["payload"]["value"]` in a custom step.

@@ -75,9 +75,9 @@ The first five items retain the high priority assigned in `TODO.md`.
   - [x] Add the reserved `on_change` trigger with a typed payload envelope (`key`, `previous`, `value`, `scope`, `writer`); transition values retain their Blackboard Variant type. Local, Saved, and Shared commits notify listeners; initialization/restoration, no-op writes, rejected writes, and dormant managed Stages do not dispatch.
   - [x] Validate filtered listeners against declared Blackboard keys and known writers. Carry rule ancestry through `set_var`, `add_var`, and shared commits so recursive change chains use the existing depth and per-frame dispatch limits. Document the payload and lifecycle policy in the API reference.
 
-- [ ] **Add immediate `emit_relay` with payload forwarding and field mapping.** See [CoreVerbs](addons/callboard/core/core_verbs.gd), [Step](addons/callboard/core/step.gd), and [RuleValidator](addons/callboard/core/rule_validator.gd).
+- [x] **Add immediate `emit_relay` with payload forwarding and field mapping.** See [CoreVerbs](addons/callboard/core/core_verbs.gd), [Step](addons/callboard/core/step.gd), and [RuleValidator](addons/callboard/core/rule_validator.gd).
   - [x] Completion relays and `repeat_emit` forward the incoming payload. `Step.emits` and `emit_arg` already carry step-level relay metadata.
-  - [ ] Emit once at a chosen point in a sequence, forward the incoming payload, and optionally select or remap fields. Validate mapped types and expose the emitter and its argument in board connections, cycle analysis, and traces. Carry dispatch ancestry into the new relay.
+  - [x] Emit once at a chosen point in a sequence; forward the full incoming payload or select and remap fields. Validate mapped schemas and runtime output types, expose the emitter and argument in board connections and traces, include it in cycle analysis, and carry dispatch ancestry into the new relay.
 
 - [ ] **Support typed runtime step inputs from the Call payload and Blackboard.** See [StageDefinition](addons/callboard/core/stage_definition.gd) and [RuleInspector](addons/callboard/editor/rule_inspector.gd).
   - [x] Authored payload schemas drive guard checks. Custom step callbacks receive the runtime payload, and `add_var` reads the current key value before applying its authored delta.

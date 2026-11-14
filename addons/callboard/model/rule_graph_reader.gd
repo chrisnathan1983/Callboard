@@ -137,6 +137,31 @@ static func validate_resources(data: GraphDraft) -> void:
 					metadata.relay = String(relay.value)
 					metadata.relay_argument = 1
 					data.step_metadata[step] = metadata
+			if step.verb == &"emit_relay":
+				if step.args.is_empty():
+					data.errors.append("rule '%s' emit_relay step is missing its relay name" % rule.id)
+				else:
+					var relay_result := ExprText.parse_literal(step.args[0])
+					if relay_result.ok and (relay_result.value is StringName or relay_result.value is String):
+						var relay_name := String(relay_result.value)
+						if relay_name.is_empty() or not relay_name.is_valid_identifier():
+							data.errors.append("rule '%s' emit_relay relay name must be a non-empty identifier" % rule.id)
+						else:
+							emitted[StringName("relay:" + relay_name)] = true
+							var metadata := GraphDraft.StepAnalysis.new()
+							metadata.relay = relay_name
+							metadata.relay_argument = 0
+							data.step_metadata[step] = metadata
+							if step.args.size() > 1:
+								var mapping := ExprText.parse_literal(step.args[1])
+								if mapping.ok and mapping.value is Dictionary:
+									_validate_resource_relay_mapping(rule, relay_name, mapping.value, payloads, data.errors)
+								elif mapping.ok:
+									data.errors.append("rule '%s' emit_relay field_map must be a Dictionary" % rule.id)
+								else:
+									data.warnings.append("rule '%s' emit_relay field_map needs scene analysis for static type checks" % rule.id)
+					else:
+						data.warnings.append("rule '%s' emit_relay relay name needs scene analysis before its connection can be identified" % rule.id)
 			if not step.delay.is_empty():
 				var delay := ExprText.parse_literal(step.delay)
 				if delay.ok and not (delay.value is int or delay.value is float):
@@ -150,6 +175,32 @@ static func validate_resources(data: GraphDraft) -> void:
 		var names: Array = custom_verbs.keys()
 		names.sort()
 		data.warnings.append("Custom verbs require scene analysis: %s" % ", ".join(names))
+
+static func _validate_resource_relay_mapping(rule: RuleData, relay_name: String,
+		field_map: Dictionary, payloads: Dictionary, errors: Array[String]) -> void:
+	var input_schema: Dictionary = payloads.get(rule.trigger, {})
+	var relay_event := StringName("relay:" + relay_name)
+	var output_schema: Dictionary = payloads.get(relay_event, {})
+	for output_field: Variant in field_map:
+		var input_field: Variant = field_map[output_field]
+		if not (output_field is String or output_field is StringName) or not (input_field is String or input_field is StringName):
+			errors.append("rule '%s' emit_relay field mappings must use String or StringName field names" % rule.id)
+			continue
+		var output_name := StringName(String(output_field))
+		var input_name := StringName(String(input_field))
+		if not output_name.is_valid_identifier() or not input_name.is_valid_identifier():
+			errors.append("rule '%s' emit_relay maps invalid field name '%s' to '%s'" % [rule.id, output_name, input_name])
+			continue
+		if payloads.has(rule.trigger) and not input_schema.has(input_name):
+			errors.append("rule '%s' emit_relay reads undeclared input field '%s' for '%s'" % [rule.id, input_name, rule.trigger])
+			continue
+		if payloads.has(relay_event) and not output_schema.has(output_name):
+			errors.append("rule '%s' emit_relay writes undeclared output field '%s' for '%s'" % [rule.id, output_name, relay_event])
+			continue
+		if input_schema.has(input_name) and output_schema.has(output_name) and input_schema[input_name] != TYPE_NIL and input_schema[input_name] != output_schema[output_name]:
+			errors.append("rule '%s' emit_relay maps '%s' (%s) to '%s' (%s) with incompatible types" % [
+				rule.id, input_name, type_string(input_schema[input_name]),
+				output_name, type_string(output_schema[output_name])])
 
 ## Scene-backed analysis. This instantiates the preview and executes Stage build
 ## hooks, the verb factory, and authored argument expressions. Call explicitly

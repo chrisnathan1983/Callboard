@@ -217,6 +217,8 @@ func _format_trace(entry: Dictionary) -> String:
 	var rule: String = entry["rule"]
 	var step: int = entry["step"]
 	var verb: String = entry["verb"]
+	var relay: String = entry.get("relay", "")
+	var relay_argument: int = entry.get("relay_argument", -1)
 	var label := kind.replace("_", " ").capitalize()
 	if kind == "event_fired":
 		label += " - " + event
@@ -226,6 +228,8 @@ func _format_trace(entry: Dictionary) -> String:
 			label += " - step %d" % step
 		if not verb.is_empty():
 			label += " - " + verb
+		if not relay.is_empty():
+			label += " - emits relay:%s (arg %d)" % [relay, relay_argument]
 	if not entry["detail"].is_empty():
 		label += " - " + entry["detail"]
 	return label

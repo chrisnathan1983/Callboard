@@ -378,6 +378,8 @@ func _emit_trace(kind: String, rule_id: StringName, event: StringName,
 		"event": String(event),
 		"step": step_index + 1 if step_index >= 0 else 0,
 		"verb": String(step.verb) if step != null else "",
+		"relay": String(step.emits) if step != null else "",
+		"relay_argument": step.emit_arg if step != null else -1,
 		"detail": detail,
 	})
 

@@ -528,6 +528,7 @@ func _initialize() -> void:
 	ok = await _test_playback_wait_exits() and ok
 	ok = await _test_cancel_if_interrupts_a_wait() and ok
 	ok = _test_shared_write_order() and ok
+	ok = _test_emit_relay() and ok
 	ok = _test_on_change_triggers() and ok
 	ok = await _test_dispatch_limits_and_ancestry() and ok
 	ok = _test_stage_dispatch_policy() and ok
@@ -706,6 +707,61 @@ func _test_shared_write_order() -> bool:
 		and _check("shared values and writer attribution match the final committed write", one_final_value)
 		and _check("unchanged shared writes do not notify or replace the writer", unchanged_is_quiet and final_writer_survived)
 		and _check("rejected shared writes do not notify", rejected_is_quiet))
+
+func _test_emit_relay() -> bool:
+	var bb := Blackboard.new()
+	var engine := RuleEngine.new(bb, {}, Callable())
+	engine.payload_schema = {
+		&"start": {&"action": TYPE_STRING, &"ignored": TYPE_INT},
+		&"relay:mapped": {&"result": TYPE_STRING},
+	}
+	var factory := CoreVerbs.new(StepContext.new(bb, engine, null, Callable()))
+	var source := Rule.new(&"mapped_source", &"start")
+	var mapping := {"result": "action"}
+	var emit_step := factory.emit_relay(&"mapped", mapping)
+	emit_step.verb = &"emit_relay"
+	emit_step.args = [&"mapped", mapping]
+	source.steps.append(emit_step)
+	var received: Array[Dictionary] = []
+	var listener := Rule.new(&"mapped_listener", &"relay:mapped")
+	listener.steps.append(Step.new(func(context: Dictionary) -> void:
+		received.append(context["payload"].duplicate(true))))
+	engine.rules.append_array([source, listener])
+	var traced_step: Array[Dictionary] = []
+	engine.trace_event.connect(func(entry: Dictionary) -> void:
+		if entry.get("kind") == "step_started" and entry.get("verb") == "emit_relay":
+			traced_step.append(entry))
+	engine.fire(&"start", {"action": "confirm", "ignored": 7})
+	var mapped_payload: bool = received == [{"result": "confirm"}]
+	var relay_metadata: bool = emit_step.emits == &"mapped" and emit_step.emit_arg == 0 \
+		and traced_step.size() == 1 and traced_step[0].get("relay") == "mapped" \
+		and traced_step[0].get("relay_argument") == 0
+	var valid_mapping := RuleValidator.check([source, listener], bb, [&"start"], [], engine.payload_schema)
+	var valid_types: bool = valid_mapping.is_empty()
+	engine.payload_schema[&"relay:mapped"][&"result"] = TYPE_BOOL
+	var invalid_mapping := RuleValidator.check([source, listener], bb, [&"start"], [], engine.payload_schema)
+	var mismatch_reported: bool = invalid_mapping.any(func(problem: String) -> bool:
+		return "emit_relay maps 'action'" in problem and "incompatible types" in problem)
+
+	var cycle_engine := RuleEngine.new(Blackboard.new(), {}, Callable())
+	var cycle_factory := CoreVerbs.new(StepContext.new(cycle_engine.bb, cycle_engine, null, Callable()))
+	var first := Rule.new(&"immediate_cycle_a", &"relay:a")
+	first.reentry = Rule.ReentryPolicy.QUEUE
+	first.steps.append(cycle_factory.emit_relay(&"b"))
+	var second := Rule.new(&"immediate_cycle_b", &"relay:b")
+	second.reentry = Rule.ReentryPolicy.QUEUE
+	second.steps.append(cycle_factory.emit_relay(&"a"))
+	cycle_engine.rules.append_array([first, second])
+	var cycle_stopped := [false]
+	cycle_engine.dispatch_limit_reached.connect(func(limit: String, chain: PackedStringArray, _rule: StringName) -> void:
+		if limit == "event depth" and chain.has("relay:a") and chain.has("relay:b"):
+			cycle_stopped[0] = true)
+	cycle_engine.fire(&"relay:a")
+	return (_check("emit_relay selects/remaps fields and exposes its relay argument in step traces",
+		mapped_payload and relay_metadata) \
+		and _check("emit_relay payload mappings validate source and destination schema types",
+		valid_types and mismatch_reported) \
+		and _check("immediate relay cycles carry ancestry into the engine depth limit", cycle_stopped[0]))
 
 func _test_on_change_triggers() -> bool:
 	var definition := StageDefinition.new()

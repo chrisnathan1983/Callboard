@@ -36,6 +36,8 @@ static func check(rules: Array[Rule], bb: Blackboard,
 		if r.emits != &"":
 			emitted["relay:" + r.emits] = true
 		for s in r.steps:
+			if s.verb == &"emit_relay":
+				problems.append_array(_validate_mapped_relay_step(r, s, payload_names))
 			for k in s.reads:
 				if not bb.has(k):
 					problems.append("rule '%s' reads '%s' which is not declared on the Blackboard" % [r.id, k])
@@ -152,6 +154,47 @@ static func check(rules: Array[Rule], bb: Blackboard,
 			problems.append("'%s' is emitted but no rule listens to it" % event)
 	problems.append_array(_find_relay_cycles(rules))
 	problems.append_array(_find_shared_trigger_conflicts(rules))
+	return problems
+
+static func _validate_mapped_relay_step(rule: Rule, step: Step,
+		payload_schemas: Dictionary) -> Array[String]:
+	var problems: Array[String] = []
+	if step.args.is_empty() or not (step.args[0] is StringName or step.args[0] is String):
+		problems.append("rule '%s' emit_relay requires a literal relay name" % rule.id)
+		return problems
+	var relay_name := String(step.args[0])
+	if relay_name.is_empty() or not relay_name.is_valid_identifier():
+		problems.append("rule '%s' emit_relay relay '%s' must be a non-empty identifier" % [rule.id, relay_name])
+		return problems
+	var field_map: Dictionary = {}
+	if step.args.size() > 1:
+		if not step.args[1] is Dictionary:
+			problems.append("rule '%s' emit_relay field_map must evaluate to a Dictionary" % rule.id)
+			return problems
+		field_map = step.args[1]
+	for output_field: Variant in field_map:
+		var input_field: Variant = field_map[output_field]
+		if not (output_field is String or output_field is StringName) or not (input_field is String or input_field is StringName):
+			problems.append("rule '%s' emit_relay field mappings must use String or StringName field names" % rule.id)
+			continue
+		var output_name := StringName(String(output_field))
+		var input_name := StringName(String(input_field))
+		if not output_name.is_valid_identifier() or not input_name.is_valid_identifier():
+			problems.append("rule '%s' emit_relay maps invalid field name '%s' to '%s'" % [rule.id, output_name, input_name])
+			continue
+		var source_schema: Dictionary = payload_schemas.get(rule.trigger, {})
+		if payload_schemas.has(rule.trigger) and not source_schema.has(input_name):
+			problems.append("rule '%s' emit_relay reads undeclared input field '%s' for '%s'" % [rule.id, input_name, rule.trigger])
+			continue
+		var relay_event := StringName("relay:" + relay_name)
+		var target_schema: Dictionary = payload_schemas.get(relay_event, {})
+		if payload_schemas.has(relay_event) and not target_schema.has(output_name):
+			problems.append("rule '%s' emit_relay writes undeclared output field '%s' for '%s'" % [rule.id, output_name, relay_event])
+			continue
+		if source_schema.has(input_name) and target_schema.has(output_name) and source_schema[input_name] != TYPE_NIL and source_schema[input_name] != target_schema[output_name]:
+			problems.append("rule '%s' emit_relay maps '%s' (%s) to '%s' (%s) with incompatible types" % [
+				rule.id, input_name, type_string(source_schema[input_name]),
+				output_name, type_string(target_schema[output_name])])
 	return problems
 
 static func _find_shared_trigger_conflicts(rules: Array[Rule]) -> Array[String]:

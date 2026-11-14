@@ -21,6 +21,9 @@ static func parse_literal(expr: String) -> Dictionary:
 	if expr.length() >= 3 and expr.begins_with('&"') and expr.ends_with('"'):
 		var parsed_name: Variant = JSON.parse_string(expr.substr(1))
 		return {"ok": true, "value": StringName(parsed_name)} if parsed_name is String else {"ok": false, "value": null}
+	if expr.begins_with("{") and expr.ends_with("}"):
+		var parsed_dictionary: Variant = str_to_var(expr)
+		return {"ok": true, "value": parsed_dictionary} if parsed_dictionary is Dictionary else {"ok": false, "value": null}
 	return {"ok": false, "value": null}
 
 static func format_literal(v: Variant) -> String:

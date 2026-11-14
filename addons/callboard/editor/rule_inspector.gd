@@ -619,7 +619,10 @@ func _arg_widget(step: StepData, i: int, param: Dictionary) -> Control:
 	# Anything else (Vector3, constants, expressions): edit the raw GDScript expression.
 	var raw := LineEdit.new()
 	raw.text = cur
-	raw.tooltip_text = "GDScript expression, e.g. a constant or Vector3(0, 1, 0)"
+	if step.verb == &"emit_relay" and param["name"] == "field_map":
+		raw.tooltip_text = "Dictionary mapping output fields to input fields, e.g. {\"result\": \"action\"}. Use {} to forward the full payload."
+	else:
+		raw.tooltip_text = "GDScript expression, e.g. a constant or Vector3(0, 1, 0)"
 	var shown := [cur]
 	var apply := func(_t := "") -> void:
 		var expr := raw.text.strip_edges()

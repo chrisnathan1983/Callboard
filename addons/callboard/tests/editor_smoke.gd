@@ -15,6 +15,7 @@ func _initialize() -> void:
 	ok = _test_debug_panel() and ok
 	ok = await _test_connection_focus() and ok
 	ok = _test_on_change_authoring() and ok
+	ok = _test_emit_relay_authoring() and ok
 	ok = _test_project_settings() and ok
 	print("ADDON EDITOR: ", "PASS" if ok else "FAIL")
 	quit(0 if ok else 1)
@@ -384,6 +385,51 @@ func _test_on_change_authoring() -> bool:
 	ok = _check("the built-in on_change trigger cannot be renamed, removed, or redeclared as a Call",
 		immutable_builtin and RuleConnections.remove(data, "on_change") != "") and ok
 	inspector.free()
+	graph.free()
+	return ok
+
+func _test_emit_relay_authoring() -> bool:
+	var data := GraphDraft.new()
+	data.external_calls.assign(["start"])
+	data.payload_fields = [
+		PayloadFieldData.from_dictionary({"event_id": "start", "key": "action", "type": "String"}),
+		PayloadFieldData.from_dictionary({"event_id": "relay:mapped", "key": "result", "type": "String"}),
+	]
+	var producer := RuleData.new()
+	producer.id = &"map_payload"
+	producer.trigger = &"start"
+	var emit_step := StepData.new()
+	emit_step.verb = &"emit_relay"
+	emit_step.args = PackedStringArray(['&"mapped"', '{"result": "action"}'])
+	producer.steps.append(emit_step)
+	var listener := RuleData.new()
+	listener.id = &"receive_mapped"
+	listener.trigger = &"relay:mapped"
+	var listener_step := StepData.new()
+	listener_step.verb = &"score"
+	listener_step.args = PackedStringArray(["1"])
+	listener.steps.append(listener_step)
+	data.rules = [producer, listener]
+	var bb := Blackboard.new()
+	data.catalog = RuntimeVerbCatalog.from_factory(CoreVerbs.new(StepContext.new(bb, null, null, Callable())))
+	RuleGraphReader.validate_resources(data)
+	var metadata := data.step_metadata.get(emit_step) as GraphDraft.StepAnalysis
+	var graph := RuleGraphView.new()
+	root.add_child(graph)
+	graph.show_data(data)
+	var has_emitter_wire := false
+	for connection: Dictionary in graph.get_connection_list():
+		if connection.get("to_node") == "receive_mapped":
+			has_emitter_wire = true
+	var ok := _check("emit_relay resource analysis exposes a typed emitter and graph connection",
+		data.errors.is_empty() and data.relay_for(emit_step) == "mapped"
+		and metadata != null and metadata.relay_argument == 0 and has_emitter_wire
+		and RuleConnections.ids(data).has("relay:mapped"))
+	ok = _check("renaming an emitted relay updates the step argument and its listener",
+		RuleConnections.rename(data, "relay:mapped", "renamed").is_empty()
+		and data.rules[0].steps[0].args[0] == '&"renamed"'
+		and data.rules[1].trigger == "relay:renamed"
+		and data.rules[0].steps[0].args[1] == '{"result": "action"}') and ok
 	graph.free()
 	return ok
 
