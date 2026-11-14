@@ -4,6 +4,8 @@ class_name StageStateStore extends Resource
 
 @export var stage_states: Dictionary = {}
 @export var shared_values: Dictionary = {}
+## Runtime-only state for the current session. It is intentionally not exported.
+var session_values: Dictionary = {}
 
 var _shared_boards: Array[WeakRef] = []
 var _loaded_ids: Dictionary = {}
@@ -39,7 +41,7 @@ func attach(stage: Stage, instance_id: StringName) -> bool:
 		push_warning("Stage instance ID '%s' is already loaded." % instance_id)
 		return false
 	var state := state_for(instance_id)
-	if not stage.attach_state_store(self, instance_id, state["saved"], state["fired"], shared_values):
+	if not stage.attach_state_store(self, instance_id, state["saved"], state["fired"], shared_values, session_values):
 		return false
 	stage.random_group_states = state["random_groups"]
 	_loaded_ids[instance_id] = stage
@@ -72,6 +74,32 @@ func release_stage(stage: Stage) -> void:
 		return
 	if _loaded_ids.get(stage.stage_instance_id) == stage:
 		_loaded_ids.erase(stage.stage_instance_id)
+
+## Restore every known session-scoped value to its declared default. Session
+## values survive Stage reloads, but never enter the durable stage/profile maps.
+func reset_session() -> void:
+	var boards: Array[Blackboard] = []
+	var defaults: Dictionary = {}
+	for ref: WeakRef in _valid_board_refs():
+		var board := ref.get_ref() as Blackboard
+		if board == null:
+			continue
+		boards.append(board)
+		for key: StringName in board.schema:
+			var entry: Dictionary = board.schema[key]
+			if entry.get("scope") == &"session":
+				defaults[entry["state_key"]] = entry["default"]
+	var previous_values := session_values.duplicate(true)
+	session_values.clear()
+	for storage_key: StringName in defaults:
+		var default_value: Variant = defaults[storage_key]
+		var previous: Variant = previous_values.get(storage_key)
+		session_values[storage_key] = default_value
+		if previous_values.has(storage_key) and typeof(previous) == typeof(default_value) \
+				and previous == default_value:
+			continue
+		for board: Blackboard in boards:
+			board.receive_session_change(storage_key, default_value, previous)
 
 ## Deliver an event to one loaded Stage, or to every eligible loaded Stage when
 ## target_instance_id is empty. Dormant, unloaded, invalid, and schema-incompatible

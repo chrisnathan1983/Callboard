@@ -1,6 +1,8 @@
 extends SceneTree
 ## Deterministic validator, router and clock-injection tests.
 
+const CrossStageValidator := preload("res://addons/callboard/model/cross_stage_event_validator.gd")
+
 signal clock_tick
 signal two_argument_tick(value: int, label: String)
 signal animation_finished_tick(animation_name: StringName)
@@ -606,6 +608,8 @@ func _initialize() -> void:
 	ok = await _test_dispatch_limits_and_ancestry() and ok
 	ok = _test_stage_dispatch_policy() and ok
 	ok = _test_cross_stage_event_bus() and ok
+	ok = _test_cross_stage_route_validation() and ok
+	ok = _test_session_scope_reset() and ok
 	ok = _test_retriggered_light() and ok
 	ok = await _test_light_from_restarted_run() and ok
 	ok = await _test_managed_stages_and_restoration() and ok
@@ -662,6 +666,47 @@ func _test_signal_callbacks_accept_arguments() -> bool:
 		cancelled_engine._awaited_signals.is_empty() and cancelled_engine.pending_snapshot().is_empty()
 		and two_argument_tick.get_connections().is_empty()) and ok
 	return ok
+
+func _test_session_scope_reset() -> bool:
+	var definition := StageDefinition.new()
+	var session := VariableData.new()
+	session.key = &"noise_floor"
+	session.scope = "session"
+	session.default_value = 0.25
+	definition.variables = [session]
+	var store := StageStateStore.new()
+	var first := Stage.new()
+	first.definition = definition
+	var attached := store.attach(first, &"session_stage")
+	first.build()
+	var changed: Array[Dictionary] = []
+	first.write_var(&"noise_floor", 0.8, &"night_event")
+	first.write_var(&"noise_floor", 0.8, &"night_event")
+	var persisted_across_reload: bool = store.session_values.get(&"noise_floor") == 0.8
+	store.release_stage(first)
+	first.free()
+	var second := Stage.new()
+	second.definition = definition
+	var reattached := store.attach(second, &"session_stage")
+	second.build()
+	second.bb.value_changed.connect(func(key: StringName, previous: Variant, value: Variant,
+			scope: StringName, writer: StringName, _context: Dictionary) -> void:
+		changed.append({"key": key, "previous": previous, "value": value,
+			"scope": scope, "writer": writer}))
+	var survives_reload: bool = second.get_var(&"noise_floor") == 0.8
+	second.write_var(&"noise_floor", 0.9, &"night_event")
+	store.state_for(&"session_stage")["saved"][&"progress"] = 7
+	store.state_for(&"session_stage")["fired"][&"once"] = true
+	store.reset_session()
+	var reset_only_session: bool = second.get_var(&"noise_floor") == 0.25 \
+		and store.state_for(&"session_stage")["saved"].get(&"progress") == 7 \
+		and store.state_for(&"session_stage")["fired"].get(&"once") == true \
+		and changed.size() == 2 and changed[0]["scope"] == &"session" \
+		and changed[1]["scope"] == &"session" and changed[1]["writer"] == &"session_reset"
+	store.release_stage(second)
+	second.free()
+	return _check("Session values survive Stage reloads and reset to defaults without clearing saved progress or latches",
+		attached and reattached and persisted_across_reload and survives_reload and reset_only_session)
 
 func _test_playback_wait_exits() -> bool:
 	var factory := StagingVerbs.new(StepContext.new(Blackboard.new(), null, root, Callable()))
@@ -1788,6 +1833,66 @@ func _test_cross_stage_event_bus() -> bool:
 		store.release_stage(stage)
 		stage.free()
 	return ok
+
+func _test_cross_stage_route_validation() -> bool:
+	var scanned_definitions: Array[StageDefinition] = CrossStageValidator._load_project_definitions()
+	var configured_stage_found := scanned_definitions.any(func(definition: StageDefinition) -> bool:
+		return definition.resource_path.ends_with("demo/stages/stage_01/stage_01.tres"))
+	var source := StageDefinition.new()
+	source.cross_stage_instance_ids = PackedStringArray(["sensor_source"])
+	var input_field := PayloadFieldData.from_dictionary({
+		"event_id": "launch", "key": "sensor_id", "type": "String"})
+	var output_field := PayloadFieldData.from_dictionary({
+		"event_id": "sensor:activated", "key": "sensor_id", "type": "String"})
+	var target := StageDefinition.new()
+	target.cross_stage_instance_ids = PackedStringArray(["sensor_west"])
+	target.external_calls = PackedStringArray(["sensor:activated"])
+	target.payload_fields = [output_field]
+	var route := StepData.new()
+	route.verb = &"emit_cross_stage"
+	route.args = PackedStringArray([
+		'&"sensor:activated"',
+		'{"sensor_id": callboard_payload(&"sensor_id")}',
+		'&"sensor_west"',
+	])
+	var rule := RuleData.new()
+	rule.id = &"send_sensor_activation"
+	rule.trigger = &"launch"
+	rule.steps = [route]
+	var data := GraphDraft.new()
+	data.definition = source
+	data.rules = [rule]
+	data.external_calls = ["launch"]
+	data.payload_fields = [input_field]
+	var good_report: Dictionary = CrossStageValidator.validate(data, [target])
+	var accepted_registered_route: bool = good_report.errors.is_empty() and good_report.warnings.is_empty()
+	target.payload_fields = [PayloadFieldData.from_dictionary({
+		"event_id": "sensor:activated", "key": "sensor_id", "type": "int"})]
+	var bad_report: Dictionary = CrossStageValidator.validate(data, [target])
+	var incompatible_payload_rejected: bool = bad_report.errors.any(
+		func(problem: String) -> bool: return "expects int" in problem)
+	route.args.remove_at(2)
+	target.payload_fields = [output_field]
+	var broadcast_report: Dictionary = CrossStageValidator.validate(data, [target])
+	var broadcast_uses_declared_recipients: bool = broadcast_report.errors.is_empty()
+	route.args.append('&"unregistered_sensor"')
+	var missing_route_report: Dictionary = CrossStageValidator.validate(data, [target])
+	var missing_route_is_actionable: bool = missing_route_report.warnings.any(
+		func(problem: String) -> bool: return "cross_stage_instance_ids" in problem)
+	var saved_definition := RuleGraphReader.make_definition(data)
+	var route_ids_survive_callboard_save := saved_definition.cross_stage_instance_ids == PackedStringArray(["sensor_source"])
+	return _check("cross-Stage schema scanning discovers configured, unloaded StageDefinitions",
+		configured_stage_found) \
+		and _check("StageDefinition target IDs survive Callboard save preparation",
+			route_ids_survive_callboard_save) \
+		and _check("resource-only cross-Stage validation resolves registered targets and typed runtime payload references",
+		accepted_registered_route) \
+		and _check("resource-only cross-Stage validation catches destination schema mismatches",
+			incompatible_payload_rejected) \
+		and _check("resource-only cross-Stage validation checks all declared broadcast recipients",
+			broadcast_uses_declared_recipients) \
+		and _check("unregistered exact targets explain how to enable offline validation",
+			missing_route_is_actionable)
 
 func _test_retriggered_light() -> bool:
 	var bb := Blackboard.new()

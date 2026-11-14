@@ -2,6 +2,8 @@
 class_name RuleGraphReader extends RefCounted
 ## Loads and analyzes typed graph drafts for the editor and live board.
 
+const CrossStageValidator := preload("res://addons/callboard/model/cross_stage_event_validator.gd")
+
 static func read(stage: Stage) -> GraphDraft:
 	var definition := stage.definition
 	if definition == null:
@@ -172,6 +174,7 @@ static func validate_resources(data: GraphDraft) -> void:
 		var names: Array = custom_verbs.keys()
 		names.sort()
 		data.warnings.append("Custom verbs require scene analysis: %s" % ", ".join(names))
+	CrossStageValidator.apply(data)
 
 static func _validate_conditional_data(rule: RuleData, step: StepData,
 		payloads: Dictionary, keys: Dictionary, errors: Array[String],
@@ -364,6 +367,7 @@ static func make_definition(data: GraphDraft) -> StageDefinition:
 	var draft := StageDefinition.new()
 	draft.stage_script = original.stage_script
 	draft.preview_scene_path = original.preview_scene_path
+	draft.cross_stage_instance_ids = PackedStringArray(original.cross_stage_instance_ids)
 	draft.managed_lifecycle = data.managed_lifecycle
 	for binding: StageRestorationBinding in data.restoration_bindings:
 		draft.restoration_bindings.append(binding.duplicate())

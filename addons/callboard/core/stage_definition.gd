@@ -12,6 +12,9 @@ static var _string_token_pattern: RegEx
 ## when the scene itself references this StageDefinition.
 @export_file("*.tscn") var preview_scene_path := ""
 @export var external_calls := PackedStringArray()
+## Runtime Stage instance IDs this definition may be loaded under. The Callboard
+## uses these declarations to validate cross-Stage targets without loading scenes.
+@export var cross_stage_instance_ids := PackedStringArray()
 ## Optional typed payload schema. Call IDs and relay IDs use the same namespace.
 @export var payload_fields: Array[PayloadFieldData] = []
 ## Canvas positions for external event nodes, keyed by event ID.
@@ -45,6 +48,12 @@ func _set(property: StringName, value: Variant) -> bool:
 func _migrate() -> void:
 	if external_calls.is_empty():
 		external_calls = PackedStringArray(["arrive"])
+	var unique_instance_ids := PackedStringArray()
+	for value: String in cross_stage_instance_ids:
+		var instance_id := value.strip_edges()
+		if not instance_id.is_empty() and not unique_instance_ids.has(instance_id):
+			unique_instance_ids.append(instance_id)
+	cross_stage_instance_ids = unique_instance_ids
 	rules = _normalize_rules(rules)
 	variables = _normalize_variables(variables)
 	groups = _normalize_groups(groups)
@@ -148,6 +157,7 @@ func apply_blackboard(stage: Stage) -> void:
 		match variable.scope:
 			"saved": stage.define_saved(variable.key, variable.default_value, variable.state_key)
 			"shared": stage.define_shared(variable.key, variable.default_value, variable.state_key)
+			"session": stage.define_session(variable.key, variable.default_value, variable.state_key)
 			_: stage.define_local(variable.key, variable.default_value, variable.state_key)
 		for alias in variable.aliases:
 			stage.bb.alias(alias, variable.key)

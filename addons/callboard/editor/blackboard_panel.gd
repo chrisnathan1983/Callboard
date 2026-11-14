@@ -104,15 +104,17 @@ func _make_row(v: VariableData) -> Control:
 	scope.add_item("Local")
 	scope.add_item("Saved")
 	scope.add_item("Shared")
+	scope.add_item("Session")
 	scope.get_popup().set_item_tooltip(0, "Reset this variable when the Stage is restored.")
 	scope.get_popup().set_item_tooltip(1, "Keep this variable in saved Stage state.")
 	scope.get_popup().set_item_tooltip(2, "Share this value across loaded Stage instances using the state store.")
-	var scope_index := ["local", "saved", "shared"].find(v.scope)
+	scope.get_popup().set_item_tooltip(3, "Keep this value across Stage reloads until the host calls reset_session().")
+	var scope_index := ["local", "saved", "shared", "session"].find(v.scope)
 	scope.select(scope_index if scope_index >= 0 else 0)
 	scope.disabled = not _editable
 	Style.tint(scope, _scope_color(v.scope))
 	scope.item_selected.connect(func(i: int) -> void:
-		v.scope = ["local", "saved", "shared"][i]
+		v.scope = ["local", "saved", "shared", "session"][i]
 		_rebuild()
 		changed.emit())
 	row.add_child(scope)

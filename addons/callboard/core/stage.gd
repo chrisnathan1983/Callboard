@@ -13,6 +13,7 @@ var saved_vars := {}    # injected by the manager; survives unloads
 var fired := {}         # injected by the manager; stores one-shot latches
 var random_group_states: Dictionary = {} # managed per-group PRNG state
 var shared_vars: Dictionary = {}
+var session_vars: Dictionary = {}
 var state_store: StageStateStore
 var stage_instance_id: StringName
 var managed_lifecycle := false
@@ -71,7 +72,8 @@ func can_reuse_analysis_props() -> bool:
 ## Configure state before the Stage enters the tree so saved values and latches
 ## exist when its Blackboard and graph are built.
 func attach_state_store(store: StageStateStore, instance_id: StringName,
-		p_saved_vars: Dictionary, p_fired: Dictionary, p_shared_vars: Dictionary) -> bool:
+		p_saved_vars: Dictionary, p_fired: Dictionary, p_shared_vars: Dictionary,
+		p_session_vars: Dictionary = {}) -> bool:
 	if is_built or bb != null or engine != null:
 		push_warning("Cannot attach a StageStateStore after Stage runtime services have been initialized. Attach before build or adding the Stage to the tree.")
 		return false
@@ -80,6 +82,7 @@ func attach_state_store(store: StageStateStore, instance_id: StringName,
 	saved_vars = p_saved_vars
 	fired = p_fired
 	shared_vars = p_shared_vars
+	session_vars = p_session_vars
 	return true
 
 func accepts_calls() -> bool:
@@ -133,7 +136,7 @@ func rebuild_for_analysis(draft: StageDefinition) -> bool:
 	return true
 
 func _create_runtime_services() -> void:
-	bb = Blackboard.new(saved_vars, shared_vars)
+	bb = Blackboard.new(saved_vars, shared_vars, session_vars)
 	bb.changed.connect(var_changed.emit)
 	bb.value_changed.connect(_on_blackboard_value_changed)
 	if state_store != null:
@@ -221,6 +224,9 @@ func define_saved(key: StringName, default_val: Variant = false, state_key: Stri
 
 func define_shared(key: StringName, default_val: Variant = false, state_key: StringName = &"") -> void:
 	bb.define(key, &"shared", default_val, state_key)
+
+func define_session(key: StringName, default_val: Variant = false, state_key: StringName = &"") -> void:
+	bb.define(key, &"session", default_val, state_key)
 
 func define_local(key: StringName, default_val: Variant = false, state_key: StringName = &"") -> void:
 	bb.define(key, &"local", default_val, state_key)

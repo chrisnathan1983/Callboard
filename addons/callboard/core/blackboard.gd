@@ -11,6 +11,7 @@ var schema := {}
 var local := {}
 var saved: Dictionary          # injected by the manager
 var shared_values: Dictionary = {}
+var session_values: Dictionary = {}
 var shared_write_guard: Callable
 var shared_write_commit: Callable
 var _saved_names := {}        # saved storage key -> current Blackboard name
@@ -19,9 +20,10 @@ var last_writers: Dictionary = {} # current Blackboard name -> most recent write
 var _value_change_queue: Array[Dictionary] = []
 var _dispatching_value_changes := false
 
-func _init(p_saved := {}, p_shared := {}) -> void:
+func _init(p_saved := {}, p_shared := {}, p_session := {}) -> void:
 	saved = p_saved
 	shared_values = p_shared
+	session_values = p_session
 
 func define(key: StringName, scope: StringName, default: Variant, state_key: StringName = &"") -> void:
 	var previous: Dictionary = schema.get(key, {})
@@ -29,15 +31,15 @@ func define(key: StringName, scope: StringName, default: Variant, state_key: Str
 	if previous.get("scope") == &"saved":
 		_saved_names.erase(previous["state_key"])
 	schema[key] = {"scope": scope, "default": default, "state_key": storage_key, "type": typeof(default)}
-	if scope == &"saved" or scope == &"shared":
-		var values: Dictionary = shared_values if scope == &"shared" else saved
+	if scope in [&"saved", &"shared", &"session"]:
+		var values: Dictionary = _storage_for_scope(scope)
 		if scope == &"saved":
 			_saved_names[storage_key] = key
 		if not values.has(storage_key):
 			values[storage_key] = default
 		elif typeof(values[storage_key]) != typeof(default):
 			push_warning("Blackboard value '%s' has a type that does not match its declaration." % storage_key)
-			if scope == &"saved":
+			if scope in [&"saved", &"session"]:
 				values[storage_key] = default
 	else:
 		local[key] = default
@@ -48,6 +50,7 @@ func get_var(key: StringName) -> Variant:
 	match entry.get("scope"):
 		&"saved": return saved.get(entry["state_key"])
 		&"shared": return shared_values.get(entry["state_key"])
+		&"session": return session_values.get(entry["state_key"])
 		_: return local.get(key)
 
 func write(key: StringName, value: Variant, writer: StringName = &"", dispatch_context: Dictionary = {}) -> bool:
@@ -62,14 +65,14 @@ func write(key: StringName, value: Variant, writer: StringName = &"", dispatch_c
 		push_warning("Blackboard write to '%s' rejected: expected type %d, got %d." % [key, entry["type"], typeof(value)])
 		return false
 	var scope: StringName = entry["scope"]
-	var is_persistent: bool = scope in [&"saved", &"shared"]
-	var storage_key: StringName = entry["state_key"] if is_persistent else key
+	var is_stored: bool = scope in [&"saved", &"shared", &"session"]
+	var storage_key: StringName = entry["state_key"] if is_stored else key
 	if scope == &"shared" and shared_write_guard.is_valid() \
 			and not bool(shared_write_guard.call(storage_key, value, self)):
 		return false
 	if scope == &"shared" and shared_write_commit.is_valid():
 		return bool(shared_write_commit.call(storage_key, key, value, writer, self, dispatch_context.duplicate(true)))
-	var values: Dictionary = shared_values if scope == &"shared" else (saved if scope == &"saved" else local)
+	var values: Dictionary = _storage_for_scope(scope)
 	var previous: Variant = values.get(storage_key)
 	if values.has(storage_key) and typeof(previous) == typeof(value) and previous == value:
 		return false
@@ -140,3 +143,21 @@ func is_set(key: StringName) -> bool:
 
 func has(key: StringName) -> bool:
 	return schema.has(resolve_key(key))
+
+func _storage_for_scope(scope: StringName) -> Dictionary:
+	match scope:
+		&"saved": return saved
+		&"shared": return shared_values
+		&"session": return session_values
+		_: return local
+
+func receive_session_change(storage_key: StringName, value: Variant, previous: Variant,
+		writer: StringName = &"session_reset") -> void:
+	for key: StringName in schema:
+		var entry: Dictionary = schema[key]
+		if entry.get("scope") == &"session" and entry.get("state_key") == storage_key:
+			if not writer.is_empty():
+				last_writers[key] = writer
+			_queue_value_change(key, previous, value, &"session", writer, {})
+			changed.emit(key, value)
+	_drain_value_changes()

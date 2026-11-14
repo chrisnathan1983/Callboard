@@ -121,18 +121,18 @@ The first five items retain the high priority assigned in `TODO.md`.
   - [x] Expose existing Shared identities in a picker and allow a custom storage key for reuse across definitions. Keep display names separate; changing scope preserves `state_key`, and existing data is remapped only after an explicit storage-key edit. Legacy variables without `state_key` continue to use their display key.
   - [x] Reject attachment once a Stage has initialized its Blackboard or engine. `attach_state_store()` and `StageStateStore.attach()` return `false` without changing the Stage's references after initialization.
 
-- [ ] **Add a store-level cross-Stage event bus.** See [StageStateStore](addons/callboard/core/stage_state_store.gd) and [Stage](addons/callboard/core/stage.gd).
+- [x] **Add a store-level cross-Stage event bus.** See [StageStateStore](addons/callboard/core/stage_state_store.gd) and [Stage](addons/callboard/core/stage.gd).
   - [x] The store maintains stable Stage instance IDs and shares values. Managed Stages can load dormant and ignore ordinary Calls until activation.
   - [x] Add `StageStateStore.broadcast_event()` for typed, live delivery to one or more active, loaded Stage instances. Tests cover a targeted `sensor:activated` event and a broadcast `system_overload` event.
   - [x] Add `CoreVerbs.emit_cross_stage()` so authored rules can send the same events with constants or typed runtime payload references.
   - [x] Define live-only delivery: skip dormant/unloaded recipients, preserve stable instance-ID order, include an eligible source Stage, deliver repeated sends without deduplication, and never queue, replay, or persist messages.
   - [x] Validate the loaded target, event declaration/listener, and each recipient's declared payload fields and types at delivery. Cross-Stage sends consume a per-frame store budget, preserve the RuleEngine ancestry/depth budget, and appear in source and recipient traces.
-  - [ ] Add authoring-time validation across unloaded Stage definitions. Runtime instance IDs are host-assigned, so a project-wide scan needs an authored route or Stage identity registry before it can resolve targets statically.
+  - [x] Add authoring-time validation across unloaded Stage definitions. `cross_stage_instance_ids` on each StageDefinition declares host-assigned IDs; the Callboard scans configured stage folders, checks event recipients, and type-checks literal and typed runtime payload fields. Dynamic IDs retain runtime validation and receive a diagnostic when no registered target can be found.
 
-- [ ] **Add Session scope and reset rules.** See [Blackboard](addons/callboard/core/blackboard.gd), [StageStateStore](addons/callboard/core/stage_state_store.gd), and [BlackboardPanel](addons/callboard/editor/blackboard_panel.gd).
+- [x] **Add Session scope and reset rules.** See [Blackboard](addons/callboard/core/blackboard.gd), [StageStateStore](addons/callboard/core/stage_state_store.gd), and [BlackboardPanel](addons/callboard/editor/blackboard_panel.gd).
   - [x] Local, Saved, and Shared scopes exist. Store-backed Saved values and latches persist by Stage instance ID.
-  - [ ] Use `&"session"` as the scope identifier for per-session Blackboard variables such as `ambient_level` and `sequence_reversed`. Expose `reset_session()` as the host hook to restore those variables to their declared defaults at a session boundary.
-  - [ ] Define host-controlled session start/reset, session counters and flags across Stage reloads, and how session state interacts with durable profile progression and one-shot latches. Make scope, reset rules, and serialization behavior explicit in the UI and API.
+  - [x] Use `&"session"` as the scope identifier for per-session Blackboard variables such as `ambient_level` and `sequence_reversed`. Expose `reset_session()` as the host hook to restore those variables to their declared defaults at a session boundary.
+  - [x] Define host-controlled session start/reset, session counters and flags across Stage reloads, and how session state interacts with durable profile progression and one-shot latches. Make scope, reset rules, and serialization behavior explicit in the UI and API.
 
 - [ ] **Extend declarative restoration.** See [StageRestorationBinding](addons/callboard/core/stage_restoration_binding.gd) and [Stage](addons/callboard/core/stage.gd).
   - [x] Saved/Shared keys can restore visibility, a local `Transform3D`, or a marker's global transform. Marker restoration can optionally seek and pause an `AnimationPlayer` at a resolved pose. Bindings run after `_restore_state()` and before activation, with runtime and validation coverage.

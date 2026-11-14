@@ -110,7 +110,7 @@ The reference type comes from the payload schema or Blackboard declaration. Know
 
 Use the reserved trigger ID `on_change` to run a rule after a declared Blackboard value commits a different value. Its payload contains `key` (String), `previous`, `value`, `scope` (String), and `writer` (String). `previous` and `value` retain the Blackboard key's declared Variant type, so numeric, Boolean, String, and other supported values can be compared or consumed by a step. For example, add `payload.key == "garage_open"` to Requires to filter a listener to one key, then inspect `context["payload"]["previous"]` and `context["payload"]["value"]` in a custom step.
 
-Local, Saved, and Shared writes all use the same trigger. Shared transitions are delivered in store commit order to every loaded Stage that declares the shared storage key. The writer label follows the commit. Initialization defaults and restored values do not fire `on_change`; unchanged or rejected writes do not fire it either. A managed dormant Stage receives shared state updates but does not replay change events on activation. Its next committed change is delivered normally. Feedback from a rule's `set_var` or `add_var` step carries the active event ancestry into `on_change`, so the existing 64-event depth and per-frame dispatch limits stop recursive chains. Use specific key guards and re-entry policies to avoid unintended feedback.
+Local, Saved, Shared, and Session writes all use the same trigger. Shared transitions are delivered in store commit order to every loaded Stage that declares the shared storage key. The writer label follows the commit. Initialization defaults and restored values do not fire `on_change`; unchanged or rejected writes do not fire it either. A managed dormant Stage receives shared state updates but does not replay change events on activation. Its next committed change is delivered normally. Feedback from a rule's `set_var` or `add_var` step carries the active event ancestry into `on_change`, so the existing 64-event depth and per-frame dispatch limits stop recursive chains. Use specific key guards and re-entry policies to avoid unintended feedback.
 
 Step callables receive authored fields at the top level for compatibility and also under `context["payload"]`. Callboard metadata is grouped under `context["_callboard"]` (`rule` and `run`); reserve `payload` and `_callboard` as field names. Queued runs retain and recheck their own payload. Cancel If always reads the payload of the active run.
 
@@ -147,6 +147,7 @@ Callboard opens StageDefinitions and processes ordinary graph edits with resourc
 | `stage_script` | The `@tool` script extending `Stage`. |
 | `preview_scene_path` | Optional scene path for editor analysis of scene-assigned props. Callboard otherwise looks for a same-name sibling `.tscn`, then falls back to constructing the script. |
 | `managed_lifecycle` | Opts the Stage into dormant loading, activation on entry, and Call filtering while dormant. |
+| `cross_stage_instance_ids` | Runtime Stage IDs that may identify instances of this definition. Declare IDs here to let the Callboard validate targeted cross-Stage events before those Stages load. |
 | `restoration_bindings` | `StageRestorationBinding` resources that restore visibility, saved transforms, Marker3D positions, and optional AnimationPlayer poses before activation. |
 | `external_calls` | Events supplied by gameplay. Use bare IDs for Calls and `relay:<name>` IDs for external relays. Include `arrive` when using that lifecycle trigger. |
 | `call_positions` | Saved graph positions keyed by external event ID. |
@@ -156,6 +157,8 @@ Callboard opens StageDefinitions and processes ordinary graph edits with resourc
 
 Use the generated `.tscn` when loading a Stage that relies on scene-assigned nodes. `StageDefinition.instantiate()` creates a Stage from its script and assigns the definition.
 
+For cross-Stage authoring checks, list each host-assigned target ID in the destination definition's `cross_stage_instance_ids` field in the Inspector. The Callboard scans StageDefinitions in the configured stage folders. It checks targeted IDs against those declarations, checks that recipients declare or listen for the event, and compares literal or typed runtime payload fields with each recipient schema. Broadcasts are checked against all configured definitions that receive the event. Runtime IDs or payloads that cannot be resolved statically still receive the store's runtime checks.
+
 Step arguments and delays are evaluated at graph compilation using Godot's [Expression](https://docs.godotengine.org/en/stable/classes/class_expression.html). Use project-authored data. The expressions can call methods and reference typed props and script constants. The event payload is available to the step callable when the rule runs.
 
 ## Blackboard
@@ -164,8 +167,8 @@ Step arguments and delays are evaluated at graph compilation using Godot's [Expr
 
 | Method | Behavior |
 | --- | --- |
-| `define(key, scope, default, state_key = &"")` | Uses the default value's Variant type as the schema. Scope is `&"local"`, `&"saved"`, or `&"shared"`. |
-| `get_var(key)`, `write(key, value, writer = &"") -> bool` | Read or write a declared value. A write returns true when a changed value is accepted; false when it is unchanged or rejected. Writes to undeclared keys produce an error. Integer writes to float keys are converted. Other type mismatches warn and discard the write. Saved values with an outdated type revert to the declared default during setup. |
+| `define(key, scope, default, state_key = &"")` | Uses the default value's Variant type as the schema. Scope is `&"local"`, `&"saved"`, `&"shared"`, or `&"session"`. |
+| `get_var(key)`, `write(key, value, writer = &"") -> bool` | Read or write a declared value. A write returns true when a changed value is accepted; false when it is unchanged or rejected. Writes to undeclared keys produce an error. Integer writes to float keys are converted. Other type mismatches warn and discard the write. Saved or session values with an outdated type revert to the declared default during setup. |
 | `has(key)`, `is_set(key)` | Test whether a key is declared or whether its value is truthy. |
 | `alias(old_key, new_key)`, `resolve_key(key)` | Support renamed keys. Callboard records aliases when it renames authored variables. |
 
@@ -173,7 +176,7 @@ The `changed(key, value)` signal is forwarded as `Stage.var_changed`. `value_cha
 
 ## StageStateStore
 
-[`StageStateStore`](../core/stage_state_store.gd) is a Resource that owns per-instance `saved` and `fired` dictionaries plus a shared Blackboard dictionary. Use a distinct, stable ID for each loaded plot, even when two plots use the same scene.
+[`StageStateStore`](../core/stage_state_store.gd) is a Resource that owns per-instance `saved` and `fired` dictionaries, a shared Blackboard dictionary, and runtime-only session values. Use a distinct, stable ID for each loaded plot, even when two plots use the same scene.
 
 ```gdscript
 var store := StageStateStore.new()
@@ -187,7 +190,7 @@ store.unload_stage(left_yard)
 store.unload_stage(right_yard)
 ```
 
-`load_stage()` injects state before adding the Stage to the tree. `unload_stage()` deactivates it and retains its dictionaries for the next load. Save the Resource or serialize `stage_states` and `shared_values` with Variant-preserving storage to persist across game restarts. Shared Blackboard keys should use the same `state_key` and Variant type in every Stage. Conflicting declarations appear in Stage diagnostics, and incompatible shared writes are rejected. Direct `saved_vars` and `fired` dictionary injection remains supported for existing managers.
+`load_stage()` injects state before adding the Stage to the tree. `unload_stage()` deactivates it and retains its dictionaries for the next load. `&"session"` Blackboard variables retain values across Stage reloads for as long as this store instance remains alive. Call `store.reset_session()` at the host's session boundary to restore declared session keys to their defaults and clear values for currently undeclared keys. This notifies loaded Blackboards and can trigger `on_change` rules for changed values. Session values are not exported or included in durable profile saves. Use `&"saved"` for progression that must survive a session reset; one-shot latches remain in each Stage instance's `fired` dictionary and are unaffected by the reset. Save the Resource or serialize `stage_states` and `shared_values` with Variant-preserving storage to persist across game restarts. Shared Blackboard keys should use the same `state_key` and Variant type in every Stage. Conflicting declarations appear in Stage diagnostics, and incompatible shared writes are rejected. Direct `saved_vars` and `fired` dictionary injection remains supported for existing managers.
 
 `broadcast_event(event_id, arguments = {}, target_instance_id = &"") -> int` sends a live event to one loaded Stage ID or broadcasts to every eligible loaded Stage when the target is empty. It returns the number of recipients that accepted the event. Targets must currently be loaded, built, and able to accept Calls; managed dormant Stages are skipped. Broadcast recipients are processed in ascending instance-ID order. A Stage must declare the event in `external_calls` or listen for it in a rule. When a recipient has a payload schema for the event, supplied fields must be declared and match their types; omitted fields are allowed and integer values are converted for float fields. A recipient without a schema accepts the supplied dictionary as-is. Targeted unknown events, unknown targets, and invalid payloads are rejected with a warning.
 
