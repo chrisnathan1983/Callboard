@@ -2,7 +2,7 @@
 class_name StageRestorationBinding extends Resource
 ## Applies resolved Blackboard state to a scene node without replaying an animation.
 
-enum Kind { VISIBILITY, TRANSFORM, SNAP_TO_MARKER, POSE_ANIMATION, CHILD_INDEX, PROPERTY }
+enum Kind { VISIBILITY, TRANSFORM, SNAP_TO_MARKER, POSE_ANIMATION, CHILD_INDEX, PROPERTY, LIGHT_ENERGY, LIGHT_COLOR, AUDIO_PLAYBACK, PARTICLE_EMITTING }
 
 @export var key: StringName
 @export var kind: Kind = Kind.VISIBILITY
@@ -13,6 +13,8 @@ enum Kind { VISIBILITY, TRANSFORM, SNAP_TO_MARKER, POSE_ANIMATION, CHILD_INDEX, 
 @export_range(0.0, 3600.0, 0.01) var animation_time := 0.0
 @export var child_choices: Array[NodePath] = []
 @export var property_name: StringName
+## Audio clips are transient by default. Enable only for stateful/looping audio.
+@export var replay_audio_on_restore := false
 
 func to_dictionary() -> Dictionary:
 	return {
@@ -21,6 +23,7 @@ func to_dictionary() -> Dictionary:
 		"animation_name": String(animation_name), "animation_time": animation_time,
 		"child_choices": child_choices.map(func(path: NodePath) -> String: return String(path)),
 		"property_name": String(property_name),
+		"replay_audio_on_restore": replay_audio_on_restore,
 	}
 
 static func from_dictionary(data: Dictionary) -> StageRestorationBinding:
@@ -35,6 +38,7 @@ static func from_dictionary(data: Dictionary) -> StageRestorationBinding:
 	for path: Variant in data.get("child_choices", []):
 		binding.child_choices.append(NodePath(path))
 	binding.property_name = StringName(data.get("property_name", ""))
+	binding.replay_audio_on_restore = bool(data.get("replay_audio_on_restore", false))
 	return binding
 
 func apply(stage: Stage) -> void:
@@ -75,6 +79,23 @@ func apply(stage: Stage) -> void:
 				return
 			var set_value: Variant = float(value) if typeof(value) == TYPE_INT and int(info.get("type", TYPE_NIL)) == TYPE_FLOAT else value
 			target.set(property_name, set_value)
+		Kind.LIGHT_ENERGY:
+			if target is Light3D and (typeof(value) == TYPE_FLOAT or typeof(value) == TYPE_INT):
+				(target as Light3D).light_energy = float(value)
+		Kind.LIGHT_COLOR:
+			if target is Light3D and value is Color:
+				(target as Light3D).light_color = value
+		Kind.AUDIO_PLAYBACK:
+			if target is AudioStreamPlayer or target is AudioStreamPlayer2D or target is AudioStreamPlayer3D:
+				var player := target as Node
+				player.call("stop")
+				if bool(value) and replay_audio_on_restore:
+					player.call("play")
+		Kind.PARTICLE_EMITTING:
+			if target is GPUParticles3D or target is CPUParticles3D:
+				var particles := target as Node
+				particles.set("emitting", bool(value))
+				particles.call("restart")
 
 func validate(stage: Stage) -> Array[String]:
 	var problems: Array[String] = []
@@ -136,6 +157,30 @@ func validate(stage: Stage) -> Array[String]:
 						problems.append("property binding key '%s' type does not match property '%s'" % [key, property_name])
 					elif not _property_value_matches(stage.bb.get_var(key), property_info):
 						problems.append("property binding value for key '%s' is incompatible with property '%s'" % [key, property_name])
+			Kind.LIGHT_ENERGY:
+				if value_type != TYPE_FLOAT and value_type != TYPE_INT:
+					problems.append("light energy binding key '%s' must be numeric" % key)
+				if not target is Light3D:
+					problems.append("light energy binding target '%s' must be Light3D" % target_path)
+			Kind.LIGHT_COLOR:
+				if value_type != TYPE_COLOR:
+					problems.append("light color binding key '%s' must be Color" % key)
+				if not target is Light3D:
+					problems.append("light color binding target '%s' must be Light3D" % target_path)
+			Kind.AUDIO_PLAYBACK:
+				if value_type != TYPE_BOOL:
+					problems.append("audio playback binding key '%s' must be Boolean" % key)
+				if not (target is AudioStreamPlayer or target is AudioStreamPlayer2D or target is AudioStreamPlayer3D):
+					problems.append("audio playback binding target '%s' must be an AudioStreamPlayer" % target_path)
+				elif replay_audio_on_restore and target.get("stream") == null:
+					problems.append("audio playback binding target '%s' has no stream to replay" % target_path)
+			Kind.PARTICLE_EMITTING:
+				if value_type != TYPE_BOOL:
+					problems.append("particle emitting binding key '%s' must be Boolean" % key)
+				if not (target is GPUParticles3D or target is CPUParticles3D):
+					problems.append("particle emitting binding target '%s' must be GPUParticles3D or CPUParticles3D" % target_path)
+				elif bool(target.get("one_shot")):
+					problems.append("particle emitting binding target '%s' must use continuous emission, not one_shot" % target_path)
 	if kind == Kind.SNAP_TO_MARKER:
 		var marker := stage.get_node_or_null(marker_path)
 		if not marker is Marker3D:
@@ -158,6 +203,8 @@ func validate(stage: Stage) -> Array[String]:
 			problems.append("restoration animation '%s' was not found on '%s'" % [animation_name, target_path])
 	elif not animation_player_path.is_empty() or not animation_name.is_empty():
 		problems.append("AnimationPlayer pose settings are only supported for marker or standalone animation pose bindings")
+	if kind != Kind.AUDIO_PLAYBACK and replay_audio_on_restore:
+		problems.append("replay_audio_on_restore is only supported for audio playback bindings")
 	return problems
 
 func _find_property(target: Object, name: StringName) -> Dictionary:

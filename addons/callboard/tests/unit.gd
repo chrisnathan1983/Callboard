@@ -1491,6 +1491,10 @@ func _test_managed_stages_and_restoration() -> bool:
 		[&"garage_door_transform", "saved", Transform3D.IDENTITY],
 		[&"selected_variant", "saved", 1],
 		[&"garage_rotation", "saved", Vector3.ZERO],
+		[&"lamp_energy", "saved", 2.5],
+		[&"lamp_color", "saved", Color(0.25, 0.5, 0.75)],
+		[&"ambience_playing", "saved", true],
+		[&"dust_emitting", "saved", true],
 	]:
 		var variable := VariableData.new()
 		variable.key = variable_spec[0]
@@ -1565,7 +1569,23 @@ func _test_managed_stages_and_restoration() -> bool:
 	binding_rotation.kind = StageRestorationBinding.Kind.PROPERTY
 	binding_rotation.target_path = NodePath("GarageDoor")
 	binding_rotation.property_name = &"rotation"
-	definition.restoration_bindings.assign([binding_window, binding_skateboard_window, binding_pose, binding_pose_only, binding_door, binding_choice, binding_rotation])
+	var binding_energy := StageRestorationBinding.new()
+	binding_energy.key = &"lamp_energy"
+	binding_energy.kind = StageRestorationBinding.Kind.LIGHT_ENERGY
+	binding_energy.target_path = NodePath("Lamp")
+	var binding_color := StageRestorationBinding.new()
+	binding_color.key = &"lamp_color"
+	binding_color.kind = StageRestorationBinding.Kind.LIGHT_COLOR
+	binding_color.target_path = NodePath("Lamp")
+	var binding_audio := StageRestorationBinding.new()
+	binding_audio.key = &"ambience_playing"
+	binding_audio.kind = StageRestorationBinding.Kind.AUDIO_PLAYBACK
+	binding_audio.target_path = NodePath("Ambience")
+	var binding_particles := StageRestorationBinding.new()
+	binding_particles.key = &"dust_emitting"
+	binding_particles.kind = StageRestorationBinding.Kind.PARTICLE_EMITTING
+	binding_particles.target_path = NodePath("Dust")
+	definition.restoration_bindings.assign([binding_window, binding_skateboard_window, binding_pose, binding_pose_only, binding_door, binding_choice, binding_rotation, binding_energy, binding_color, binding_audio, binding_particles])
 
 	var template := Stage.new()
 	template.name = "Stage"
@@ -1617,6 +1637,18 @@ func _test_managed_stages_and_restoration() -> bool:
 	sleep_animation.track_insert_key(sleep_track, 10.0, Vector3(0, 0.25, 0))
 	library.add_animation(&"sleep", sleep_animation)
 	animation_player.add_animation_library(&"", library)
+	var lamp := OmniLight3D.new()
+	lamp.name = "Lamp"
+	template.add_child(lamp)
+	lamp.owner = template
+	var ambience := AudioStreamPlayer.new()
+	ambience.name = "Ambience"
+	template.add_child(ambience)
+	ambience.owner = template
+	var dust := CPUParticles3D.new()
+	dust.name = "Dust"
+	template.add_child(dust)
+	dust.owner = template
 	var gift := TriggerArea.new()
 	gift.name = "RobotGiftTarget"
 	gift.mode = TriggerArea.Mode.INTERACT
@@ -1674,6 +1706,34 @@ func _test_managed_stages_and_restoration() -> bool:
 		property_errors.any(func(problem: String) -> bool: return "type does not match" in problem)
 		and binding_roundtrip.kind == StageRestorationBinding.Kind.CHILD_INDEX
 		and binding_roundtrip.child_choices == binding_choice.child_choices) and ok
+	var invalid_audio_replay := StageRestorationBinding.new()
+	invalid_audio_replay.key = &"ambience_playing"
+	invalid_audio_replay.kind = StageRestorationBinding.Kind.AUDIO_PLAYBACK
+	invalid_audio_replay.target_path = NodePath("Ambience")
+	invalid_audio_replay.replay_audio_on_restore = true
+	var invalid_particles := StageRestorationBinding.new()
+	invalid_particles.key = &"dust_emitting"
+	invalid_particles.kind = StageRestorationBinding.Kind.PARTICLE_EMITTING
+	invalid_particles.target_path = NodePath("Dust")
+	(stage.get_node("Dust") as CPUParticles3D).one_shot = true
+	var invalid_audio_problems := invalid_audio_replay.validate(stage)
+	var invalid_particle_problems := invalid_particles.validate(stage)
+	var audio_binding_roundtrip := StageRestorationBinding.from_dictionary(invalid_audio_replay.to_dictionary())
+	ok = _check("audio replay requires an explicit stream and particle restoration rejects one-shot effects",
+		invalid_audio_problems.any(func(problem: String) -> bool: return "no stream" in problem)
+		and invalid_particle_problems.any(func(problem: String) -> bool: return "one_shot" in problem)
+		and audio_binding_roundtrip.replay_audio_on_restore) and ok
+	(stage.get_node("Dust") as CPUParticles3D).one_shot = false
+	binding_energy.apply(stage)
+	binding_color.apply(stage)
+	binding_audio.apply(stage)
+	binding_particles.apply(stage)
+	var restored_lamp := stage.get_node("Lamp") as OmniLight3D
+	ok = _check("light state and continuous particles restore while transient audio remains stopped by default",
+		is_equal_approx(restored_lamp.light_energy, 2.5)
+		and restored_lamp.light_color.is_equal_approx(Color(0.25, 0.5, 0.75))
+		and not (stage.get_node("Ambience") as AudioStreamPlayer).is_playing()
+		and (stage.get_node("Dust") as CPUParticles3D).emitting) and ok
 	var actor := Node3D.new()
 	root.add_child(actor)
 	var gift_target := stage.get_node("RobotGiftTarget") as TriggerArea
