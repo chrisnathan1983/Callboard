@@ -77,6 +77,20 @@ emit_relay(&"parcel_ready", {"item": "gift_id", "accepted": "approved"})
 
 Missing input fields are omitted from the emitted payload. When input and output schemas are declared, authoring validation checks mapped field names and types; the runtime checks supplied values against the output schema before dispatch. The relay dispatch carries the current event ancestry, so recursive relay chains remain subject to the same depth and per-frame dispatch limits. The rule board draws the step as a relay emitter, and live step traces include its relay name and argument position.
 
+### Waiting in a rule
+
+```gdscript
+wait_for_call(&"host_reply", &"payload.accepted == true", 3.0, &"reply_timeout")
+wait_for_call(&"relay:prop_ready")
+wait_until(&"completed_count >= 3", 5.0, &"setup_timeout")
+```
+
+`wait_for_call(event, payload_guard = &"", timeout = 0.0, timeout_relay = &"")` observes future events on the same Stage. Use the full `relay:` ID when waiting for a relay. The optional guard checks the incoming event's payload. The event still dispatches to its ordinary listeners, and the waiting rule resumes afterward with its original payload. Events that arrived before the wait was armed are discarded. For a host acknowledgment, declare the reply Call and have the host send it with `Stage.fire()` after the wait is armed. A host replying to a preceding `gameplay_event` step in the same rule can defer its reply to let the wait arm first.
+
+`wait_until(condition, timeout = 0.0, timeout_relay = &"")` checks the guard immediately with the current Blackboard and the rule's original payload. If the guard fails, the step rechecks on each committed Blackboard change.
+
+For both steps, zero waits indefinitely. The first match or timeout wins. Success continues the sequence. Timeout ends the sequence and suppresses the rule's completion relay. If supplied, the bare timeout relay name dispatches with the original payload and event ancestry, so another rule can handle recovery. Restart, Cancel If, and Stage deactivation release the subscriptions and stop the interrupted sequence. The live debugger shows pending waits and traces matches, timeouts, and cancellations.
+
 ### Runtime step inputs
 
 To read the current rule's payload or Blackboard at step execution time, use a typed reference in an argument expression:

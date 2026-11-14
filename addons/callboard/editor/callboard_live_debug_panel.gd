@@ -229,7 +229,10 @@ func _format_trace(entry: Dictionary) -> String:
 		if not verb.is_empty():
 			label += " - " + verb
 		if not relay.is_empty():
-			label += " - emits relay:%s (arg %d)" % [relay, relay_argument]
+			if verb in ["wait_for_call", "wait_until"]:
+				label += " - timeout relay:%s" % relay
+			else:
+				label += " - emits relay:%s (arg %d)" % [relay, relay_argument]
 	if not entry["detail"].is_empty():
 		label += " - " + entry["detail"]
 	return label

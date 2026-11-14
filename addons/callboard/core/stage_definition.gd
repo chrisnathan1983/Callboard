@@ -245,6 +245,8 @@ func _build_step(stage: Stage, event: StringName, factory: CoreVerbs, spec: Step
 	# Invoke the factory with the evaluated arguments. Expression reports argument
 	# and type errors without invoking the verb twice or logging a script error.
 	var authored_args: Array = values[0]
+	if verb in ["wait_for_call", "wait_until"] and not RuleValidator.wait_argument_error(spec.verb, authored_args).is_empty():
+		return null
 	if not _runtime_references_fit_known_schema(stage, verb, authored_args):
 		return null
 	var args: Array = []

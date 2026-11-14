@@ -530,6 +530,7 @@ func _initialize() -> void:
 	ok = _test_shared_write_order() and ok
 	ok = _test_emit_relay() and ok
 	ok = _test_runtime_step_inputs() and ok
+	ok = await _test_authored_waits() and ok
 	ok = _test_on_change_triggers() and ok
 	ok = await _test_dispatch_limits_and_ancestry() and ok
 	ok = _test_stage_dispatch_policy() and ok
@@ -845,6 +846,103 @@ func _build_props() -> void:
 		built_ok and passed_payload) \
 		and _check("missing or type-incompatible runtime inputs skip affected steps without blocking static arguments",
 		missing_skips_only_affected_steps and incompatible_skips_only_affected_steps))
+
+func _test_authored_waits() -> bool:
+	var stage := Stage.new()
+	stage.definition = StageDefinition.new()
+	stage.definition.managed_lifecycle = true
+	stage.definition.external_calls = PackedStringArray(["arrive", "start", "ack"])
+	var ready := VariableData.new()
+	ready.key = &"ready"
+	ready.default_value = false
+	stage.definition.variables = [ready]
+	var start := RuleData.new()
+	start.id = &"request"
+	start.trigger = &"start"
+	start.reentry = Rule.ReentryPolicy.RESTART
+	start.emit = &"done"
+	var acknowledgment := StepData.new()
+	acknowledgment.verb = &"wait_for_call"
+	acknowledgment.args = PackedStringArray(['&"ack"', ExprText.format_literal(&'payload.result == "ok"'), "1.0", '&"expired"'])
+	var condition := StepData.new()
+	condition.verb = &"wait_until"
+	condition.args = PackedStringArray(['&"ready"', "1.0", '&"expired"'])
+	start.steps = [acknowledgment, condition]
+	stage.definition.rules = [start]
+	for event in [&"relay:done", &"relay:expired", &"ack"]:
+		var listener := RuleData.new()
+		listener.id = StringName(String(event).trim_prefix("relay:"))
+		listener.trigger = event
+		var score := StepData.new()
+		score.verb = &"score"
+		score.args = PackedStringArray([str([&"done", &"expired", &"ack"].find(listener.id) + 1)])
+		listener.steps = [score]
+		stage.definition.rules.append(listener)
+	root.add_child(stage)
+	stage.build()
+	var ok := _check("authored wait verbs compile with correctly indexed timeout relays", stage.graph_errors.is_empty()
+		and stage.engine.rules[0].steps[0].emit_arg == 3 and stage.engine.rules[0].steps[1].emit_arg == 2)
+	if not ok:
+		stage.free()
+		return false
+	stage.engine.wait = func(_seconds: float) -> Signal: return clock_tick
+	var scores: Array[int] = []
+	var acknowledgments := [0]
+	var outcomes: Array[String] = []
+	stage.scored.connect(func(points: int) -> void:
+		if points == 3:
+			acknowledgments[0] += 1
+		else:
+			scores.append(points))
+	stage.engine.trace_event.connect(func(entry: Dictionary) -> void:
+		if entry.kind.begins_with("wait_"):
+			outcomes.append(entry.kind))
+	stage.activate()
+	stage.fire(&"start")
+	stage.fire(&"ack", {"result": "retry"})
+	await process_frame
+	ok = _check("unmatched host acknowledgment leaves the wait pending",
+		outcomes.is_empty() and stage.engine.pending_snapshot().size() == 1) and ok
+	stage.fire(&"ack", {"result": "ok"})
+	ok = _check("acknowledgments dispatch ordinary listeners before a waiting rule resumes",
+		acknowledgments[0] == 2 and outcomes.is_empty()) and ok
+	clock_tick.emit()
+	await process_frame
+	stage.write_var(&"ready", true)
+	await process_frame
+	ok = _check("matching acknowledgment wins over a later timeout and condition wakes on a Blackboard write",
+		scores == [1] and outcomes == ["wait_matched", "wait_matched"]
+		and clock_tick.get_connections().is_empty()) and ok
+
+	stage.fire(&"start")
+	clock_tick.emit()
+	stage.fire(&"ack", {"result": "ok"})
+	await process_frame
+	ok = _check("timeout wins if first and sends only the recovery relay",
+		scores == [1, 2] and outcomes.back() == "wait_timed_out") and ok
+
+	stage.fire(&"start")
+	stage.fire(&"start")
+	stage.fire(&"ack", {"result": "ok"})
+	await process_frame
+	ok = _check("Restart discards the cancelled subscription before arming its replacement",
+		scores == [1, 2] and stage.engine.pending_snapshot().size() == 1) and ok
+	stage.fire(&"ack", {"result": "ok"})
+	await process_frame
+	ok = _check("an already-true condition continues without another timer",
+		scores == [1, 2, 1] and clock_tick.get_connections().is_empty()) and ok
+
+	stage.fire(&"start")
+	stage.deactivate()
+	clock_tick.emit()
+	stage.fire(&"ack", {"result": "ok"})
+	await process_frame
+	ok = _check("Stage deactivation disconnects the Call observer and clock without running recovery",
+		stage.engine._event_received.get_connections().is_empty()
+		and stage.engine.pending_snapshot().is_empty() and clock_tick.get_connections().is_empty()
+		and scores == [1, 2, 1]) and ok
+	stage.free()
+	return ok
 
 func _test_on_change_triggers() -> bool:
 	var definition := StageDefinition.new()

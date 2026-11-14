@@ -8,6 +8,7 @@ static func check(rules: Array[Rule], bb: Blackboard,
 		payload_schema: Dictionary = {}, external_writers: Array[BlackboardWriterData] = []) -> Array[String]:
 	var problems: Array[String] = []
 	var emitted := {}
+	var waited := {}
 	var settable := {}
 	var seen := {}
 	var payload_names := {}
@@ -40,6 +41,28 @@ static func check(rules: Array[Rule], bb: Blackboard,
 		for s in r.steps:
 			if s.verb == &"emit_relay":
 				problems.append_array(_validate_mapped_relay_step(r, s, payload_names))
+			if s.verb == &"wait_for_call":
+				waited[s.wait_event] = true
+				var filter := StringName(s.args[1]) if s.args.size() > 1 else &""
+				if not filter.is_empty():
+					var field := GuardExpression.referenced_payload_field(filter)
+					if payload_names.has(s.wait_event) and not payload_names[s.wait_event].has(field):
+						problems.append("rule '%s' waits for undeclared payload field '%s' on '%s'" % [r.id, field, s.wait_event])
+					elif payload_names.has(s.wait_event):
+						var guard := GuardExpression.parse(String(filter))
+						if guard.get("comparison", false) and not _payload_comparison_is_compatible(payload_names[s.wait_event][field], guard):
+							problems.append("rule '%s' wait payload guard for '%s' uses an incompatible literal or operator" % [r.id, field])
+			if s.verb == &"wait_until" and not s.args.is_empty():
+				var guard := GuardExpression.parse(String(s.args[0]))
+				var key: StringName = guard.get("key", &"")
+				if guard.get("payload", false) and payload_names.has(r.trigger):
+					if not payload_names[r.trigger].has(key):
+						problems.append("rule '%s' wait condition checks undeclared payload field '%s'" % [r.id, key])
+					elif guard["comparison"] and not _payload_comparison_is_compatible(payload_names[r.trigger][key], guard):
+						problems.append("rule '%s' wait condition for payload field '%s' uses an incompatible literal or operator" % [r.id, key])
+				elif not guard.get("payload", false) and guard.get("comparison", false) and bb.has(key):
+					if bb.schema[bb.resolve_key(key)]["type"] not in [TYPE_INT, TYPE_FLOAT] or guard["value_type"] not in [TYPE_INT, TYPE_FLOAT]:
+						problems.append("rule '%s' wait condition for '%s' requires a numeric key and literal" % [r.id, key])
 			for k in s.reads:
 				if not bb.has(k):
 					problems.append("rule '%s' reads '%s' which is not declared on the Blackboard" % [r.id, k])
@@ -126,16 +149,7 @@ static func check(rules: Array[Rule], bb: Blackboard,
 					if not payload_names.has(r.trigger):
 						continue
 					var field_type: int = trigger_schema.get(field_key, TYPE_NIL)
-					var literal_type: int = parsed["value_type"]
-					var operator: String = parsed["operator"]
-					var compatible := false
-					if field_type == TYPE_NIL:
-						compatible = true # Dynamic Variant fields, including on_change values.
-					elif field_type in [TYPE_INT, TYPE_FLOAT]:
-						compatible = literal_type in [TYPE_INT, TYPE_FLOAT]
-					elif field_type in [TYPE_BOOL, TYPE_STRING]:
-						compatible = literal_type == field_type and operator in ["==", "!="]
-					if not compatible:
+					if not _payload_comparison_is_compatible(field_type, parsed):
 						problems.append("rule '%s' compares payload field '%s' with an incompatible literal or operator" % [r.id, field_key])
 				continue
 			var key: StringName = bb.resolve_key(parsed["key"])
@@ -152,11 +166,47 @@ static func check(rules: Array[Rule], bb: Blackboard,
 		if r.steps.is_empty() and r.emits == &"":
 			problems.append("rule '%s' has no steps or completion relay" % r.id)
 	for event in emitted:
-		if not rules.any(func(x: Rule) -> bool: return x.trigger == event):
+		if not waited.has(event) and not rules.any(func(x: Rule) -> bool: return x.trigger == event):
 			problems.append("'%s' is emitted but no rule listens to it" % event)
 	problems.append_array(_find_relay_cycles(rules))
 	problems.append_array(_find_shared_trigger_conflicts(rules))
 	return problems
+
+static func _payload_comparison_is_compatible(field_type: int, guard: Dictionary) -> bool:
+	if field_type == TYPE_NIL:
+		return true # Dynamic Variant fields, including on_change values.
+	var literal_type: int = guard["value_type"]
+	if field_type in [TYPE_INT, TYPE_FLOAT]:
+		return literal_type in [TYPE_INT, TYPE_FLOAT]
+	return field_type in [TYPE_BOOL, TYPE_STRING] and literal_type == field_type and guard["operator"] in ["==", "!="]
+
+## Checks evaluated arguments. The Stage compiler uses this before creating a wait.
+static func wait_argument_error(verb: StringName, args: Array) -> String:
+	var for_call := verb == &"wait_for_call"
+	if args.is_empty() or typeof(args[0]) not in [TYPE_STRING, TYPE_STRING_NAME]:
+		return "requires a Call or relay ID" if for_call else "requires a guard condition"
+	var first := String(args[0])
+	if for_call:
+		if first.strip_edges().is_empty() or first == "relay:":
+			return "requires a non-empty Call or relay ID"
+		if args.size() > 1:
+			if typeof(args[1]) not in [TYPE_STRING, TYPE_STRING_NAME]:
+				return "payload guard must be a string"
+			var filter := StringName(args[1])
+			if not filter.is_empty() and GuardExpression.referenced_payload_field(filter).is_empty():
+				return "requires a payload comparison or presence check"
+	elif not GuardExpression.parse(first)["ok"]:
+		return "requires a valid guard condition"
+	var timeout_index := 2 if for_call else 1
+	if args.size() > timeout_index:
+		var timeout: Variant = args[timeout_index]
+		if typeof(timeout) not in [TYPE_INT, TYPE_FLOAT] or not is_finite(float(timeout)) or timeout < 0:
+			return "timeout must be a finite number of seconds, zero or greater"
+	if args.size() > timeout_index + 1:
+		var relay: Variant = args[timeout_index + 1]
+		if typeof(relay) not in [TYPE_STRING, TYPE_STRING_NAME] or (not String(relay).is_empty() and not String(relay).is_valid_identifier()):
+			return "timeout relay must be a bare relay identifier or empty"
+	return ""
 
 static func _validate_mapped_relay_step(rule: Rule, step: Step,
 		payload_schemas: Dictionary) -> Array[String]:

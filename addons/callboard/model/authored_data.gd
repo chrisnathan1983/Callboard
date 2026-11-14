@@ -52,6 +52,11 @@ static func rename_key(data: GraphDraft, old: String, new_key: String) -> void:
 				guards[index] = GuardExpression.rename_key(guards[index], old, new_key)
 			rule.set(field, guards)
 		for step in rule.steps:
+			if step.verb == &"wait_until" and not step.args.is_empty():
+				var condition := ExprText.parse_literal(step.args[0])
+				if condition.ok and typeof(condition.value) in [TYPE_STRING, TYPE_STRING_NAME]:
+					var renamed := GuardExpression.rename_key(String(condition.value), old, new_key)
+					step.args[0] = ExprText.format_literal(StringName(renamed))
 			var verb := VerbCatalog.find(data.catalog, step.verb)
 			var params: Array = verb.get("args", [])
 			for index in params.size():

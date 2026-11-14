@@ -84,10 +84,10 @@ The first five items retain the high priority assigned in `TODO.md`.
   - [x] Add `callboard_payload()` and `callboard_blackboard()` typed references resolved for each step run. Existing constant, prop, and verb-factory arguments remain build-time expressions. Missing values and runtime type mismatches warn and skip the affected step while later steps continue.
   - [x] Support dynamic values for `set_var`, `add_var`, `say`, scoring, relay field maps, and host request dictionaries. The inspector offers compatible declared payload and Blackboard sources and known schema mismatches are rejected during Stage build.
 
-- [ ] **Add cancellable `wait_for_call` and `wait_until` steps with timeouts.** See [RuleEngine](addons/callboard/core/rule_engine.gd) and [Step](addons/callboard/core/step.gd).
+- [x] **Add cancellable `wait_for_call` and `wait_until` steps with timeouts.** See [RuleEngine](addons/callboard/core/rule_engine.gd) and [Step](addons/callboard/core/step.gd).
   - [x] `.after()` delays and verb-specific waits already exist, with an injected timer for engine tests.
-  - [ ] Wait for a Call or relay, optionally matched by payload, or for a Blackboard/guard condition. Define whether an already-true condition completes immediately and how a matching event interacts with regular dispatch.
-  - [ ] Expose success, timeout, and interruption to authored recovery paths. Dispose subscriptions and timers through §1's run-owned wait handling. Test simultaneous timeout and success, Restart, Stage deactivation, and receipt of a host acknowledgment.
+  - [x] Wait for a future Call or relay with an optional payload guard, or for a Blackboard condition. An already-true condition completes immediately. Matching Calls and relays still dispatch normally before the waiting sequence resumes.
+  - [x] Success continues the sequence. Timeout ends it and can emit a recovery relay. Restart, Cancel If, and deactivation release the wait. Injected-clock tests cover first-result ordering, Restart, Stage deactivation, and a filtered host acknowledgment.
 
 - [ ] **Add sequential and parallel step groups.** See [`RuleEngine._run()`](addons/callboard/core/rule_engine.gd).
   - [x] The engine awaits a rule's steps in order. Independent rules can already overlap, and some verbs support non-blocking playback.

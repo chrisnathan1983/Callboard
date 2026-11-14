@@ -93,6 +93,8 @@ Use expressions such as `payload.action == "confirm"`, `payload.accepted == true
 
 Use the `emit_relay` step to dispatch a relay at a specific point in a rule's sequence. Its optional dictionary maps output field names to input field names; for example, `emit_relay(&"parcel_ready", {"item": "gift_id"})` sends the incoming `gift_id` as `item`. Use `{}` to forward the complete payload. Declared input and relay schemas are checked for field and type compatibility, and the relay continues the current event ancestry.
 
+Use `wait_for_call` to wait for a future Call or relay, with an optional payload guard. Use `wait_until` to continue as soon as a guard passes. Both steps accept a timeout and an optional recovery relay. See [Waiting in a rule](docs/api.md#waiting-in-a-rule) for examples.
+
 Select the built-in `on_change` trigger to react to Blackboard commits. Filter a rule with `payload.key == "door_open"`; its payload also includes `previous`, `value`, `scope`, and `writer`. The transition values keep the declared Blackboard type. Local, Saved, and Shared writes trigger listeners after a committed change; defaults, restored values, unchanged or rejected writes, and shared updates received while a managed Stage is dormant do not. Do not add `on_change` to **Calls & relays** or fire it manually; the Stage emits it after a write commits.
 
 Use the built-in `add_var` step to update numeric Blackboard counters. It reads the current value when it runs, so multiple Calls accumulate and later steps see the new value. Integer keys accept whole-number positive or negative deltas; float keys accept fractional deltas. Saved counters continue from the values in your Stage's injected save dictionary.

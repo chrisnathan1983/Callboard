@@ -17,6 +17,10 @@ static func ids(data: GraphDraft) -> Array:
 		if rule.emit != "":
 			names[RELAY_PREFIX + rule.emit] = true
 		for step in rule.steps:
+			if step.verb == &"wait_for_call" and not step.args.is_empty():
+				var event := ExprText.parse_literal(step.args[0])
+				if event.ok and typeof(event.value) in [TYPE_STRING, TYPE_STRING_NAME] and String(event.value).begins_with(RELAY_PREFIX) and event.value != RELAY_PREFIX:
+					names[String(event.value)] = true
 			var relay := data.relay_for(step)
 			if not relay.is_empty():
 				names[RELAY_PREFIX + relay] = true
@@ -30,13 +34,13 @@ static func impact(data: GraphDraft, id: String) -> PackedStringArray:
 	for rule in data.rules:
 		if rule.trigger == id:
 			lines.append("%s — trigger" % rule.id)
-		if relay.is_empty():
-			continue
-		if rule.emit == relay:
+		if not relay.is_empty() and rule.emit == relay:
 			lines.append("%s — rule output" % rule.id)
 		for i in rule.steps.size():
 			var step: StepData = rule.steps[i]
-			if data.relay_for(step) == relay:
+			if _waits_for(step, id):
+				lines.append("%s - step %d (wait_for_call)" % [rule.id, i + 1])
+			if not relay.is_empty() and data.relay_for(step) == relay:
 				lines.append("%s — step %d (%s)" % [rule.id, i + 1, step.verb])
 	return lines
 
@@ -160,3 +164,12 @@ static func _replace_references(data: GraphDraft, old_id: String, new_id: String
 	for rule in data.rules:
 		if rule.trigger == old_id:
 			rule.trigger = new_id
+		for step in rule.steps:
+			if _waits_for(step, old_id):
+				step.args[0] = ExprText.format_literal(StringName(new_id))
+
+static func _waits_for(step: StepData, event: String) -> bool:
+	if step.verb != &"wait_for_call" or step.args.is_empty():
+		return false
+	var literal := ExprText.parse_literal(step.args[0])
+	return literal.ok and typeof(literal.value) in [TYPE_STRING, TYPE_STRING_NAME] and String(literal.value) == event

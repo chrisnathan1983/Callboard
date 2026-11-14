@@ -633,7 +633,7 @@ func _arg_widget(step: StepData, i: int, param: Dictionary) -> Control:
 				ob.item_selected.connect(func(k: int) -> void: _set_arg(step, i, '&"%s"' % keys[k]))
 				return ob
 			if lit["ok"]:
-				return _text_arg(step, i, String(lit["value"]), func(t: String) -> String: return '&"%s"' % t)
+				return _text_arg(step, i, String(lit["value"]), func(t: String) -> String: return ExprText.format_literal(StringName(t)))
 	# Anything else (Vector3, constants, expressions): edit the raw GDScript expression.
 	var raw := LineEdit.new()
 	raw.text = cur

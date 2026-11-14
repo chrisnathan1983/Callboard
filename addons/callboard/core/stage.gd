@@ -315,6 +315,8 @@ func _event_is_known(event: StringName) -> bool:
 		if event == StringName("relay:" + String(rule.emits)) and not rule.emits.is_empty():
 			return true
 		for step: Step in rule.steps:
+			if step.wait_event == event:
+				return true
 			if not step.emits.is_empty() and event == StringName("relay:" + String(step.emits)):
 				return true
 	return false

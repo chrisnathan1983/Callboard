@@ -129,6 +129,8 @@ static func validate_resources(data: GraphDraft) -> void:
 				data.errors.append("rule '%s' has a step with no verb" % rule.id)
 			elif RuntimeVerbCatalog.find(data.catalog, String(step.verb)).is_empty():
 				custom_verbs[step.verb] = true
+			if step.verb in [&"wait_for_call", &"wait_until"]:
+				_analyze_wait(data, rule, step, emitted, listening)
 			if step.verb == &"repeat_emit" and step.args.size() > 1:
 				var relay := ExprText.parse_literal(step.args[1])
 				if relay.ok and relay.value is StringName and not relay.value.is_empty():
@@ -175,6 +177,29 @@ static func validate_resources(data: GraphDraft) -> void:
 		var names: Array = custom_verbs.keys()
 		names.sort()
 		data.warnings.append("Custom verbs require scene analysis: %s" % ", ".join(names))
+
+static func _analyze_wait(data: GraphDraft, rule: RuleData, step: StepData,
+		emitted: Dictionary, listening: Dictionary) -> void:
+	var args: Array = []
+	for source in step.args:
+		var literal := ExprText.parse_literal(source)
+		if not literal.ok:
+			data.warnings.append("rule '%s' %s arguments need scene analysis" % [rule.id, step.verb])
+			return
+		args.append(literal.value)
+	var issue := RuleValidator.wait_argument_error(step.verb, args)
+	if not issue.is_empty():
+		data.errors.append("rule '%s' %s %s" % [rule.id, step.verb, issue])
+		return
+	if step.verb == &"wait_for_call":
+		listening[StringName(args[0])] = true
+	var relay_arg := 3 if step.verb == &"wait_for_call" else 2
+	if args.size() > relay_arg and not String(args[relay_arg]).is_empty():
+		var metadata := GraphDraft.StepAnalysis.new()
+		metadata.relay = String(args[relay_arg])
+		metadata.relay_argument = relay_arg
+		data.step_metadata[step] = metadata
+		emitted[StringName("relay:" + metadata.relay)] = true
 
 static func _validate_resource_relay_mapping(rule: RuleData, relay_name: String,
 		field_map: Dictionary, payloads: Dictionary, errors: Array[String]) -> void:

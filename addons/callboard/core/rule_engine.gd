@@ -7,6 +7,7 @@ signal pending_changed(entries: Array)
 signal run_cancelled(rule_id: StringName)
 signal all_cancelled
 signal dispatch_limit_reached(limit: String, event_chain: PackedStringArray, rule_id: StringName)
+signal _event_received(event: StringName, payload: Dictionary)
 
 class AwaitedSignal extends RefCounted:
 	signal completed
@@ -89,10 +90,11 @@ func _fire(event: StringName, payload: Dictionary, parent_context: Dictionary) -
 		_report_dispatch_limit("event depth", path)
 		return
 	var context := {"path": path}
+	var gen := _gen
 	_event_context_stack.append(context)
+	_event_received.emit(event, payload)
 	_emit_trace("event_fired", &"", event)
 	_event_context_stack.pop_back()
-	var gen := _gen
 	for r in rules:
 		if gen != _gen:
 			return
@@ -188,6 +190,18 @@ func _run(rule: Rule, event: StringName, payload: Dictionary, generation: int, d
 		if not alive(rule, generation, payload):
 			_cancel_run(run, rule.id, event, step_index, step)
 			return
+		var wait_outcome: String = run.get("wait_outcome", "")
+		run.erase("wait_outcome")
+		if not wait_outcome.is_empty():
+			_emit_trace("wait_" + wait_outcome, rule.id, event, step_index, step)
+			if not alive(rule, generation, payload):
+				_cancel_run(run, rule.id, event, step_index, step)
+				return
+			if wait_outcome == "timed_out":
+				_release_cancel_if(run)
+				if not step.emits.is_empty():
+					_fire("relay:" + step.emits, payload, context)
+				return
 		_emit_trace("step_completed", rule.id, event, step_index, step)
 	if not rule.emits.is_empty():
 		_fire("relay:" + rule.emits, payload, context)
@@ -250,6 +264,55 @@ func wait_tracked(seconds: float, rule_id: StringName, label: String) -> Signal:
 	ids.append(id)
 	_tracked_wait_ids[signal_key] = ids
 	return timeout
+
+func wait_for_call(event: StringName, filter: StringName, seconds: float,
+		rule_id: StringName, run: Dictionary) -> Signal:
+	var matches := func(received: StringName, payload: Dictionary) -> bool:
+		return received == event and (filter.is_empty() or
+			GuardExpression.evaluate(bb, filter, payload, received, payload_schema))
+	return _wait_for_match(_event_received, matches, seconds, rule_id, "wait for " + String(event), run)
+
+func wait_until(condition: StringName, seconds: float, rule_id: StringName, run: Dictionary) -> Signal:
+	var matches := func(..._change: Array) -> bool:
+		return GuardExpression.evaluate(bb, condition, run["payload"], run["event"], payload_schema)
+	if matches.call():
+		run["wait_outcome"] = "matched"
+		return Signal()
+	return _wait_for_match(bb.changed, matches, seconds, rule_id, "wait until " + String(condition), run)
+
+func _wait_for_match(source: Signal, matches: Callable, seconds: float, rule_id: StringName,
+		label: String, run: Dictionary) -> Signal:
+	if run.get("cancelled", false):
+		return Signal()
+	var completion := AwaitedSignal.new()
+	var id := completion.get_instance_id()
+	var connections: Array[Dictionary] = []
+	var settle := func(outcome: String) -> void:
+		if run.get("cancelled", false) or run.has("wait_outcome"):
+			return
+		run["wait_outcome"] = outcome
+		# Latch the first result now, then resume after the event or Blackboard
+		# notification has finished dispatching and this step has begun awaiting.
+		call_deferred("_complete_wait", id)
+	var source_callback := func(...values: Array) -> void:
+		if matches.callv(values):
+			settle.call("matched")
+	source.connect(source_callback)
+	connections.append({"signal": source, "callback": source_callback})
+	if seconds > 0.0:
+		var timer: Signal = wait.call(seconds)
+		var timeout_callback := func() -> void: settle.call("timed_out")
+		timer.connect(timeout_callback)
+		connections.append({"signal": timer, "callback": timeout_callback})
+	var cancellation: AwaitedSignal = run["cancel_signal"]
+	var cancel_callback := func() -> void: call_deferred("_complete_wait", id)
+	cancellation.cancelled.connect(cancel_callback)
+	connections.append({"signal": cancellation.cancelled, "callback": cancel_callback})
+	var tracked_id := _add_pending_wait(rule_id, label, seconds if seconds > 0.0 else -1.0)
+	_awaited_signals[id] = {"connections": connections, "completion": completion, "tracked_id": tracked_id}
+	pending_changed.emit(pending_snapshot())
+	# A synchronous diagnostics listener can deactivate and release the wait.
+	return completion.completed if _awaited_signals.has(id) else Signal()
 
 ## Completes when its source emits, its run is replaced, or the engine is deactivated.
 ## `completion_if` can ignore unrelated source emissions without dropping the wait.
@@ -321,6 +384,14 @@ func _disconnect_wait_connections(entry: Dictionary) -> void:
 
 ## Tracks an awaited or non-blocking signal until it completes.
 func track_signal(signal_to_track: Signal, rule_id: StringName, label: String, seconds := -1.0) -> int:
+	var id := _add_pending_wait(rule_id, label, seconds)
+	pending_changed.emit(pending_snapshot())
+	var callback := func(..._emitted_values: Array) -> void: _finish_tracked_signal(id)
+	_pending_callbacks[id] = {"signal": signal_to_track, "callback": callback}
+	signal_to_track.connect(callback, CONNECT_ONE_SHOT)
+	return id
+
+func _add_pending_wait(rule_id: StringName, label: String, seconds: float) -> int:
 	var id := _next_wait_id
 	_next_wait_id += 1
 	_pending_waits[id] = {
@@ -330,10 +401,6 @@ func track_signal(signal_to_track: Signal, rule_id: StringName, label: String, s
 		"started_ms": Time.get_ticks_msec(),
 		"duration": seconds,
 	}
-	pending_changed.emit(pending_snapshot())
-	var callback := func(..._emitted_values: Array) -> void: _finish_tracked_signal(id)
-	_pending_callbacks[id] = {"signal": signal_to_track, "callback": callback}
-	signal_to_track.connect(callback, CONNECT_ONE_SHOT)
 	return id
 
 func pending_snapshot() -> Array:

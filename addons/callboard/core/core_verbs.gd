@@ -156,6 +156,44 @@ func _mapped_payload_matches_schema(engine: RuleEngine, relay_event: StringName,
 			return false
 	return true
 
+## Wait for a future Call or relay on this Stage. The optional payload guard
+## checks the incoming event. A timeout ends the rule and can emit a relay.
+func wait_for_call(event: StringName, payload_guard: StringName = &"", timeout: float = 0.0,
+		timeout_relay: StringName = &"") -> Step:
+	var engine_ref := context.engine_ref
+	var step := Step.new(func(c: Dictionary) -> void:
+		var engine := engine_ref.get_ref() as RuleEngine
+		var callboard: Dictionary = c["_callboard"]
+		var rule: Rule = callboard["rule"]
+		if engine != null:
+			var completion := engine.wait_for_call(event, payload_guard, timeout, rule.id, callboard["run"])
+			engine = null
+			if not completion.is_null():
+				await completion)
+	step.wait_event = event
+	step.emits = timeout_relay
+	step.emit_arg = 3
+	return step
+
+## Continue immediately if the guard passes, or recheck after Blackboard writes.
+func wait_until(condition: StringName, timeout: float = 0.0, timeout_relay: StringName = &"") -> Step:
+	var engine_ref := context.engine_ref
+	var step := Step.new(func(c: Dictionary) -> void:
+		var engine := engine_ref.get_ref() as RuleEngine
+		var callboard: Dictionary = c["_callboard"]
+		var rule: Rule = callboard["rule"]
+		if engine != null:
+			var completion := engine.wait_until(condition, timeout, rule.id, callboard["run"])
+			engine = null
+			if not completion.is_null():
+				await completion)
+	var key := GuardExpression.referenced_key(condition)
+	if not key.is_empty():
+		step.reads.append(key)
+	step.emits = timeout_relay
+	step.emit_arg = 2
+	return step
+
 ## Stops when the running rule is cancelled or its engine deactivates.
 func repeat_emit(interval: float, tick: StringName) -> Step:
 	var ctx := context
