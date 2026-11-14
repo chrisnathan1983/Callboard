@@ -80,6 +80,26 @@ static func check(rules: Array[Rule], bb: Blackboard,
 						if value_type != target_type and not (target_type == TYPE_FLOAT and value_type == TYPE_INT):
 							problems.append("rule '%s' set_var value of type %s is incompatible with key '%s' declared as %s" % [
 								r.id, type_string(value_type), target, type_string(target_type)])
+			if s.verb == &"set_state":
+				if s.args.size() < 2:
+					problems.append("rule '%s' has a set_state step without a key and state" % r.id)
+				else:
+					var target: Variant = s.args[0]
+					var state: Variant = s.args[1]
+					if not target is StringName:
+						problems.append("rule '%s' set_state target must be a Blackboard key" % r.id)
+					elif not bb.has(target):
+						problems.append("rule '%s' set_state target '%s' is not declared on the Blackboard" % [r.id, target])
+					else:
+						var entry: Dictionary = bb.schema[bb.resolve_key(target)]
+						if entry.get("type", TYPE_NIL) != TYPE_STRING_NAME:
+							problems.append("rule '%s' set_state target '%s' must be StringName" % [r.id, target])
+						else:
+							var initial_state: Variant = entry.get("default", &"")
+							if not initial_state is StringName or initial_state.is_empty():
+								problems.append("rule '%s' set_state target '%s' must have a non-empty StringName initial state" % [r.id, target])
+					if not state is StringName or state.is_empty():
+						problems.append("rule '%s' set_state state must be a non-empty StringName" % r.id)
 			if s.verb == &"add_var":
 				if s.args.size() < 2:
 					problems.append("rule '%s' has an add_var step without a key and delta" % r.id)

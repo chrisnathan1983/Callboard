@@ -5,8 +5,30 @@ class_name Stage extends Node3D
 signal rule_fired(rule_id: StringName, event: StringName)
 signal scored(points: int)
 signal gameplay_event(event_id: StringName, arguments: Dictionary)
+signal gameplay_request(request_id: int, event_id: StringName, arguments: Dictionary)
+signal gameplay_request_finished(request_id: int, event_id: StringName,
+		outcome: StringName, data: Dictionary)
 signal var_changed(key: StringName, value: Variant)
 signal dispatch_blocked(action: String, reason: String)
+
+class GameplayRequest extends RefCounted:
+	signal responded(request_id: int, accepted: bool, payload: Dictionary)
+	var request_id: int
+	var event_id: StringName
+	var arguments: Dictionary
+	var response_schema: Dictionary
+	var status: StringName = &"pending"
+	var response: Dictionary = {}
+	var published := false
+
+func _init_request(request_id: int, event_id: StringName, arguments: Dictionary,
+		response_schema: Dictionary) -> GameplayRequest:
+	var request := GameplayRequest.new()
+	request.request_id = request_id
+	request.event_id = event_id
+	request.arguments = arguments.duplicate(true)
+	request.response_schema = response_schema.duplicate(true)
+	return request
 
 @export var definition: StageDefinition
 var saved_vars := {}    # injected by the manager; survives unloads
@@ -24,6 +46,9 @@ var bb: Blackboard
 var engine: RuleEngine
 var verbs: CoreVerbs
 var graph_errors: Array[String] = []
+var _next_gameplay_request_id := 1
+var _pending_gameplay_requests: Dictionary = {}
+var _settled_gameplay_requests: Dictionary = {}
 
 ## Call IDs, external relay event IDs, and keys supplied by gameplay code.
 var external_calls: Array[StringName] = [&"arrive"]
@@ -49,6 +74,7 @@ func build() -> void:
 	is_built = false
 	if engine != null:
 		engine.cancel_all()
+	_cancel_pending_gameplay_requests(&"stage_rebuilt")
 	if state_store != null and bb != null:
 		state_store.unregister_blackboard(bb)
 	graph_errors.clear()
@@ -207,6 +233,7 @@ func deactivate() -> void:
 		is_active = false
 	if engine != null:
 		engine.cancel_all()
+	_cancel_pending_gameplay_requests(&"stage_deactivated")
 
 func _exit_tree() -> void:
 	if engine:
@@ -321,6 +348,126 @@ func publish_gameplay_event(event_id: StringName, arguments: Dictionary = {}) ->
 			push_warning("Stage '%s' cannot publish a gameplay event with an empty ID." % name)
 		return
 	gameplay_event.emit(event_id, arguments.duplicate(true))
+
+## Reserve a correlated host request before publishing it. A zero ID allocates one;
+## positive host-provided IDs are accepted once per Stage instance.
+func reserve_gameplay_request(event_id: StringName, arguments: Dictionary = {},
+		response_schema: Dictionary = {}, request_id := 0) -> GameplayRequest:
+	if not _can_dispatch("reserve gameplay request '%s'" % event_id) or event_id.is_empty():
+		return null
+	if request_id < 0:
+		return null
+	if request_id == 0:
+		while _pending_gameplay_requests.has(_next_gameplay_request_id) \
+				or _settled_gameplay_requests.has(_next_gameplay_request_id):
+			_next_gameplay_request_id += 1
+		request_id = _next_gameplay_request_id
+		_next_gameplay_request_id += 1
+	if _pending_gameplay_requests.has(request_id) or _settled_gameplay_requests.has(request_id):
+		if OS.is_debug_build():
+			push_warning("Stage '%s' rejected duplicate gameplay request ID %d." % [name, request_id])
+		return null
+	var schema_errors := validate_gameplay_response_schema(response_schema)
+	if not schema_errors.is_empty():
+		for problem: String in schema_errors:
+			push_warning("Stage '%s' rejected gameplay request: %s." % [name, problem])
+		return null
+	var normalized_schema: Dictionary = {}
+	for field: Variant in response_schema:
+		normalized_schema[StringName(String(field))] = response_schema[field]
+	var request := _init_request(request_id, event_id, arguments, normalized_schema)
+	_pending_gameplay_requests[request_id] = request
+	return request
+
+## Publish a previously reserved request. A host may respond synchronously from this signal.
+func publish_gameplay_request(request: GameplayRequest) -> bool:
+	if request == null or _pending_gameplay_requests.get(request.request_id) != request \
+			or request.status != &"pending" or request.published:
+		return false
+	if not _can_dispatch("publish gameplay request '%s'" % request.event_id):
+		cancel_gameplay_request(request.request_id, &"dispatch_blocked")
+		return false
+	request.published = true
+	gameplay_request.emit(request.request_id, request.event_id, request.arguments.duplicate(true))
+	return true
+
+## Complete one pending request. Duplicates and late responses are rejected and never replayed.
+func respond_gameplay_request(request_id: int, accepted: bool, data: Dictionary = {}) -> bool:
+	var request := _pending_gameplay_requests.get(request_id) as GameplayRequest
+	if request == null or request.status != &"pending" or not request.published:
+		if OS.is_debug_build():
+			push_warning("Stage '%s' ignored duplicate or late response for gameplay request %d." % [name, request_id])
+		return false
+	var validation := _validate_gameplay_response_data(data, request.response_schema)
+	if not validation.get("valid", false):
+		if OS.is_debug_build():
+			push_warning("Stage '%s' rejected response for gameplay request %d: %s." % [
+				name, request_id, validation.get("reason", "invalid response")])
+		return false
+	var payload: Dictionary = validation["data"]
+	payload[&"request_id"] = request_id
+	payload[&"accepted"] = accepted
+	request.status = &"completed"
+	request.response = payload.duplicate(true)
+	_pending_gameplay_requests.erase(request_id)
+	var outcome: StringName = &"accepted" if accepted else &"rejected"
+	_settled_gameplay_requests[request_id] = outcome
+	gameplay_request_finished.emit(request_id, request.event_id, outcome, payload.duplicate(true))
+	request.responded.emit(request_id, accepted, payload.duplicate(true))
+	return true
+
+## Cancel an outstanding request after timeout, rule cancellation, or Stage teardown.
+func cancel_gameplay_request(request_id: int, reason: StringName = &"cancelled") -> bool:
+	var request := _pending_gameplay_requests.get(request_id) as GameplayRequest
+	if request == null:
+		return false
+	request.status = reason
+	_pending_gameplay_requests.erase(request_id)
+	_settled_gameplay_requests[request_id] = reason
+	gameplay_request_finished.emit(request_id, request.event_id, reason, {})
+	return true
+
+func _cancel_pending_gameplay_requests(reason: StringName) -> void:
+	for request_id: int in _pending_gameplay_requests.keys():
+		cancel_gameplay_request(request_id, reason)
+
+func validate_gameplay_response_schema(schema: Dictionary) -> Array[String]:
+	var problems: Array[String] = []
+	for field: Variant in schema:
+		if not (field is String or field is StringName):
+			problems.append("response field names must be String or StringName")
+			continue
+		var field_name := StringName(String(field))
+		if not field_name.is_valid_identifier() or field_name in [&"request_id", &"accepted"]:
+			problems.append("response field '%s' is invalid or reserved" % field_name)
+		var field_type: Variant = schema[field]
+		if not field_type is int or field_type < TYPE_NIL or field_type >= TYPE_MAX:
+			problems.append("response field '%s' must declare a Godot Variant type" % field_name)
+	return problems
+
+func _validate_gameplay_response_data(data: Dictionary, schema: Dictionary) -> Dictionary:
+	var normalized: Dictionary = {}
+	for field: Variant in data:
+		if not (field is String or field is StringName):
+			return {"valid": false, "reason": "response field names must be String or StringName"}
+		var field_name := StringName(String(field))
+		if not field_name.is_valid_identifier() or field_name in [&"request_id", &"accepted"]:
+			return {"valid": false, "reason": "response field '%s' is invalid or reserved" % field_name}
+		if not schema.is_empty() and not schema.has(field_name):
+			return {"valid": false, "reason": "response field '%s' is not declared" % field_name}
+		if schema.has(field_name):
+			var expected_type: int = schema[field_name]
+			var actual_type := typeof(data[field])
+			if expected_type == TYPE_FLOAT and actual_type == TYPE_INT:
+				normalized[field_name] = float(data[field])
+			elif expected_type != TYPE_NIL and actual_type != expected_type:
+				return {"valid": false, "reason": "response field '%s' has type %s, expected %s" % [
+					field_name, type_string(actual_type), type_string(expected_type)]}
+			else:
+				normalized[field_name] = data[field]
+		else:
+			normalized[field_name] = data[field]
+	return {"valid": true, "data": normalized.duplicate(true)}
 
 ## Use a declared Boolean Blackboard key to latch a relay fired by gameplay code.
 func fire_relay_once(relay: StringName, latch: StringName, source_id: StringName, source_event: StringName) -> bool:

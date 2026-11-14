@@ -46,6 +46,7 @@ When `SceneTree.paused` is true, rule delays, repeat ticks, and timed lights sto
 | `define_shared(key, default_val = false, state_key = &"")` | Defines a shared Blackboard key backed by the StageStateStore's shared dictionary. |
 | `fire(event: StringName, payload := {}) -> void` | Dispatches a Call ID such as `deliver` or a relay event ID such as `relay:calm_guard`. The optional dictionary is the event payload available to guards and steps. `on_change` is reserved and dispatched automatically after a Blackboard commit. Build first. Valid unmanaged Stages can fire without `activate()`; invalid graphs and dormant managed Stages block Calls. |
 | `publish_gameplay_event(event_id, arguments = {}) -> void` | Emits a typed host request only when the Stage is built, its graph is valid, and a managed Stage is active. The host owns the request's meaning. |
+| `respond_gameplay_request(request_id, accepted, data = {}) -> bool` | Completes one published correlated request. Returns false for duplicate/late IDs or response data that violates its declared schema. |
 | `fire_relay_once(relay, latch, source_id, source_event) -> bool` | Applies the same lifecycle and graph checks as `fire()`. It reports success only after synchronously committing an unset Boolean latch and emitting the relay. |
 | `get_var(key: StringName) -> Variant` | Reads the resolved Blackboard value. An unknown key returns `null`. |
 | `write_var(key: StringName, value: Variant, writer: StringName = &"") -> bool` | Writes a declared key using its Variant type. Integer inputs to float keys are converted to floats. Returns true when a changed value is accepted; false for rejected or unchanged writes. An optional writer label appears in the live Blackboard view. |
@@ -120,9 +121,38 @@ Step callables receive authored fields at the top level for compatibility and al
 | `var_changed(key: StringName, value: Variant)` | An accepted write that changes the stored Blackboard value. The key uses its current name. |
 | `scored(points: int)` | A scoring step emits a score delta. The game owns the total. |
 | `gameplay_event(event_id: StringName, arguments: Dictionary)` | A `gameplay_event` step asks host code to apply a project-specific action. |
+| `gameplay_request(request_id: int, event_id: StringName, arguments: Dictionary)` | A `gameplay_request` step asks the host to act and includes the correlation ID to return with its acknowledgment. |
+| `gameplay_request_finished(request_id: int, event_id: StringName, outcome: StringName, data: Dictionary)` | Reports `accepted`, `rejected`, `timed_out`, or cancellation/dispatch outcomes. Accepted/rejected data includes `request_id`, `accepted`, and declared response fields. |
 | `dispatch_blocked(action: String, reason: String)` | A Call, relay, or gameplay event was blocked because the Stage is unbuilt, its graph is invalid, or it is dormant. The action identifies the rejected entry point; the reason gives the applicable lifecycle or graph error. |
 
 Connect to `stage.gameplay_event` after loading the Stage. The addon emits the authored ID and a deep copy of the arguments; it does not interpret them. `Stage.scored` and the `score(points)` verb remain available for score deltas.
+
+### Correlated host requests
+
+`gameplay_event()` remains one-way. Use `gameplay_request()` when a rule must wait for a host response:
+
+```gdscript
+var request_step := verbs.gameplay_request(
+    &"check_access",
+    {"card_id": &"blue_key"},
+    3.0,
+    {&"remaining_uses": TYPE_INT},
+    &"access_check_timed_out"
+)
+
+func _on_gameplay_request(request_id: int, event_id: StringName,
+		arguments: Dictionary) -> void:
+	if event_id == &"check_access":
+		var allowed := inventory.has(arguments["card_id"])
+		stage.respond_gameplay_request(request_id, allowed,
+			{&"remaining_uses": inventory.remaining_uses(arguments["card_id"])})
+```
+
+Connect to `gameplay_request` before starting rules. The wait is registered before the request signal is emitted, so a host can acknowledge synchronously. A zero timeout waits indefinitely; a positive timeout emits the step's optional timeout relay and ends the current rule run. Rule cancellation and Stage deactivation cancel the pending request. `gameplay_request_finished` fires before the waiting rule resumes, so a host listener can update Blackboard values for following steps.
+
+The final optional `request_id` argument is `0` for an automatically allocated ID or a positive host-supplied ID. IDs are unique within that live Stage instance and are never reusable. The host must respond on the same Stage instance. Duplicate, late, and unknown responses return false and do not fire the completion signal.
+
+`response_schema` maps response field names to Godot Variant type constants such as `TYPE_INT`, `TYPE_BOOL`, or `TYPE_STRING`. A nonempty schema rejects undeclared fields and incompatible values; omitted fields are allowed, and integer values widen to float fields. An empty schema accepts dynamic response values. Response fields `request_id` and `accepted` are reserved. An invalid response is rejected without settling the request, allowing the host to correct it before timeout. Completion outcomes are `accepted` or `rejected`; the `data` dictionary contains those reserved fields alongside the validated response fields. Timeout and cancellation outcomes carry an empty data dictionary.
 
 ### Stage hooks
 
@@ -171,6 +201,8 @@ Step arguments and delays are evaluated at graph compilation using Godot's [Expr
 | `get_var(key)`, `write(key, value, writer = &"") -> bool` | Read or write a declared value. A write returns true when a changed value is accepted; false when it is unchanged or rejected. Writes to undeclared keys produce an error. Integer writes to float keys are converted. Other type mismatches warn and discard the write. Saved or session values with an outdated type revert to the declared default during setup. |
 | `has(key)`, `is_set(key)` | Test whether a key is declared or whether its value is truthy. |
 | `alias(old_key, new_key)`, `resolve_key(key)` | Support renamed keys. Callboard records aliases when it renames authored variables. |
+
+For named actor states, declare a `StringName` Blackboard key with a non-empty default such as `&"idle"`. That default is the initial state when no stored value exists. Use Saved scope when state should survive Stage reloads, Session scope for a host-defined session, Shared scope for multiple loaded Stages, or Local scope for a state that resets on rebuild. `set_state(key, &"active")` writes through the same typed path as other Blackboard changes; restoration comes from the declared scope and regular Stage restoration bindings. `idle`, `active`, and `resolved` are conventions, not a fixed enum. Guards and `on_change` rules can observe transitions. The addon does not impose a transition graph or own actor behavior.
 
 The `changed(key, value)` signal is forwarded as `Stage.var_changed`. `value_changed(key, previous, value, scope, writer, dispatch_context)` is the richer commit signal used for authored `on_change` rules. It fires after the value changes and carries the previous committed value, scope, writer label, and any rule event ancestry. Use the write methods when gameplay changes a value so validation and notifications apply. Declare external producers through `external_vars` or typed `external_writers`; `on_change` listeners filtered to a key are checked against the Blackboard schema and declared writers. `BlackboardWriter` is a scene component with an exported `callboard_writers` list and a `publish(key, value)` method; the Stage collects its declarations during editor analysis and runtime setup. Custom scene nodes may expose the same property. The live Blackboard shows the most recent non-empty writer label for each key.
 
@@ -279,7 +311,8 @@ The default factory is [`StagingVerbs`](../core/staging_verbs.gd), which inherit
 | Core | `reset_var(key)` | Write a declared key's authored default when the step executes. It supports any default whose Variant type matches the declaration. |
 | Core | `score(points)` | Emit a score delta. |
 | Core | `emit_cross_stage(event_id, arguments = {}, target_instance_id = &"")` | Send a typed live event through the StageStateStore. An empty target broadcasts to active loaded Stages that declare or listen for the event. Runtime payload references are supported inside `arguments`. |
-| Core | `repeat_emit(interval, tick)` | Emit `relay:<tick>` every interval in seconds until the rule is cancelled. This step occupies the rule while it runs. |
+| Core | `set_state(key, state)` | Write a non-empty named state into a declared `StringName` Blackboard key. The key's scope controls initial and restoration behavior. |
+| Core | `repeat_emit(interval, tick = &"")` | Repeat at the interval until cancelled. If `tick` is supplied, emit `relay:<tick>` each interval; omit it for a relay-free ambient lifetime loop. |
 | Staging | `show_node(n, should_be_visible = true)` | Set a `Node3D`'s visibility. |
 | Staging | `light(n, on, duration = 0.0, key = &"")` | Set visibility immediately. A positive duration turns it off at timeout, rule cancellation, or Stage deactivation. The optional key mirrors the Boolean state and must be declared as a Boolean Blackboard value. |
 | Staging | `pop(n)`, `bounce(n)` | Play a scale animation. |
@@ -290,9 +323,10 @@ The default factory is [`StagingVerbs`](../core/staging_verbs.gd), which inherit
 | Staging | `play_animation(player, animation, wait_for_completion = true, timeout = 0.0)` | Play a named `AnimationPlayer` clip. Waiting checks the completed clip name and the Callboard playback token. A positive timeout releases the wait and cancels the run. |
 | Staging | `pose_animation(player, animation, time = 0.0)` | Seek to a time in a named clip and pause there. |
 | Staging | `gameplay_event(event_id, arguments = {})` | Emit `Stage.gameplay_event` for host-owned behavior such as doors, quests, or inventory. |
+| Staging | `gameplay_request(event_id, arguments = {}, timeout = 0.0, response_schema = {}, timeout_relay = &"", request_id = 0)` | Emit a correlated host request and wait for an accepted or rejected acknowledgment. Timeout ends the run and can fire a recovery relay; cancellation releases the request. |
 | Staging | `flash(m)`, `jump(m)` | Tint compatible `BaseMaterial3D` overrides or mesh surfaces. Materials are duplicated for the target instance; `jump` still performs its hop when no tintable material exists. |
 
-`toggle_var` and `reset_var` read the current value and write through `Blackboard.write()`. Local values remain Stage-local; Saved values update the Stage save dictionary; Shared values use the store's ordered, type-checked commit. Changed values emit the normal change notifications and record the running rule as writer. Rejected and unchanged writes retain the existing Blackboard behavior. Session scope is not implemented yet; when it is added, these verbs will continue to use the same write path.
+`set_state`, `toggle_var`, and `reset_var` write through `Blackboard.write()`. Local values remain Stage-local; Saved values update the Stage save dictionary; Shared values use the store's ordered, type-checked commit; Session values live in the StageStateStore's runtime-only session dictionary. Changed values emit the normal change notifications and record the running rule as writer. Rejected and unchanged writes retain the existing Blackboard behavior.
 
 When `move_to` and `jump` overlap on the same node, the latest step controls its position. Earlier steps finish on their original schedule so their rules can continue.
 
@@ -306,7 +340,7 @@ The engine checks **Cancel If** before the first step and after each step or del
 
 | Verb | Effect after cancellation |
 | --- | --- |
-| `set_var`, `add_var`, `score`, `show_node` | Completed writes, score changes, and visibility changes stay applied. |
+| `set_var`, `set_state`, `add_var`, `score`, `show_node` | Completed writes, score changes, and visibility changes stay applied. |
 | `repeat_emit` | Checks before each tick and stops emitting when cancelled. Restart releases the timer wait on the next process frame; deactivation releases it immediately. |
 | `pop`, `bounce`, `move_to`, waiting `rotate_to` | The tween finishes while the Stage remains in the tree. Restart releases the rule's wait on the next process frame; deactivation releases it immediately. The tween continues. |
 | `flash`, `jump` | The tint restores the target instance's base colors and the hop returns to its base height. Restart releases the rule's wait on the next process frame; deactivation releases it immediately. The visual effect continues. |

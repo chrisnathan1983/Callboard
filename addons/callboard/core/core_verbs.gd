@@ -46,6 +46,25 @@ func set_var(key: StringName, value: Variant = true) -> Step:
 	step.sets = [key]
 	return step
 
+## Change a named actor state stored in a StringName Blackboard key. The key's
+## declared scope controls whether this state is local, session, shared, or saved.
+func set_state(key: StringName, state: StringName) -> Step:
+	var bb := context.bb
+	var step := Step.new(func(c: Dictionary) -> void:
+		var resolved := bb.resolve_key(key)
+		if not bb.schema.has(resolved):
+			push_warning("Callboard set_state skipped: Blackboard key '%s' is not declared." % key)
+			return
+		if bb.schema[resolved].get("type", TYPE_NIL) != TYPE_STRING_NAME:
+			push_warning("Callboard set_state skipped: Blackboard key '%s' must be StringName." % key)
+			return
+		if state.is_empty():
+			push_warning("Callboard set_state skipped: state name cannot be empty.")
+			return
+		bb.write(key, state, _rule_writer(c), _dispatch_context(c)))
+	step.sets = [key]
+	return step
+
 ## Add to a declared numeric Blackboard value when this step executes.
 func add_var(key: StringName, delta: float) -> Step:
 	var bb := context.bb
@@ -266,7 +285,7 @@ func wait_until(condition: StringName, timeout: float = 0.0, timeout_relay: Stri
 	return step
 
 ## Stops when the running rule is cancelled or its engine deactivates.
-func repeat_emit(interval: float, tick: StringName) -> Step:
+func repeat_emit(interval: float, tick: StringName = &"") -> Step:
 	var ctx := context
 	var run := func(c: Dictionary) -> void:
 		var callboard: Dictionary = c["_callboard"]
@@ -287,7 +306,8 @@ func repeat_emit(interval: float, tick: StringName) -> Step:
 			engine = ctx.engine_ref.get_ref() as RuleEngine
 			if not engine or not engine.alive(rule, gen):
 				return
-			engine.fire("relay:" + tick, authored_payload)
+			if not tick.is_empty():
+				engine.fire("relay:" + tick, authored_payload)
 	var step := Step.new(run)
 	step.emits = tick
 	step.emit_arg = 1

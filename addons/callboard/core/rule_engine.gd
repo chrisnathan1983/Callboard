@@ -453,6 +453,11 @@ func wait_for_call(event: StringName, filter: StringName, seconds: float,
 			GuardExpression.evaluate(bb, filter, payload, received, payload_schema))
 	return _wait_for_match(_event_received, matches, seconds, rule_id, "wait for " + String(event), run)
 
+## Wait for a matching arbitrary signal using the same timeout, cancellation, and diagnostics path.
+func wait_for_signal(source: Signal, matches: Callable, seconds: float, rule_id: StringName,
+		label: String, run: Dictionary, on_outcome: Callable = Callable()) -> Signal:
+	return _wait_for_match(source, matches, seconds, rule_id, label, run, on_outcome)
+
 func wait_until(condition: StringName, seconds: float, rule_id: StringName, run: Dictionary) -> Signal:
 	var matches := func(..._change: Array) -> bool:
 		return GuardExpression.evaluate(bb, condition, run["payload"], run["event"], payload_schema)
@@ -462,16 +467,18 @@ func wait_until(condition: StringName, seconds: float, rule_id: StringName, run:
 	return _wait_for_match(bb.changed, matches, seconds, rule_id, "wait until " + String(condition), run)
 
 func _wait_for_match(source: Signal, matches: Callable, seconds: float, rule_id: StringName,
-		label: String, run: Dictionary) -> Signal:
+		label: String, run: Dictionary, on_outcome: Callable = Callable()) -> Signal:
 	if run.get("cancelled", false):
 		return Signal()
 	var completion := AwaitedSignal.new()
 	var id := completion.get_instance_id()
 	var connections: Array[Dictionary] = []
 	var settle := func(outcome: String) -> void:
-		if run.get("cancelled", false) or run.has("wait_outcome"):
+		if run.has("wait_outcome") or (run.get("cancelled", false) and outcome != "cancelled"):
 			return
 		run["wait_outcome"] = outcome
+		if on_outcome.is_valid():
+			on_outcome.call(outcome)
 		# Latch the first result now, then resume after the event or Blackboard
 		# notification has finished dispatching and this step has begun awaiting.
 		call_deferred("_complete_wait", id)
@@ -486,7 +493,8 @@ func _wait_for_match(source: Signal, matches: Callable, seconds: float, rule_id:
 		timer.connect(timeout_callback)
 		connections.append({"signal": timer, "callback": timeout_callback})
 	var cancellation: AwaitedSignal = run["cancel_signal"]
-	var cancel_callback := func() -> void: call_deferred("_complete_wait", id)
+	var cancel_callback := func() -> void:
+		settle.call("cancelled")
 	cancellation.cancelled.connect(cancel_callback)
 	connections.append({"signal": cancellation.cancelled, "callback": cancel_callback})
 	var tracked_id := _add_pending_wait(rule_id, label, seconds if seconds > 0.0 else -1.0)

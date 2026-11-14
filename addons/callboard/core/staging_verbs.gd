@@ -42,6 +42,48 @@ func gameplay_event(event_id: StringName, arguments: Dictionary = {}) -> Step:
 		if is_instance_valid(stage):
 			stage.publish_gameplay_event(event_id, arguments))
 
+## Publish a correlated host request and hold this rule until response, timeout, or cancellation.
+func gameplay_request(event_id: StringName, arguments: Dictionary = {}, timeout := 0.0,
+		response_schema: Dictionary = {}, timeout_relay: StringName = &"",
+		request_id := 0) -> Step:
+	var stage := context.host as Stage
+	var engine_ref := context.engine_ref
+	var request_arguments := arguments.duplicate(true)
+	var response_types := response_schema.duplicate(true)
+	var step := Step.new(func(c: Dictionary) -> void:
+		var engine := engine_ref.get_ref() as RuleEngine
+		if not is_instance_valid(stage) or engine == null:
+			return
+		if event_id.is_empty() or timeout < 0.0:
+			push_warning("Callboard gameplay_request requires an event ID and a nonnegative timeout.")
+			return
+		var callboard: Dictionary = c.get("_callboard", {})
+		var rule: Rule = callboard.get("rule") as Rule
+		var run: Dictionary = callboard.get("run", {})
+		if rule == null or run.is_empty():
+			return
+		var request := stage.reserve_gameplay_request(event_id, request_arguments,
+			response_types, request_id)
+		if request == null:
+			return
+		var matches := func(received_id: int, _accepted: bool, _data: Dictionary) -> bool:
+			return received_id == request.request_id
+		var on_outcome := func(outcome: String) -> void:
+			if outcome != "matched":
+				var reason: StringName = &"timed_out" if outcome == "timed_out" else &"cancelled"
+				stage.cancel_gameplay_request(request.request_id, reason)
+		var completion := engine.wait_for_signal(request.responded, matches, timeout,
+			rule.id, "host request " + String(event_id), run, on_outcome)
+		if completion.is_null():
+			stage.cancel_gameplay_request(request.request_id, &"cancelled")
+			return
+		if not stage.publish_gameplay_request(request):
+			stage.cancel_gameplay_request(request.request_id, &"dispatch_blocked")
+		await completion)
+	step.emits = timeout_relay
+	step.emit_arg = 4
+	return step
+
 ## Play a stream. A positive timeout cancels a wait that runs too long.
 func play_audio(player: Node, wait_for_completion := false, timeout := 0.0) -> Step:
 	var f := func(payload: Dictionary) -> Variant:
@@ -521,6 +563,19 @@ func validate_step(rule_id: StringName, step: Step, bb: Blackboard) -> Array[Str
 	if step.verb == &"gameplay_event":
 		if not step.args[0] is StringName or step.args[0].is_empty():
 			problems.append("rule '%s' gameplay_event requires a non-empty StringName event ID" % rule_id)
+	if step.verb == &"gameplay_request":
+		if not step.args[0] is StringName or step.args[0].is_empty():
+			problems.append("rule '%s' gameplay_request requires a non-empty StringName event ID" % rule_id)
+		if step.args.size() > 2 and (not step.args[2] is float and not step.args[2] is int
+				or float(step.args[2]) < 0.0):
+			problems.append("rule '%s' gameplay_request timeout must be a nonnegative number" % rule_id)
+		if step.args.size() > 3:
+			if not step.args[3] is Dictionary:
+				problems.append("rule '%s' gameplay_request response schema must be a Dictionary" % rule_id)
+			elif is_instance_valid(context.host) and context.host is Stage:
+				problems.append_array((context.host as Stage).validate_gameplay_response_schema(step.args[3]))
+		if step.args.size() > 5 and (not step.args[5] is int or step.args[5] < 0):
+			problems.append("rule '%s' gameplay_request correlation ID must be a nonnegative integer" % rule_id)
 	return problems
 
 func _has_effect_material(mesh: MeshInstance3D) -> bool:

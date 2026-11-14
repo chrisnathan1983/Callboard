@@ -604,7 +604,9 @@ func _initialize() -> void:
 	ok = _test_emit_relay() and ok
 	ok = _test_runtime_step_inputs() and ok
 	ok = await _test_blackboard_toggle_reset() and ok
+	ok = await _test_named_actor_states() and ok
 	ok = await _test_authored_waits() and ok
+	ok = await _test_gameplay_requests() and ok
 	ok = _test_on_change_triggers() and ok
 	ok = await _test_dispatch_limits_and_ancestry() and ok
 	ok = _test_stage_dispatch_policy() and ok
@@ -1376,6 +1378,220 @@ func _test_authored_waits() -> bool:
 		and stage.engine.pending_snapshot().is_empty() and clock_tick.get_connections().is_empty()
 		and scores == [1, 2, 1]) and ok
 	stage.free()
+	return ok
+
+func _test_named_actor_states() -> bool:
+	var saved_values := {&"actor_state": &"active"}
+	var bb := Blackboard.new(saved_values)
+	bb.define(&"actor_state", &"saved", &"idle")
+	var initial_restored_state: bool = bb.get_var(&"actor_state") == &"active"
+	var factory := CoreVerbs.new(StepContext.new(bb, null, null, Callable()))
+	var step := factory.set_state(&"actor_state", &"resolved")
+	step.verb = &"set_state"
+	step.args = [&"actor_state", &"resolved"]
+	var changes: Array[Dictionary] = []
+	bb.value_changed.connect(func(key: StringName, previous: Variant, value: Variant,
+			scope: StringName, writer: StringName, _context: Dictionary) -> void:
+		changes.append({"key": key, "previous": previous, "value": value,
+			"scope": scope, "writer": writer}))
+	var rule := Rule.new(&"resolve_actor", &"resolve")
+	rule.steps = [step]
+	var engine := RuleEngine.new(bb, {}, Callable())
+	engine.rules = [rule]
+	engine.fire(&"resolve")
+	await process_frame
+	var valid_state: bool = bb.get_var(&"actor_state") == &"resolved"
+	var normal_saved_write: bool = saved_values[&"actor_state"] == &"resolved" \
+		and changes.size() == 1 and changes[0].previous == &"active" \
+		and changes[0].value == &"resolved" and changes[0].scope == &"saved" \
+		and changes[0].writer == &"rule:resolve_actor"
+	var authored_stage := Stage.new()
+	authored_stage.definition = StageDefinition.new()
+	authored_stage.definition.external_calls = PackedStringArray(["set_actor_state"])
+	var authored_variable := VariableData.new()
+	authored_variable.key = &"actor_state"
+	authored_variable.default_value = &"idle"
+	authored_variable.scope = "saved"
+	authored_stage.definition.variables = [authored_variable]
+	var authored_rule := RuleData.new()
+	authored_rule.id = &"set_actor_active"
+	authored_rule.trigger = &"set_actor_state"
+	var authored_step := StepData.new()
+	authored_step.verb = &"set_state"
+	authored_step.args = PackedStringArray(['&"actor_state"', '&"active"'])
+	authored_rule.steps = [authored_step]
+	authored_stage.definition.rules = [authored_rule]
+	authored_stage.build()
+	var authored_compiles: bool = authored_stage.graph_errors.is_empty() \
+		and authored_stage.engine.rules.size() == 1 \
+		and authored_stage.engine.rules[0].steps[0].verb == &"set_state"
+	if authored_compiles:
+		authored_stage.fire(&"set_actor_state")
+		await process_frame
+		authored_compiles = authored_stage.get_var(&"actor_state") == &"active"
+	authored_stage.free()
+	var validation_bb := Blackboard.new()
+	validation_bb.define(&"actor_state", &"local", &"idle")
+	validation_bb.define(&"not_state", &"local", false)
+	var valid_rule := Rule.new(&"state_rule", &"state_change")
+	valid_rule.steps = [factory.set_state(&"actor_state", &"active")]
+	valid_rule.steps[0].verb = &"set_state"
+	valid_rule.steps[0].args = [&"actor_state", &"active"]
+	var invalid_type_rule := Rule.new(&"bad_state", &"state_change")
+	var invalid_type_step := factory.set_state(&"not_state", &"active")
+	invalid_type_step.verb = &"set_state"
+	invalid_type_step.args = [&"not_state", &"active"]
+	invalid_type_rule.steps = [invalid_type_step]
+	var invalid_name_rule := Rule.new(&"empty_state", &"state_change")
+	var invalid_name_step := factory.set_state(&"actor_state", &"")
+	invalid_name_step.verb = &"set_state"
+	invalid_name_step.args = [&"actor_state", &""]
+	invalid_name_rule.steps = [invalid_name_step]
+	var validation := RuleValidator.check([valid_rule], validation_bb, [&"state_change"], [])
+	var type_validation := RuleValidator.check([invalid_type_rule], validation_bb, [&"state_change"], [])
+	var name_validation := RuleValidator.check([invalid_name_rule], validation_bb, [&"state_change"], [])
+	var invalid_initial_bb := Blackboard.new()
+	invalid_initial_bb.define(&"actor_state", &"local", &"")
+	var initial_validation := RuleValidator.check([valid_rule], invalid_initial_bb,
+		[&"state_change"], [])
+	var ambient := Rule.new(&"idle_ambient", &"arrive")
+	var ambient_step := factory.repeat_emit(1.0)
+	ambient_step.verb = &"repeat_emit"
+	ambient_step.args = [1.0]
+	ambient.steps = [ambient_step]
+	var ambient_validation := RuleValidator.check([ambient], validation_bb, [&"arrive"], [])
+	return _check("set_state writes named StringName states through the declared Saved scope",
+		initial_restored_state and valid_state and normal_saved_write) \
+		and _check("authored set_state steps compile from StageDefinition and update state",
+			authored_compiles) \
+		and _check("set_state validator requires a declared StringName key and non-empty state",
+		validation.is_empty() and type_validation.any(func(problem: String) -> bool: return "must be StringName" in problem)
+		and name_validation.any(func(problem: String) -> bool: return "non-empty StringName" in problem)
+		and initial_validation.any(func(problem: String) -> bool: return "initial state" in problem)) \
+		and _check("repeat_emit supports relay-free ambient waits without an unused-relay diagnostic",
+		ambient_validation.is_empty())
+
+func _test_gameplay_requests() -> bool:
+	var stage := Stage.new()
+	root.add_child(stage)
+	await process_frame
+	var request_ids: Array[int] = []
+	var request_arguments: Array[Dictionary] = []
+	var request_finished: Array[Dictionary] = []
+	var wait_registered := [false]
+	var response_checks := {"invalid": false, "accepted": false, "duplicate": false, "rejected": false}
+	stage.bb.define(&"request_accepted", &"local", false)
+	var request_callback := func(request_id: int, event_id: StringName,
+			arguments: Dictionary) -> void:
+		request_ids.append(request_id)
+		request_arguments.append(arguments.duplicate(true))
+		wait_registered[0] = stage.engine.pending_snapshot().any(func(entry: Dictionary) -> bool:
+			return entry.get("label", "").begins_with("host request "))
+		if event_id == &"grant_score":
+			response_checks["invalid"] = not stage.respond_gameplay_request(request_id, true,
+				{&"score": "seven", &"multiplier": 2})
+			response_checks["accepted"] = stage.respond_gameplay_request(request_id, true,
+				{&"score": 7, &"multiplier": 2})
+			response_checks["duplicate"] = not stage.respond_gameplay_request(request_id, false,
+				{&"score": 8, &"multiplier": 2})
+		elif event_id == &"deny_access":
+			response_checks["rejected"] = stage.respond_gameplay_request(request_id, false,
+				{&"score": 0, &"multiplier": 1})
+	stage.gameplay_request.connect(request_callback)
+	stage.gameplay_request_finished.connect(func(request_id: int, event_id: StringName,
+			outcome: StringName, data: Dictionary) -> void:
+		request_finished.append({"id": request_id, "event": event_id,
+			"outcome": outcome, "data": data.duplicate(true)})
+		if event_id in [&"grant_score", &"deny_access"]:
+			stage.write_var(&"request_accepted", outcome == &"accepted", &"host"))
+	var response_schema: Dictionary = {&"score": TYPE_INT, &"multiplier": TYPE_FLOAT}
+	var authored_arguments: Dictionary = {"amount": 2}
+	var factory := StagingVerbs.new(StepContext.new(stage.bb, stage.engine, stage, Callable()))
+	var sync_step := factory.gameplay_request(&"grant_score", authored_arguments,
+		0.0, response_schema)
+	authored_arguments["amount"] = 99
+	var sync_sequence_saw_ack := [false]
+	var sync_rule := Rule.new(&"sync_host_request", &"start_sync_request")
+	sync_rule.steps.append(sync_step)
+	sync_rule.steps.append(Step.new(func(_context: Dictionary) -> void:
+		sync_sequence_saw_ack[0] = stage.get_var(&"request_accepted")))
+	stage.engine.rules.append(sync_rule)
+	stage.engine.fire(&"start_sync_request")
+	await process_frame
+	await process_frame
+	var sync_response: Dictionary = request_finished[0] if not request_finished.is_empty() else {}
+	var sync_ack_captured: bool = request_ids.size() == 1 and request_ids[0] > 0 \
+		and wait_registered[0] and request_arguments[0].get("amount") == 2 \
+		and response_checks["invalid"] and response_checks["accepted"] \
+		and response_checks["duplicate"] and sync_response.get("outcome") == &"accepted" \
+		and sync_response.get("data", {}).get("score") == 7 \
+		and typeof(sync_response.get("data", {}).get("multiplier")) == TYPE_FLOAT \
+		and sync_sequence_saw_ack[0] \
+		and not stage.engine.pending_snapshot().any(func(entry: Dictionary) -> bool:
+			return entry.get("label", "").begins_with("host request "))
+	var rejection_sequence_saw_result := [true]
+	var rejection_rule := Rule.new(&"rejected_host_request", &"start_rejected_request")
+	rejection_rule.steps.append(factory.gameplay_request(&"deny_access", {}, 0.0,
+		response_schema))
+	rejection_rule.steps.append(Step.new(func(_context: Dictionary) -> void:
+		rejection_sequence_saw_result[0] = not stage.get_var(&"request_accepted")))
+	stage.engine.rules.append(rejection_rule)
+	stage.engine.fire(&"start_rejected_request")
+	await process_frame
+	await process_frame
+	var rejected_response: Dictionary = request_finished[1] if request_finished.size() > 1 else {}
+	var rejection_outcome_routed: bool = response_checks["rejected"] \
+		and rejected_response.get("outcome") == &"rejected" \
+		and rejected_response.get("data", {}).get("score") == 0 \
+		and typeof(rejected_response.get("data", {}).get("multiplier")) == TYPE_FLOAT \
+		and rejection_sequence_saw_result[0]
+
+	var timeout_fired := [false]
+	var timeout_listener := Rule.new(&"request_timeout_listener", &"relay:request_expired")
+	timeout_listener.steps.append(Step.new(func(_context: Dictionary) -> void:
+		timeout_fired[0] = true))
+	stage.engine.rules.append(timeout_listener)
+	var timeout_rule := Rule.new(&"timed_host_request", &"start_timed_request")
+	timeout_rule.steps.append(factory.gameplay_request(&"slow_operation", {}, 0.02,
+		{}, &"request_expired"))
+	stage.engine.rules.append(timeout_rule)
+	stage.engine.fire(&"start_timed_request")
+	await create_timer(0.08).timeout
+	await process_frame
+	var timeout_id: int = request_ids[2] if request_ids.size() > 2 else -1
+	var late_timeout_response_rejected: bool = timeout_id > 0 \
+		and not stage.respond_gameplay_request(timeout_id, true, {})
+	var timeout_recorded: bool = request_finished.any(func(entry: Dictionary) -> bool:
+		return entry.get("id") == timeout_id and entry.get("outcome") == &"timed_out")
+
+	var cancel_rule := Rule.new(&"cancelled_host_request", &"start_cancel_request")
+	cancel_rule.steps.append(factory.gameplay_request(&"cancelled_operation"))
+	stage.engine.rules.append(cancel_rule)
+	stage.engine.fire(&"start_cancel_request")
+	var cancel_id: int = request_ids[3] if request_ids.size() > 3 else -1
+	stage.deactivate()
+	await process_frame
+	var cancellation_recorded: bool = request_finished.any(func(entry: Dictionary) -> bool:
+		return entry.get("id") == cancel_id and entry.get("outcome") == &"cancelled")
+	var late_cancel_response_rejected: bool = cancel_id > 0 \
+		and not stage.respond_gameplay_request(cancel_id, true, {})
+	var explicit_id_request := stage.reserve_gameplay_request(&"manual_request", {}, {}, 9001)
+	var duplicate_explicit_id_rejected: bool = stage.reserve_gameplay_request(&"manual_request", {}, {}, 9001) == null
+	var explicit_id_cancelled: bool = explicit_id_request != null \
+		and stage.cancel_gameplay_request(9001, &"cancelled")
+	var settled_explicit_id_not_reused: bool = stage.reserve_gameplay_request(&"manual_request", {}, {}, 9001) == null
+	var ok: bool = _check("host requests register before emission, copy arguments, validate typed synchronous acknowledgments, and reject duplicates",
+		sync_ack_captured)
+	ok = _check("host request rejection outcomes reach host listeners before the rule sequence resumes",
+		rejection_outcome_routed) and ok
+	ok = _check("host request timeouts emit the timeout relay and reject late acknowledgments",
+		timeout_fired[0] and timeout_recorded and late_timeout_response_rejected) and ok
+	ok = _check("rule cancellation settles a pending host request and rejects its late acknowledgment",
+		cancellation_recorded and late_cancel_response_rejected) and ok
+	ok = _check("host request IDs can be supplied explicitly but cannot be duplicated or reused",
+		duplicate_explicit_id_rejected and explicit_id_cancelled and settled_explicit_id_not_reused) and ok
+	stage.queue_free()
+	await process_frame
 	return ok
 
 func _test_on_change_triggers() -> bool:
