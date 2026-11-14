@@ -204,6 +204,7 @@ func _build_rule() -> void:
 	add.flat = false
 	var verbs: Array = _data.catalog.map(func(v: Dictionary) -> String: return v["name"])
 	verbs.append("Parallel group")
+	verbs.append("Conditional branches")
 	for v in verbs:
 		add.get_popup().add_item(v)
 	add.get_popup().index_pressed.connect(func(i: int) -> void:
@@ -478,7 +479,15 @@ func _step_panel_in(steps: Array, idx: int, depth: int) -> Control:
 	var ob := OptionButton.new()
 	var names: Array = _data.catalog.map(func(v: Dictionary) -> String: return v["name"])
 	names.append("Parallel group")
-	var displayed_verb := "Parallel group" if step.verb == &"parallel" else String(step.verb)
+	var displayed_verb := String(step.verb)
+	if step.verb == &"parallel":
+		displayed_verb = "Parallel group"
+	elif step.verb == &"conditional":
+		displayed_verb = "Conditional branches"
+	elif step.verb == &"random":
+		displayed_verb = "Random choice"
+	names.append("Conditional branches")
+	names.append("Random choice")
 	if not names.has(displayed_verb):
 		names.append(displayed_verb)
 	for n in names:
@@ -493,6 +502,12 @@ func _step_panel_in(steps: Array, idx: int, depth: int) -> Control:
 		step.args = fresh.args
 		step.parallel_branches = fresh.parallel_branches
 		step.join_parallel = fresh.join_parallel
+		step.branch_conditions = fresh.branch_conditions
+		step.default_branch_index = fresh.default_branch_index
+		step.group_id = fresh.group_id
+		step.random_selection = fresh.random_selection
+		step.random_seed = fresh.random_seed
+		step.branch_weights = fresh.branch_weights
 		changed.emit(_rule.id)
 		_rebuild_later())
 	head.add_child(ob)
@@ -520,6 +535,10 @@ func _step_panel_in(steps: Array, idx: int, depth: int) -> Control:
 	vb.add_child(head)
 	if step.verb == &"parallel":
 		vb.add_child(_parallel_panel(step, depth + 1))
+	elif step.verb == &"conditional":
+		vb.add_child(_conditional_panel(step, depth + 1))
+	elif step.verb == &"random":
+		vb.add_child(_random_panel(step, depth + 1))
 
 	for j in params.size():
 		var row := HBoxContainer.new()
@@ -611,12 +630,199 @@ func _parallel_panel(step: StepData, depth: int) -> Control:
 	container.add_child(add_branch)
 	return container
 
+func _conditional_panel(step: StepData, depth: int) -> Control:
+	var container := VBoxContainer.new()
+	container.add_theme_constant_override("separation", 5)
+	for branch_index in step.parallel_branches.size():
+		var branch: Array = step.parallel_branches[branch_index]
+		var branch_contents := VBoxContainer.new()
+		branch_contents.add_theme_constant_override("separation", 5)
+		var header := HBoxContainer.new()
+		header.add_child(Style.label("Branch %d" % (branch_index + 1), Style.EVENT, 11))
+		var otherwise := CheckBox.new()
+		otherwise.text = "Otherwise"
+		otherwise.button_pressed = branch_index == step.default_branch_index
+		otherwise.toggled.connect(func(enabled: bool) -> void:
+			if enabled:
+				step.default_branch_index = branch_index
+				while step.branch_conditions.size() < step.parallel_branches.size():
+					step.branch_conditions.append(&"")
+				step.branch_conditions[branch_index] = &""
+			elif step.default_branch_index == branch_index:
+				step.default_branch_index = -1
+			changed.emit(_rule.id)
+			_rebuild_later())
+		header.add_child(otherwise)
+		var guard := LineEdit.new()
+		guard.placeholder_text = "Guard expression"
+		guard.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		guard.text = String(step.branch_conditions[branch_index]) if branch_index < step.branch_conditions.size() else ""
+		guard.editable = branch_index != step.default_branch_index
+		var apply_guard := func(_submitted := "") -> void:
+			if branch_index == step.default_branch_index:
+				return
+			while step.branch_conditions.size() < step.parallel_branches.size():
+				step.branch_conditions.append(&"")
+			step.branch_conditions[branch_index] = StringName(guard.text.strip_edges())
+			changed.emit(_rule.id)
+		guard.text_submitted.connect(apply_guard)
+		guard.focus_exited.connect(apply_guard)
+		header.add_child(guard)
+		for offset in [-1, 1]:
+			var move := Button.new()
+			move.text = "↑" if offset < 0 else "↓"
+			move.tooltip_text = "Move branch up" if offset < 0 else "Move branch down"
+			move.disabled = branch_index + offset < 0 or branch_index + offset >= step.parallel_branches.size()
+			move.pressed.connect(func() -> void:
+				_move_conditional_branch(step, branch_index, branch_index + offset)
+				changed.emit(_rule.id)
+				_rebuild_later())
+			header.add_child(move)
+		var remove := Button.new()
+		remove.text = "Remove"
+		remove.tooltip_text = "Remove this branch and its steps"
+		remove.pressed.connect(func() -> void:
+			step.parallel_branches.remove_at(branch_index)
+			if branch_index < step.branch_conditions.size():
+				step.branch_conditions.remove_at(branch_index)
+			if step.default_branch_index == branch_index:
+				step.default_branch_index = -1
+			elif step.default_branch_index > branch_index:
+				step.default_branch_index -= 1
+			changed.emit(_rule.id)
+			_rebuild_later())
+		header.add_child(remove)
+		branch_contents.add_child(header)
+		for child_index in branch.size():
+			branch_contents.add_child(_step_panel_in(branch, child_index, depth))
+		branch_contents.add_child(_add_branch_step_menu(branch))
+		container.add_child(Style.entry(branch_contents))
+	var add_branch := Button.new()
+	add_branch.text = "+ Add condition"
+	add_branch.tooltip_text = "Add a guarded branch before the Otherwise branch."
+	add_branch.pressed.connect(func() -> void:
+		var insert_at := step.default_branch_index if step.default_branch_index >= 0 else step.parallel_branches.size()
+		step.parallel_branches.insert(insert_at, [])
+		step.branch_conditions.insert(insert_at, &"")
+		if step.default_branch_index >= insert_at:
+			step.default_branch_index += 1
+		changed.emit(_rule.id)
+		_rebuild_later())
+	container.add_child(add_branch)
+	return container
+
+func _random_panel(step: StepData, depth: int) -> Control:
+	var container := VBoxContainer.new()
+	container.add_theme_constant_override("separation", 5)
+	var settings := HBoxContainer.new()
+	settings.add_child(Style.label("Selection", Style.EVENT, 11))
+	var mode := OptionButton.new()
+	mode.add_item("Uniform", 0)
+	mode.add_item("Weighted", 1)
+	mode.select(step.random_selection)
+	mode.item_selected.connect(func(index: int) -> void:
+		step.random_selection = index
+		while step.branch_weights.size() < step.parallel_branches.size():
+			step.branch_weights.append(1.0)
+		changed.emit(_rule.id)
+		_rebuild_later())
+	settings.add_child(mode)
+	settings.add_child(Style.label("Seed", Style.EVENT, 11))
+	var seed := SpinBox.new()
+	seed.min_value = -2147483648.0
+	seed.max_value = 2147483647.0
+	seed.step = 1.0
+	seed.value = step.random_seed
+	seed.value_changed.connect(func(value: float) -> void:
+		step.random_seed = int(value)
+		changed.emit(_rule.id))
+	settings.add_child(seed)
+	container.add_child(settings)
+	container.add_child(Style.label("A seeded choice is repeatable. Managed Stages save each group's random stream across reloads.", Style.MUTED, 10))
+	for branch_index in step.parallel_branches.size():
+		var branch: Array = step.parallel_branches[branch_index]
+		var contents := VBoxContainer.new()
+		contents.add_theme_constant_override("separation", 4)
+		var header := HBoxContainer.new()
+		header.add_child(Style.label("Branch %d" % (branch_index + 1), Style.EVENT, 11))
+		if step.random_selection == 1:
+			while step.branch_weights.size() <= branch_index:
+				step.branch_weights.append(1.0)
+			var weight := SpinBox.new()
+			weight.min_value = 0.0
+			weight.max_value = 1000000.0
+			weight.step = 0.1
+			weight.value = step.branch_weights[branch_index]
+			weight.tooltip_text = "Relative chance for this branch; zero disables it."
+			weight.value_changed.connect(func(value: float) -> void:
+				step.branch_weights[branch_index] = value
+				changed.emit(_rule.id))
+			header.add_child(Style.label("Weight", Style.MUTED, 10))
+			header.add_child(weight)
+		for offset in [-1, 1]:
+			var move := Button.new()
+			move.text = "↑" if offset < 0 else "↓"
+			move.tooltip_text = "Move branch up" if offset < 0 else "Move branch down"
+			move.disabled = branch_index + offset < 0 or branch_index + offset >= step.parallel_branches.size()
+			move.pressed.connect(func() -> void:
+				var moved: Array = step.parallel_branches[branch_index]
+				step.parallel_branches.remove_at(branch_index)
+				step.parallel_branches.insert(branch_index + offset, moved)
+				if branch_index < step.branch_weights.size():
+					var moved_weight := step.branch_weights[branch_index]
+					step.branch_weights.remove_at(branch_index)
+					step.branch_weights.insert(branch_index + offset, moved_weight)
+				changed.emit(_rule.id)
+				_rebuild_later())
+			header.add_child(move)
+		var remove := Button.new()
+		remove.text = "Remove"
+		remove.pressed.connect(func() -> void:
+			step.parallel_branches.remove_at(branch_index)
+			if branch_index < step.branch_weights.size():
+				step.branch_weights.remove_at(branch_index)
+			changed.emit(_rule.id)
+			_rebuild_later())
+		header.add_child(remove)
+		contents.add_child(header)
+		for child_index in branch.size():
+			contents.add_child(_step_panel_in(branch, child_index, depth))
+		contents.add_child(_add_branch_step_menu(branch))
+		container.add_child(Style.entry(contents))
+	var add_branch := Button.new()
+	add_branch.text = "+ Add branch"
+	add_branch.pressed.connect(func() -> void:
+		step.parallel_branches.append([])
+		step.branch_weights.append(1.0)
+		changed.emit(_rule.id)
+		_rebuild_later())
+	container.add_child(add_branch)
+	return container
+
+func _move_conditional_branch(step: StepData, from: int, to: int) -> void:
+	var branch: Array = step.parallel_branches[from]
+	step.parallel_branches.remove_at(from)
+	step.parallel_branches.insert(to, branch)
+	while step.branch_conditions.size() < step.parallel_branches.size():
+		step.branch_conditions.append(&"")
+	var condition: StringName = step.branch_conditions[from]
+	step.branch_conditions.remove_at(from)
+	step.branch_conditions.insert(to, condition)
+	if step.default_branch_index == from:
+		step.default_branch_index = to
+	elif from < step.default_branch_index and to >= step.default_branch_index:
+		step.default_branch_index -= 1
+	elif from > step.default_branch_index and to <= step.default_branch_index:
+		step.default_branch_index += 1
+
 func _add_branch_step_menu(steps: Array) -> Control:
 	var add := MenuButton.new()
 	add.text = "+ Add branch step"
 	add.flat = false
 	var verbs: Array = _data.catalog.map(func(v: Dictionary) -> String: return v["name"])
 	verbs.append("Parallel group")
+	verbs.append("Conditional branches")
+	verbs.append("Random choice")
 	for verb_name in verbs:
 		add.get_popup().add_item(verb_name)
 	add.get_popup().index_pressed.connect(func(index: int) -> void:
@@ -629,6 +835,20 @@ func _new_step_data(verb_name: String) -> StepData:
 	if verb_name == "Parallel group":
 		var step := StepData.new()
 		step.verb = &"parallel"
+		return step
+	if verb_name == "Conditional branches":
+		var step := StepData.new()
+		step.verb = &"conditional"
+		step.parallel_branches = [[]]
+		step.branch_conditions = [&""]
+		step.default_branch_index = 0
+		return step
+	if verb_name == "Random choice":
+		var step := StepData.new()
+		step.verb = &"random"
+		step.group_id = StringName(str(ResourceUID.create_id()))
+		step.parallel_branches = [[], []]
+		step.branch_weights = PackedFloat32Array([1.0, 1.0])
 		return step
 	return VerbCatalog.new_step(_data, verb_name)
 

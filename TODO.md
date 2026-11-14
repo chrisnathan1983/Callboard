@@ -19,6 +19,7 @@ The first five items retain the high priority assigned in `TODO.md`.
 - [x] **Give playback and waits per-run ownership.** See [StagingVerbs](addons/callboard/core/staging_verbs.gd), [RuleEngine](addons/callboard/core/rule_engine.gd), and [CoreVerbs](addons/callboard/core/core_verbs.gd).
   - [x] Stage deactivation releases registered interruptible waits. Delays and `repeat_emit` use the engine's injected clock. Restart cancels the active run and starts only the latest same-frame replacement after the cancellation wakeup; unit tests cover replacement and repeat behavior.
   - [x] Match completion to the requested playback instance. `play_animation` checks the emitted animation name and a per-player playback ticket; `play_audio` captures and checks its `AudioStreamPlayback` instance. A later built-in playback supersedes the earlier wait, including replay of the same animation. Runtime unit tests pass for name filtering and replacement cancellation.
+  - [x] Wait until Godot has created the audio playback object before requesting it, and recheck player/run ownership after the frame boundary.
   - [x] Define and test all playback exit cases:
     - [x] Replacement, including replay of the same clip, cancels the earlier wait; Restart and Stage deactivation release run-owned waits.
     - [x] Stop and target removal cancel the waiting run and prevent its remaining steps.
@@ -95,10 +96,11 @@ The first five items retain the high priority assigned in `TODO.md`.
   - [x] Serialize nested `StepData` branches recursively with join mode, and compile authored groups into runtime `Step.parallel()` steps.
   - [x] Add Rule Inspector authoring for nested branches, including branch add/remove/reorder and per-branch step editing. Branch start, completion, and cancellation events include branch details in the live trace.
 
-- [ ] **Add conditional branches and deterministic random choices inside a rule.** See [RuleData](addons/callboard/core/rule_data.gd), [StepData](addons/callboard/core/step_data.gd), and [RuleValidator](addons/callboard/core/rule_validator.gd).
+- [x] **Add conditional branches and deterministic random choices inside a rule.** See [RuleData](addons/callboard/core/rule_data.gd), [StepData](addons/callboard/core/step_data.gd), and [RuleValidator](addons/callboard/core/rule_validator.gd).
   - [x] Separate rules can route by guards, with overlap diagnostics and an explicit allowance for intentional overlap.
-  - [ ] Add per-step guards or branch groups, including a default path. Add uniform and weighted selection, with a seed and restorable random state when reproducibility across loads is required.
-  - [ ] Validate branch conditions and weights, and make nested step groups and selected outcomes visible in the board and trace.
+  - [x] Add conditional step groups with first-match guards and one explicit Otherwise branch. Execute only the selected branch, preserve nested steps in resources, and allow branch reorder and guard-key renames.
+  - [x] Add uniform and weighted random selection with an authored seed and restorable per-group RNG state across managed Stage reloads.
+  - [x] Validate conditional guards, default paths, and supported operand types. Show branch conditions in board tooltips and selected outcomes in the live trace.
 
 - [ ] **Expand guard expressions.** See [GuardExpression](addons/callboard/core/guard_expression.gd) and [RuleValidator](addons/callboard/core/rule_validator.gd).
   - [x] Existing guards support Blackboard truthiness and numeric comparisons with literals, plus typed payload comparisons and `has()`/`missing()` checks.

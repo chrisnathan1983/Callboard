@@ -11,6 +11,7 @@ signal dispatch_blocked(action: String, reason: String)
 @export var definition: StageDefinition
 var saved_vars := {}    # injected by the manager; survives unloads
 var fired := {}         # injected by the manager; stores one-shot latches
+var random_group_states: Dictionary = {} # managed per-group PRNG state
 var shared_vars: Dictionary = {}
 var state_store: StageStateStore
 var stage_instance_id: StringName
@@ -134,6 +135,7 @@ func _create_runtime_services() -> void:
 	if state_store != null:
 		state_store.register_blackboard(bb)
 	engine = RuleEngine.new(bb, fired, _wait)
+	engine.random_group_states = random_group_states
 	engine.rule_fired.connect(rule_fired.emit)
 	verbs = _make_verbs(StepContext.new(bb, engine, self, scored.emit))
 
@@ -314,7 +316,7 @@ func _event_is_known(event: StringName) -> bool:
 			return true
 		if event == StringName("relay:" + String(rule.emits)) and not rule.emits.is_empty():
 			return true
-		for step: Step in rule.steps:
+		for step: Step in _flatten_steps(rule.steps):
 			if step.wait_event == event:
 				return true
 			if not step.emits.is_empty() and event == StringName("relay:" + String(step.emits)):
@@ -329,7 +331,7 @@ func check() -> Array[String]:
 		problems.append_array(state_store.shared_schema_errors(bb))
 	if verbs is StagingVerbs:
 		for rule: Rule in engine.rules:
-			for step: Step in rule.steps:
+			for step: Step in _flatten_steps(rule.steps):
 				problems.append_array((verbs as StagingVerbs).validate_step(rule.id, step, bb))
 	var seen_fields := {}
 	for field: PayloadFieldData in definition.payload_fields if definition != null else []:
@@ -349,3 +351,11 @@ func check() -> Array[String]:
 		if binding != null:
 			problems.append_array(binding.validate(self))
 	return problems
+
+func _flatten_steps(steps: Array) -> Array[Step]:
+	var result: Array[Step] = []
+	for step: Step in steps:
+		result.append(step)
+		for branch in step.parallel_branches:
+			result.append_array(_flatten_steps(branch))
+	return result

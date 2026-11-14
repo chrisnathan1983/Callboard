@@ -21,6 +21,8 @@ func state_for(instance_id: StringName) -> Dictionary:
 		state["saved"] = {}
 	if not state.get("fired") is Dictionary:
 		state["fired"] = {}
+	if not state.get("random_groups") is Dictionary:
+		state["random_groups"] = {}
 	return state
 
 ## Inject state before the Stage enters the tree and initializes its Blackboard.
@@ -32,6 +34,7 @@ func attach(stage: Stage, instance_id: StringName) -> bool:
 		return false
 	var state := state_for(instance_id)
 	stage.attach_state_store(self, instance_id, state["saved"], state["fired"], shared_values)
+	stage.random_group_states = state["random_groups"]
 	_loaded_ids[instance_id] = stage
 	return true
 

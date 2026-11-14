@@ -59,32 +59,67 @@ func play_audio(player: Node, wait_for_completion := false, timeout := 0.0) -> S
 			previous_ticket.cancel(&"replaced")
 		var ticket := PlaybackTicket.new()
 		player.set_meta(AUDIO_PLAYBACK_META, ticket)
+		var playback_tree := player.get_tree() if player.is_inside_tree() else null
+		var completion: RuleEngine.AwaitedSignal
+		var wait_signal: Signal
+		if wait_for_completion:
+			if playback_tree == null:
+				return null
+			completion = RuleEngine.AwaitedSignal.new()
+			wait_signal = _animation_completion(payload, completion.completed,
+				Callable(), [ticket.interrupted])
 		player.call("play")
 		if wait_for_completion:
-			# Godot only exposes a stream playback after the player has actually
-			# started. A stopped, paused-out, or not-yet-active player returns no
-			# playback instance and get_stream_playback() logs an engine error.
-			if not player.is_inside_tree() or not bool(player.get("playing")):
-				return null
-			var playback := player.call("get_stream_playback") as AudioStreamPlayback
-			var playback_id := playback.get_instance_id() if playback != null else 0
-			var playback_matches := func() -> bool:
-				if playback_id == 0 or not is_instance_valid(player):
-					return false
-				if not player.is_inside_tree() or not bool(player.get("playing")):
-					return false
-				var current := player.call("get_stream_playback") as AudioStreamPlayback
-				var matches: bool = (current != null and current.get_instance_id() == playback_id
-					and player.get_meta(AUDIO_PLAYBACK_META, null) == ticket)
-				if matches:
-					ticket.completed = true
-				return matches
-			var finished := _audio_finished_signal(player)
-			_start_playback_monitor(player, ticket, func() -> bool:
-				return bool(player.get("playing")) and not bool(player.get("stream_paused")), timeout)
-			return _animation_completion(payload, finished, playback_matches, [ticket.interrupted])
+			_watch_audio_playback(player.get_instance_id(), ticket, completion,
+				playback_tree, _audio_finished_signal(player), timeout)
+			return wait_signal
 		return null
 	return Step.new(f)
+
+func _watch_audio_playback(player_id: int, ticket: PlaybackTicket,
+		completion: RuleEngine.AwaitedSignal, tree: SceneTree, finished: Signal,
+		timeout: float) -> void:
+	var playback_id := [0]
+	var finished_early := [false]
+	var on_finished := func() -> void:
+		var player := instance_from_id(player_id) as Node
+		if not is_instance_valid(player) or ticket.cancelled \
+				or player.get_meta(AUDIO_PLAYBACK_META, null) != ticket:
+			return
+		if playback_id[0] == 0:
+			finished_early[0] = true
+			return
+		ticket.completed = true
+		completion.is_complete = true
+		completion.completed.emit()
+	finished.connect(on_finished, CONNECT_ONE_SHOT)
+	await tree.process_frame
+	if ticket.cancelled or completion.is_complete:
+		return
+	var player := instance_from_id(player_id) as Node
+	if not is_instance_valid(player) or not player.is_inside_tree() \
+			or player.get_meta(AUDIO_PLAYBACK_META, null) != ticket:
+		ticket.cancel(&"target_removed")
+		return
+	if not bool(player.get("playing")):
+		if finished_early[0]:
+			ticket.completed = true
+			completion.is_complete = true
+			completion.completed.emit()
+		else:
+			ticket.cancel(&"stopped")
+		return
+	# AudioStreamPlayer creates the underlying playback only after play() has
+	# advanced through an audio frame. Never query it before this point.
+	var playback := player.call("get_stream_playback") as AudioStreamPlayback
+	playback_id[0] = playback.get_instance_id() if playback != null else 0
+	if finished_early[0] and playback_id[0] == 0 and not bool(player.get("playing")):
+		ticket.completed = true
+		completion.is_complete = true
+		completion.completed.emit()
+		return
+	_start_playback_monitor(player, ticket, func() -> bool:
+		return bool(player.get("playing")) and not bool(player.get("stream_paused")), timeout)
 
 ## Rotate a Node3D to an Euler rotation in radians. Waiting is explicit.
 func rotate_to(n: Node3D, target_rotation: Vector3, duration := 0.25,

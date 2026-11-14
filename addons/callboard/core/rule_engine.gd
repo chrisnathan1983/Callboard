@@ -18,6 +18,8 @@ var rules: Array[Rule] = []
 var fired: Dictionary                 # injected, latches one-shot rules
 var bb: Blackboard
 var payload_schema: Dictionary = {}
+## Managed Stages inject a stable per-instance dictionary from StageStateStore.
+var random_group_states: Dictionary = {}
 var wait: Callable                    # func(seconds: float) -> Signal; tests swap this
 var _gen := 0
 var _active := {}                      # Rule -> pending payloads and restart request
@@ -215,6 +217,51 @@ func _run_steps(steps: Array, rule: Rule, event: StringName, payload: Dictionary
 				[(run["cancel_signal"] as AwaitedSignal).cancelled], run, true)
 			if not alive(rule, generation, payload):
 				return {"completed": false, "index": step_index, "step": step}
+		if step.verb == &"conditional":
+			var selected_branch := -1
+			for branch_index in step.parallel_branches.size():
+				if branch_index == step.default_branch_index:
+					continue
+				if branch_index < step.branch_conditions.size() and GuardExpression.evaluate(
+						bb, step.branch_conditions[branch_index], payload, event, _payload_schema()):
+					selected_branch = branch_index
+					break
+			if selected_branch < 0:
+				selected_branch = step.default_branch_index
+			if selected_branch < 0 or selected_branch >= step.parallel_branches.size():
+				_emit_trace("branch_unmatched", rule.id, event, step_index, step,
+					"no condition matched and no valid default branch exists")
+				continue
+			var condition := String(step.branch_conditions[selected_branch]) \
+				if selected_branch < step.branch_conditions.size() else "Otherwise"
+			_emit_trace("branch_selected", rule.id, event, step_index, step,
+				"branch=%d; %s" % [selected_branch + 1,
+				"Otherwise" if selected_branch == step.default_branch_index else condition])
+			var branch_outcome: Dictionary = await _run_group_branch(
+				step.parallel_branches[selected_branch], rule, event, payload, generation,
+				context, step_payload, run, step_index, selected_branch)
+			if not branch_outcome.get("completed", false):
+				branch_outcome["index"] = step_index
+				branch_outcome["step"] = branch_outcome.get("step", step)
+				return branch_outcome
+			continue
+		if step.verb == &"random":
+			var selected_branch := _choose_random_branch(step, rule, step_index)
+			if selected_branch < 0:
+				_emit_trace("branch_unmatched", rule.id, event, step_index, step,
+					"random group has no selectable branches")
+				continue
+			_emit_trace("branch_selected", rule.id, event, step_index, step,
+				"branch=%d; %s" % [selected_branch + 1,
+					"uniform" if step.random_selection == 0 else "weighted"])
+			var random_outcome: Dictionary = await _run_group_branch(
+				step.parallel_branches[selected_branch], rule, event, payload, generation,
+				context, step_payload, run, step_index, selected_branch)
+			if not random_outcome.get("completed", false):
+				random_outcome["index"] = step_index
+				random_outcome["step"] = random_outcome.get("step", step)
+				return random_outcome
+			continue
 		if step.verb == &"parallel":
 			var branch_signals: Array[AwaitedSignal] = []
 			for child_index in step.parallel_branches.size():
@@ -249,6 +296,57 @@ func _run_steps(steps: Array, rule: Rule, event: StringName, payload: Dictionary
 				return {"completed": false, "timed_out": true, "index": step_index, "step": step}
 		_emit_branch_trace("step_completed", rule, event, step_index, step, branch_id, is_main)
 	return {"completed": true}
+
+func _choose_random_branch(step: Step, rule: Rule, step_index: int) -> int:
+	var count := step.parallel_branches.size()
+	if count == 0:
+		return -1
+	var stable_id := step.group_id
+	if stable_id.is_empty():
+		stable_id = StringName("%s:%d" % [rule.latch_key(), step_index])
+	var state_key := StringName("random:%s" % stable_id)
+	var rng := RandomNumberGenerator.new()
+	var stored_state: Variant = random_group_states.get(state_key)
+	if stored_state is Dictionary and int(stored_state.get("seed", step.random_seed)) == step.random_seed:
+		rng.state = int(stored_state.get("state", 0))
+	else:
+		rng.seed = step.random_seed
+	var selected := 0
+	if step.random_selection == 1:
+		var total := 0.0
+		for index in count:
+			if index < step.branch_weights.size():
+				total += maxf(0.0, step.branch_weights[index])
+		if total <= 0.0:
+			return -1
+		var roll := rng.randf() * total
+		for index in count:
+			var weight := step.branch_weights[index] if index < step.branch_weights.size() else 0.0
+			roll -= maxf(0.0, weight)
+			if roll < 0.0:
+				selected = index
+				break
+	else:
+		selected = rng.randi_range(0, count - 1)
+	random_group_states[state_key] = {"seed": step.random_seed, "state": rng.state}
+	return selected
+
+func _run_group_branch(steps: Array, rule: Rule, event: StringName, payload: Dictionary,
+		generation: int, context: Dictionary, step_payload: Dictionary, run: Dictionary,
+		group_index: int, branch_index: int) -> Dictionary:
+	var branch_run := run.duplicate(false)
+	branch_run.erase("wait_outcome")
+	var branch_context := step_payload.duplicate(false)
+	var callboard_context: Dictionary = branch_context.get("_callboard", {}).duplicate(false)
+	callboard_context["run"] = branch_run
+	branch_context["_callboard"] = callboard_context
+	var outcome: Dictionary = await _run_steps(steps, rule, event, payload, generation,
+		context, branch_context, branch_run, branch_index + 1, false)
+	_emit_trace("branch_completed" if outcome.get("completed", false) else "branch_cancelled",
+		rule.id, event, group_index, null,
+		"branch=%d; %s" % [branch_index + 1,
+		"completed" if outcome.get("completed", false) else "cancelled"])
+	return outcome
 
 func _run_parallel_branch(steps: Array, rule: Rule, event: StringName, payload: Dictionary,
 		generation: int, context: Dictionary, step_payload: Dictionary, run: Dictionary,

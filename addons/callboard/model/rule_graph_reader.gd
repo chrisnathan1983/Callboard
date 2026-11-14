@@ -125,9 +125,12 @@ static func validate_resources(data: GraphDraft) -> void:
 			elif not parsed["payload"] and not keys.has(parsed["key"]):
 				data.warnings.append("rule '%s' checks key '%s', which is not declared in the StageDefinition; scene analysis will check script-defined keys" % [rule.id, parsed["key"]])
 		for step: StepData in rule.steps:
+			_validate_step_groups(rule, step, payloads, keys, data.errors, data.warnings)
+		for step: StepData in _flatten_steps(rule.steps):
 			if step.verb.is_empty():
 				data.errors.append("rule '%s' has a step with no verb" % rule.id)
-			elif RuntimeVerbCatalog.find(data.catalog, String(step.verb)).is_empty():
+			elif step.verb not in [&"parallel", &"conditional", &"random"] \
+					and RuntimeVerbCatalog.find(data.catalog, String(step.verb)).is_empty():
 				custom_verbs[step.verb] = true
 			if step.verb in [&"wait_for_call", &"wait_until"]:
 				_analyze_wait(data, rule, step, emitted, listening)
@@ -178,6 +181,74 @@ static func validate_resources(data: GraphDraft) -> void:
 		names.sort()
 		data.warnings.append("Custom verbs require scene analysis: %s" % ", ".join(names))
 
+static func _validate_conditional_data(rule: RuleData, step: StepData,
+		payloads: Dictionary, keys: Dictionary, errors: Array[String],
+		warnings: Array[String]) -> void:
+	var branch_count := step.parallel_branches.size()
+	if step.branch_conditions.size() != branch_count:
+		errors.append("rule '%s' conditional branch conditions must match its branch count" % rule.id)
+	if step.default_branch_index < 0 or step.default_branch_index >= branch_count:
+		errors.append("rule '%s' conditional group requires one valid Otherwise branch" % rule.id)
+	for index in mini(branch_count, step.branch_conditions.size()):
+		if index == step.default_branch_index:
+			if not step.branch_conditions[index].is_empty():
+				errors.append("rule '%s' conditional Otherwise branch must not have a condition" % rule.id)
+			continue
+		var expression := step.branch_conditions[index]
+		var parsed := GuardExpression.parse(String(expression))
+		if expression.is_empty() or not parsed.get("ok", false):
+			errors.append("rule '%s' conditional branch %d has an invalid guard '%s'" % [rule.id, index + 1, expression])
+			continue
+		var key: StringName = parsed.get("key", &"")
+		if parsed.get("payload", false):
+			if payloads.has(rule.trigger):
+				var schema: Dictionary = payloads[rule.trigger]
+				if not schema.has(key):
+					errors.append("rule '%s' conditional branch %d checks undeclared payload field '%s'" % [rule.id, index + 1, key])
+				elif parsed.get("comparison", false):
+					var declared_type: int = schema[key]
+					var literal_type: int = parsed["value_type"]
+					if declared_type in [TYPE_INT, TYPE_FLOAT] and literal_type not in [TYPE_INT, TYPE_FLOAT] \
+							or declared_type not in [TYPE_INT, TYPE_FLOAT] and declared_type != literal_type:
+						errors.append("rule '%s' conditional branch %d has an incompatible payload comparison" % [rule.id, index + 1])
+		elif not keys.has(key):
+			warnings.append("rule '%s' conditional branch %d checks undeclared Blackboard key '%s'" % [rule.id, index + 1, key])
+		elif parsed.get("comparison", false):
+			var value: Variant = keys[key]
+			if value != null and typeof(value) not in [TYPE_INT, TYPE_FLOAT]:
+				errors.append("rule '%s' conditional branch %d compares non-numeric Blackboard key '%s'" % [rule.id, index + 1, key])
+
+static func _validate_step_groups(rule: RuleData, step: StepData, payloads: Dictionary,
+		keys: Dictionary, errors: Array[String], warnings: Array[String]) -> void:
+	if step.verb == &"conditional":
+		_validate_conditional_data(rule, step, payloads, keys, errors, warnings)
+	elif step.verb == &"random":
+		if step.parallel_branches.is_empty():
+			errors.append("rule '%s' random group requires at least one branch" % rule.id)
+		if step.random_selection not in [0, 1]:
+			errors.append("rule '%s' random group has an unknown selection mode" % rule.id)
+		if step.random_selection == 1:
+			if step.branch_weights.size() != step.parallel_branches.size():
+				errors.append("rule '%s' weighted random group needs one weight per branch" % rule.id)
+			var total := 0.0
+			for weight in step.branch_weights:
+				if not is_finite(weight) or weight < 0.0:
+					errors.append("rule '%s' random branch weights must be finite and non-negative" % rule.id)
+				else:
+					total += weight
+			if total <= 0.0:
+				errors.append("rule '%s' weighted random group needs a positive total weight" % rule.id)
+	for branch in step.parallel_branches:
+		for child: StepData in branch:
+			_validate_step_groups(rule, child, payloads, keys, errors, warnings)
+
+static func _flatten_steps(steps: Array) -> Array[StepData]:
+	var result: Array[StepData] = []
+	for step: StepData in steps:
+		result.append(step)
+		for branch in step.parallel_branches:
+			result.append_array(_flatten_steps(branch))
+	return result
 static func _analyze_wait(data: GraphDraft, rule: RuleData, step: StepData,
 		emitted: Dictionary, listening: Dictionary) -> void:
 	var args: Array = []

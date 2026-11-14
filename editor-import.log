@@ -1,6 +1,0 @@
-Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
-ERROR: Could not create editor data directory: C:/Users/chris/AppData/Roaming/Godot
-   at: EditorPaths (editor/file_system/editor_paths.cpp:201)
-ERROR: Could not create editor config directory: C:/Users/chris/AppData/Roaming/Godot
-   at: EditorPaths (editor/file_system/editor_paths.cpp:216)
-

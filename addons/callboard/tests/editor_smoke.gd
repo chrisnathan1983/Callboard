@@ -9,6 +9,8 @@ func _initialize() -> void:
 	var ok := _test_scene_assigned_props()
 	ok = _test_add_var_editor() and ok
 	ok = _test_parallel_group_authoring() and ok
+	ok = _test_conditional_group_authoring() and ok
+	ok = _test_random_group_authoring() and ok
 	ok = _test_staging_verb_catalog_and_validation() and ok
 	ok = await _test_overlapping_flash_restores_surface_colors() and ok
 	ok = _test_layer_export_filter() and ok
@@ -174,6 +176,81 @@ func _test_parallel_group_authoring() -> bool:
 	inspector.free()
 	return _check("parallel inspector adds editable branches and child steps with join control",
 		branch_created and step_created and join_visible and reordered and removed)
+
+func _test_conditional_group_authoring() -> bool:
+	var draft := GraphDraft.new()
+	draft.catalog = VerbCatalog.from_factory(CoreVerbs.new(
+		StepContext.new(Blackboard.new(), null, null, Callable())))
+	var rule := RuleData.new()
+	rule.id = &"conditional_authoring"
+	rule.trigger = &"start"
+	var group := StepData.new()
+	group.verb = &"conditional"
+	group.parallel_branches = [[], []]
+	group.branch_conditions = [&"ready", &""]
+	group.default_branch_index = 1
+	rule.steps = [group]
+	draft.rules = [rule]
+	var inspector := RuleInspector.new()
+	inspector._data = draft
+	inspector._rule = rule
+	var panel := inspector._conditional_panel(group, 1)
+	var otherwise_visible := false
+	for control: Node in panel.find_children("*", "CheckBox", true, false):
+		var check := control as CheckBox
+		if check != null and check.text == "Otherwise":
+			otherwise_visible = true
+	var add_condition: Button
+	for control: Node in panel.find_children("*", "Button", true, false):
+		var button := control as Button
+		if button != null and button.text == "+ Add condition":
+			add_condition = button
+			break
+	if add_condition != null:
+		add_condition.pressed.emit()
+	var added_before_default := group.parallel_branches.size() == 3 and group.default_branch_index == 2
+	panel.free()
+	inspector.free()
+	return _check("conditional group inspector exposes Otherwise and inserts new guarded branches before it",
+		otherwise_visible and added_before_default)
+
+func _test_random_group_authoring() -> bool:
+	var draft := GraphDraft.new()
+	draft.catalog = VerbCatalog.from_factory(CoreVerbs.new(
+		StepContext.new(Blackboard.new(), null, null, Callable())))
+	var rule := RuleData.new()
+	rule.id = &"random_authoring"
+	rule.trigger = &"start"
+	var group := StepData.new()
+	group.verb = &"random"
+	group.group_id = &"stable_group"
+	group.random_selection = 1
+	group.random_seed = 42
+	group.parallel_branches = [[], []]
+	group.branch_weights = PackedFloat32Array([2.0, 1.0])
+	rule.steps = [group]
+	draft.rules = [rule]
+	var inspector := RuleInspector.new()
+	inspector._data = draft
+	inspector._rule = rule
+	var panel := inspector._random_panel(group, 1)
+	var has_seed := false
+	var weight_count := 0
+	for control: Node in panel.find_children("*", "SpinBox", true, false):
+		var spin := control as SpinBox
+		if spin != null and spin.value == 42.0:
+			has_seed = true
+		elif spin != null:
+			weight_count += 1
+	var has_selection := false
+	for control: Node in panel.find_children("*", "OptionButton", true, false):
+		var option := control as OptionButton
+		if option != null and option.selected == 1:
+			has_selection = true
+	panel.free()
+	inspector.free()
+	return _check("random group inspector exposes weighted mode, an authored seed, and branch weights",
+		has_seed and has_selection and weight_count == 2)
 
 func _test_staging_verb_catalog_and_validation() -> bool:
 	var bb := Blackboard.new()

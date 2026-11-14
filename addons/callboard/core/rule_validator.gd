@@ -38,7 +38,11 @@ static func check(rules: Array[Rule], bb: Blackboard,
 		seen[r.id] = true
 		if r.emits != &"":
 			emitted["relay:" + r.emits] = true
-		for s in r.steps:
+		for s: Step in _flatten_steps(r.steps):
+			if s.verb == &"conditional":
+				problems.append_array(_validate_conditional_group(r, s, bb, payload_names))
+			elif s.verb == &"random":
+				problems.append_array(_validate_random_group(r, s))
 			if s.verb == &"emit_relay":
 				problems.append_array(_validate_mapped_relay_step(r, s, payload_names))
 			if s.verb == &"wait_for_call":
@@ -160,7 +164,7 @@ static func check(rules: Array[Rule], bb: Blackboard,
 				problems.append("rule '%s' compares '%s', which is not an int or float Blackboard key" % [r.id, key])
 			if not settable.has(key):
 				problems.append("rule '%s' checks key '%s' but nothing sets it" % [r.id, key])
-		for s in r.steps:
+		for s: Step in _flatten_steps(r.steps):
 			if s.args.has(null):
 				problems.append("rule '%s' has a '%s' step with an unset prop" % [r.id, s.verb])
 		if r.steps.is_empty() and r.emits == &"":
@@ -179,6 +183,68 @@ static func _payload_comparison_is_compatible(field_type: int, guard: Dictionary
 	if field_type in [TYPE_INT, TYPE_FLOAT]:
 		return literal_type in [TYPE_INT, TYPE_FLOAT]
 	return field_type in [TYPE_BOOL, TYPE_STRING] and literal_type == field_type and guard["operator"] in ["==", "!="]
+
+static func _validate_conditional_group(rule: Rule, step: Step, bb: Blackboard,
+		payload_names: Dictionary) -> Array[String]:
+	var problems: Array[String] = []
+	var branch_count := step.parallel_branches.size()
+	if step.branch_conditions.size() != branch_count:
+		problems.append("rule '%s' conditional branch conditions must match its branch count" % rule.id)
+	if step.default_branch_index < 0 or step.default_branch_index >= branch_count:
+		problems.append("rule '%s' conditional group requires one valid Otherwise branch" % rule.id)
+	for index in mini(branch_count, step.branch_conditions.size()):
+		if index == step.default_branch_index:
+			if not step.branch_conditions[index].is_empty():
+				problems.append("rule '%s' conditional Otherwise branch must not have a condition" % rule.id)
+			continue
+		var expression := step.branch_conditions[index]
+		var parsed := GuardExpression.parse(String(expression))
+		if expression.is_empty() or not parsed.get("ok", false):
+			problems.append("rule '%s' conditional branch %d has an invalid guard '%s'" % [rule.id, index + 1, expression])
+			continue
+		var key: StringName = parsed.get("key", &"")
+		if parsed.get("payload", false):
+			if payload_names.has(rule.trigger):
+				var schema: Dictionary = payload_names[rule.trigger]
+				if not schema.has(key):
+					problems.append("rule '%s' conditional branch %d checks undeclared payload field '%s'" % [rule.id, index + 1, key])
+				elif parsed.get("comparison", false) and not _payload_comparison_is_compatible(schema[key], parsed):
+					problems.append("rule '%s' conditional branch %d has an incompatible payload comparison" % [rule.id, index + 1])
+		elif not bb.has(key):
+			problems.append("rule '%s' conditional branch %d checks undeclared Blackboard key '%s'" % [rule.id, index + 1, key])
+		elif parsed.get("comparison", false) and (
+				bb.schema[bb.resolve_key(key)].get("type") not in [TYPE_INT, TYPE_FLOAT]
+				or parsed.get("value_type") not in [TYPE_INT, TYPE_FLOAT]):
+			problems.append("rule '%s' conditional branch %d requires numeric Blackboard key and literal for '%s'" % [rule.id, index + 1, key])
+	return problems
+
+static func _validate_random_group(rule: Rule, step: Step) -> Array[String]:
+	var problems: Array[String] = []
+	var count := step.parallel_branches.size()
+	if count == 0:
+		problems.append("rule '%s' random group requires at least one branch" % rule.id)
+	if step.random_selection not in [0, 1]:
+		problems.append("rule '%s' random group has an unknown selection mode" % rule.id)
+	if step.random_selection == 1:
+		if step.branch_weights.size() != count:
+			problems.append("rule '%s' weighted random group needs one weight per branch" % rule.id)
+		var total := 0.0
+		for weight in step.branch_weights:
+			if not is_finite(weight) or weight < 0.0:
+				problems.append("rule '%s' random branch weights must be finite and non-negative" % rule.id)
+			else:
+				total += weight
+		if total <= 0.0:
+			problems.append("rule '%s' weighted random group needs a positive total weight" % rule.id)
+	return problems
+
+static func _flatten_steps(steps: Array) -> Array[Step]:
+	var result: Array[Step] = []
+	for step: Step in steps:
+		result.append(step)
+		for branch in step.parallel_branches:
+			result.append_array(_flatten_steps(branch))
+	return result
 
 ## Checks evaluated arguments. The Stage compiler uses this before creating a wait.
 static func wait_argument_error(verb: StringName, args: Array) -> String:

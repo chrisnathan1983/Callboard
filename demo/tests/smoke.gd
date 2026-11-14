@@ -309,8 +309,13 @@ func _test_staging_verbs(stage: Stage) -> bool:
 		emitted_gameplay_events == [[&"door_unlocked", {"door": &"north", "forced": false}]]) and ok
 
 	var audio := AudioStreamPlayer.new()
-	var audio_stream := AudioStreamGenerator.new()
-	audio_stream.buffer_length = 5.0
+	var audio_stream := AudioStreamWAV.new()
+	audio_stream.format = AudioStreamWAV.FORMAT_16_BITS
+	audio_stream.mix_rate = 44100
+	audio_stream.stereo = false
+	var audio_samples := PackedByteArray()
+	audio_samples.resize(441000)
+	audio_stream.data = audio_samples
 	audio.stream = audio_stream
 	stage.add_child(audio)
 	var audio_completed := [false]

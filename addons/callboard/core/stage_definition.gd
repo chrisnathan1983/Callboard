@@ -218,7 +218,7 @@ func apply_graph(stage: Stage) -> Array[String]:
 
 func _build_step(stage: Stage, event: StringName, factory: CoreVerbs, spec: StepData,
 		catalog: Array, inputs: Dictionary) -> Step:
-	if spec.verb == &"parallel":
+	if spec.verb in [&"parallel", &"conditional", &"random"]:
 		var branches: Array[Array] = []
 		for branch_data: Array in spec.parallel_branches:
 			var branch: Array[Step] = []
@@ -228,7 +228,18 @@ func _build_step(stage: Stage, event: StringName, factory: CoreVerbs, spec: Step
 					return null
 				branch.append(child_step)
 			branches.append(branch)
-		var group := Step.parallel(branches, spec.join_parallel)
+		var group: Step
+		if spec.verb == &"conditional":
+			var conditions: Array[StringName] = []
+			for expression in spec.branch_conditions:
+				conditions.append(StringName(expression))
+			group = Step.conditional(conditions, branches, spec.default_branch_index)
+		elif spec.verb == &"random":
+			group = Step.random_choice(branches, spec.branch_weights, spec.random_seed,
+				spec.group_id, spec.random_selection)
+		else:
+			group = Step.parallel(branches, spec.join_parallel)
+		group.group_id = spec.group_id
 		var group_delay := _evaluate_step_delay(spec.delay, inputs, factory)
 		if group_delay == null or float(group_delay) < 0.0:
 			return null

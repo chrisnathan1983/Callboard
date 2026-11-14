@@ -938,7 +938,9 @@ func _make_rule_node(rd: RuleData, data: GraphDraft) -> GraphNode:
 		if s.delay != "":
 			prefix += "+%ss  " % s.delay
 		var step_icon := &"Timer" if s.delay != "" else &"Play"
-		rows.append([_row(prefix + "%s(%s)" % [s.verb, ", ".join(PackedStringArray(s.args))], Style.TEXT, step_icon), false, false, COL_DIM])
+		var step_row := _row(prefix + _step_summary(s), Style.TEXT, step_icon)
+		step_row.tooltip_text = _step_tooltip(s)
+		rows.append([step_row, false, false, COL_DIM])
 		i += 1
 	for p in relays.size():
 		var last := p == relays.size() - 1
@@ -955,6 +957,35 @@ func _make_rule_node(rd: RuleData, data: GraphDraft) -> GraphNode:
 
 	_add_card_rows(n, rows)
 	return n
+
+func _step_summary(step: StepData) -> String:
+	if step.verb == &"conditional":
+		return "Conditional (%d paths)" % step.parallel_branches.size()
+	if step.verb == &"parallel":
+		return "Parallel (%d branches)" % step.parallel_branches.size()
+	if step.verb == &"random":
+		return "Random (%s, %d branches)" % ["uniform" if step.random_selection == 0 else "weighted", step.parallel_branches.size()]
+	return "%s(%s)" % [step.verb, ", ".join(PackedStringArray(step.args))]
+
+func _step_tooltip(step: StepData) -> String:
+	if step.verb not in [&"conditional", &"parallel", &"random"]:
+		return String(step.verb)
+	var lines := PackedStringArray()
+	if step.verb == &"conditional":
+		for i in step.parallel_branches.size():
+			var path := "Otherwise" if i == step.default_branch_index else \
+				("If " + String(step.branch_conditions[i]) if i < step.branch_conditions.size() else "If <missing guard>")
+			lines.append("%s: %d step(s)" % [path, step.parallel_branches[i].size()])
+	elif step.verb == &"random":
+		lines.append("Selection: %s; seed: %d; group: %s" % ["uniform" if step.random_selection == 0 else "weighted", step.random_seed, step.group_id])
+		for i in step.parallel_branches.size():
+			var weight := step.branch_weights[i] if i < step.branch_weights.size() else 0.0
+			lines.append("Branch %d: weight %s; %d step(s)" % [i + 1, weight, step.parallel_branches[i].size()])
+	else:
+		lines.append("Join branches: %s" % step.join_parallel)
+		for i in step.parallel_branches.size():
+			lines.append("Branch %d: %d step(s)" % [i + 1, step.parallel_branches[i].size()])
+	return "\n".join(lines)
 
 func _add_compact_title_icons(row: HBoxContainer, rd: RuleData) -> void:
 	if not rd.requires.is_empty():

@@ -52,16 +52,25 @@ static func rename_key(data: GraphDraft, old: String, new_key: String) -> void:
 				guards[index] = GuardExpression.rename_key(guards[index], old, new_key)
 			rule.set(field, guards)
 		for step in rule.steps:
-			if step.verb == &"wait_until" and not step.args.is_empty():
-				var condition := ExprText.parse_literal(step.args[0])
-				if condition.ok and typeof(condition.value) in [TYPE_STRING, TYPE_STRING_NAME]:
-					var renamed := GuardExpression.rename_key(String(condition.value), old, new_key)
-					step.args[0] = ExprText.format_literal(StringName(renamed))
-			var verb := VerbCatalog.find(data.catalog, step.verb)
-			var params: Array = verb.get("args", [])
-			for index in params.size():
-				if params[index]["name"] != "key":
-					continue
-				var expression: String = step.args[index] if index < step.args.size() else params[index]["default"]
-				if expression == '&"%s"' % old:
-					VerbCatalog.set_arg(data, step, index, '&"%s"' % new_key)
+			_rename_step_keys(data, step, old, new_key)
+
+static func _rename_step_keys(data: GraphDraft, step: StepData, old: String,
+		new_key: String) -> void:
+	if step.verb == &"wait_until" and not step.args.is_empty():
+		var condition := ExprText.parse_literal(step.args[0])
+		if condition.ok and typeof(condition.value) in [TYPE_STRING, TYPE_STRING_NAME]:
+			var renamed := GuardExpression.rename_key(String(condition.value), old, new_key)
+			step.args[0] = ExprText.format_literal(StringName(renamed))
+	var verb := VerbCatalog.find(data.catalog, step.verb)
+	var params: Array = verb.get("args", []) if not verb.is_empty() else []
+	for index in params.size():
+		if params[index]["name"] != "key":
+			continue
+		var expression: String = step.args[index] if index < step.args.size() else params[index]["default"]
+		if expression == '&"%s"' % old:
+			VerbCatalog.set_arg(data, step, index, '&"%s"' % new_key)
+	for index in step.branch_conditions.size():
+		step.branch_conditions[index] = GuardExpression.rename_key(step.branch_conditions[index], old, new_key)
+	for branch in step.parallel_branches:
+		for child: StepData in branch:
+			_rename_step_keys(data, child, old, new_key)

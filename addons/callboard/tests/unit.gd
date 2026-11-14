@@ -524,6 +524,8 @@ func _initialize() -> void:
 
 	ok = await _test_restart() and ok
 	ok = await _test_queue() and ok
+	ok = await _test_conditional_groups() and ok
+	ok = await _test_random_groups() and ok
 	ok = _test_signal_callbacks_accept_arguments() and ok
 	ok = await _test_playback_wait_exits() and ok
 	ok = await _test_cancel_if_interrupts_a_wait() and ok
@@ -1657,6 +1659,19 @@ func _test_queue() -> bool:
 		and restored_group.parallel_branches[0][0].verb == &"say"
 		and restored_group.parallel_branches[0][1].parallel_branches[0][0].verb == &"score"
 		and restored_group.parallel_branches[1].is_empty()) and ok
+	var serialized_conditional := StepData.new()
+	serialized_conditional.verb = &"conditional"
+	serialized_conditional.branch_conditions = [&"ready", &"count >= 2", &""]
+	serialized_conditional.default_branch_index = 2
+	serialized_conditional.parallel_branches = [[], [], []]
+	var restored_conditional := StepData.from_dictionary(serialized_conditional.to_dictionary())
+	ok = _check("conditional StepData preserves guard order and the explicit default branch",
+		restored_conditional.branch_conditions.size() == 3
+		and restored_conditional.branch_conditions[0] == &"ready"
+		and restored_conditional.branch_conditions[1] == &"count >= 2"
+		and restored_conditional.branch_conditions[2].is_empty()
+		and restored_conditional.default_branch_index == 2
+		and restored_conditional.parallel_branches.size() == 3) and ok
 	var parallel_order: Array[String] = []
 	var parallel_rule := Rule.new(&"parallel_join", &"parallel_start")
 	var slow_branch: Array[Step] = [Step.new(func(_c: Dictionary) -> void:
@@ -1706,6 +1721,159 @@ func _test_queue() -> bool:
 	clock_tick.emit()
 	return _check("deactivation drops pending triggers and leaves later runs intact",
 		received == [1, 2, 3, 4, 8, 9]) and ok
+
+func _test_conditional_groups() -> bool:
+	var bb := Blackboard.new()
+	bb.define(&"ready", &"local", false)
+	bb.define(&"count", &"local", 0)
+	var engine := RuleEngine.new(bb, {}, Callable())
+	var chosen: Array[String] = []
+	var conditional := Step.conditional([&"ready", &"count >= 2", &""], [
+		[Step.new(func(_c: Dictionary) -> void: chosen.append("ready"))],
+		[Step.new(func(_c: Dictionary) -> void: chosen.append("quota"))],
+		[Step.new(func(_c: Dictionary) -> void: chosen.append("default"))],
+	], 2)
+	var rule := Rule.new(&"conditional_route", &"choose")
+	rule.steps = [conditional]
+	engine.rules = [rule]
+	var selections: Array[String] = []
+	engine.trace_event.connect(func(entry: Dictionary) -> void:
+		if entry.get("kind") == "branch_selected":
+			selections.append(entry.get("detail", "")))
+	bb.write(&"ready", true)
+	engine.fire(&"choose")
+	await process_frame
+	await process_frame
+	bb.write(&"ready", false)
+	bb.write(&"count", 3)
+	engine.fire(&"choose")
+	await process_frame
+	await process_frame
+	bb.write(&"count", 0)
+	engine.fire(&"choose")
+	await process_frame
+	await process_frame
+	var selected_expected := chosen == ["ready", "quota", "default"] \
+		and selections == ["branch=1; ready", "branch=2; count >= 2", "branch=3; Otherwise"]
+	var missing_default := Step.conditional([&"ready"], [[Step.new()]], -1)
+	var invalid_rule := Rule.new(&"missing_default", &"choose")
+	invalid_rule.steps = [missing_default]
+	var validation := RuleValidator.check([invalid_rule], bb, [&"choose"], [], {})
+	var wrong_type_group := Step.conditional([&"count == true", &""], [[], []], 1)
+	var wrong_type_rule := Rule.new(&"wrong_condition_type", &"choose")
+	wrong_type_rule.steps = [wrong_type_group]
+	var type_validation := RuleValidator.check([wrong_type_rule], bb, [&"choose"], [], {})
+	var definition := StageDefinition.new()
+	definition.external_calls = PackedStringArray(["choose"])
+	var authored_rule := RuleData.new()
+	authored_rule.id = &"authored_conditional"
+	authored_rule.trigger = &"choose"
+	var authored_group := StepData.new()
+	authored_group.verb = &"conditional"
+	authored_group.branch_conditions = [&"ready", &""]
+	authored_group.default_branch_index = 1
+	var first_branch := StepData.new()
+	first_branch.verb = &"score"
+	first_branch.args = PackedStringArray(["1"])
+	var default_branch := StepData.new()
+	default_branch.verb = &"score"
+	default_branch.args = PackedStringArray(["2"])
+	authored_group.parallel_branches = [[first_branch], [default_branch]]
+	authored_rule.steps = [authored_group]
+	definition.rules = [authored_rule]
+	var compiled_stage := Stage.new()
+	compiled_stage.definition = definition
+	compiled_stage.build()
+	var resource_compiles := compiled_stage.graph_errors.is_empty() \
+		and compiled_stage.engine.rules[0].steps[0].verb == &"conditional"
+	compiled_stage.free()
+	return _check("conditional groups execute the first matching branch or Otherwise and trace the selection",
+		selected_expected) and _check("conditional groups validate defaults and guard value types",
+		validation.any(func(problem: String) -> bool: return "Otherwise branch" in problem)
+		and type_validation.any(func(problem: String) -> bool: return "numeric Blackboard key and literal" in problem)) \
+		and _check("StageDefinition compiles serialized conditional branches into runtime steps",
+		resource_compiles)
+
+func _test_random_groups() -> bool:
+	var state: Dictionary = {}
+	var selected: Array[String] = []
+	var bb := Blackboard.new()
+	var engine := RuleEngine.new(bb, {}, Callable())
+	engine.random_group_states = state
+	var noop := func(_context: Dictionary) -> void: pass
+	var random_step := Step.random_choice([
+		[Step.new(noop)], [Step.new(noop)], [Step.new(noop)],
+	], PackedFloat32Array([1.0, 1.0, 1.0]), 4921, &"test_group")
+	var rule := Rule.new(&"random_test", &"choose")
+	rule.steps = [random_step]
+	engine.rules = [rule]
+	engine.trace_event.connect(func(entry: Dictionary) -> void:
+		if entry.get("kind") == "branch_selected":
+			selected.append(entry.get("detail", "")))
+	for _i in 12:
+		engine.fire(&"choose")
+		await process_frame
+		await process_frame
+	var repeat_selected: Array[String] = []
+	var repeat_engine := RuleEngine.new(Blackboard.new(), {}, Callable())
+	var repeat_step := Step.random_choice([
+		[Step.new(noop)], [Step.new(noop)], [Step.new(noop)],
+	], PackedFloat32Array([1.0, 1.0, 1.0]), 4921, &"test_group")
+	var repeat_rule := Rule.new(&"random_test", &"choose")
+	repeat_rule.steps = [repeat_step]
+	repeat_engine.random_group_states = {}
+	repeat_engine.rules = [repeat_rule]
+	repeat_engine.trace_event.connect(func(entry: Dictionary) -> void:
+		if entry.get("kind") == "branch_selected":
+			repeat_selected.append(entry.get("detail", "")))
+	for _i in 12:
+		repeat_engine.fire(&"choose")
+		await process_frame
+		await process_frame
+	var weighted := Step.random_choice([[], [], []], PackedFloat32Array([0.0, 5.0, 0.0]),
+		77, &"weighted_test", 1)
+	var weighted_rule := Rule.new(&"weighted_test", &"choose")
+	weighted_rule.steps = [weighted]
+	var weighted_validation := RuleValidator.check([weighted_rule], Blackboard.new(),
+		[&"choose"], [], {})
+	var random_data := StepData.new()
+	random_data.verb = &"random"
+	random_data.group_id = &"stable_authoring_id"
+	random_data.random_seed = -31
+	random_data.random_selection = 1
+	random_data.branch_weights = PackedFloat32Array([0.0, 4.5])
+	random_data.parallel_branches = [[], []]
+	var random_round_trip := StepData.from_dictionary(random_data.to_dictionary())
+	var weighted_selected: Array[String] = []
+	var weighted_engine := RuleEngine.new(Blackboard.new(), {}, Callable())
+	weighted_engine.random_group_states = {}
+	weighted_engine.rules = [weighted_rule]
+	weighted_engine.trace_event.connect(func(entry: Dictionary) -> void:
+		if entry.get("kind") == "branch_selected":
+			weighted_selected.append(entry.get("detail", "")))
+	weighted_engine.fire(&"choose")
+	await process_frame
+	await process_frame
+	var store := StageStateStore.new()
+	var first_stage := Stage.new()
+	store.attach(first_stage, &"random_reload_test")
+	first_stage.random_group_states[&"random:test_group"] = {"seed": 4921, "state": 123456}
+	var retained_state: Dictionary = store.state_for(&"random_reload_test")["random_groups"]
+	first_stage.free()
+	var reloaded_stage := Stage.new()
+	var restored: bool = store.attach(reloaded_stage, &"random_reload_test") \
+		and reloaded_stage.random_group_states.get(&"random:test_group", {}).get("state", -1) == 123456
+	reloaded_stage.free()
+	return _check("seeded random groups replay the same uniform branch sequence", selected == repeat_selected) \
+		and _check("random group resources preserve their seed, mode, weights, and stable ID",
+			random_round_trip.group_id == &"stable_authoring_id"
+			and random_round_trip.random_seed == -31 and random_round_trip.random_selection == 1
+			and random_round_trip.branch_weights == PackedFloat32Array([0.0, 4.5])) \
+		and _check("weighted random groups accept zero-weight paths and validate their configuration",
+		weighted_validation.is_empty() and weighted.random_selection == 1
+		and weighted_selected == ["branch=2; weighted"]) \
+		and _check("managed Stage reload restores per-group random state", restored
+		and retained_state.get(&"random:test_group", {}).get("state", -1) == 123456)
 
 func _check(label: String, condition: bool) -> bool:
 	print(("  ok   " if condition else "  FAIL ") + label)

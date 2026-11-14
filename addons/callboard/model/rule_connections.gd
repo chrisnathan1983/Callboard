@@ -16,7 +16,7 @@ static func ids(data: GraphDraft) -> Array:
 			names[rule.trigger] = true
 		if rule.emit != "":
 			names[RELAY_PREFIX + rule.emit] = true
-		for step in rule.steps:
+		for step: StepData in _flatten_steps(rule.steps):
 			if step.verb == &"wait_for_call" and not step.args.is_empty():
 				var event := ExprText.parse_literal(step.args[0])
 				if event.ok and typeof(event.value) in [TYPE_STRING, TYPE_STRING_NAME] and String(event.value).begins_with(RELAY_PREFIX) and event.value != RELAY_PREFIX:
@@ -36,8 +36,9 @@ static func impact(data: GraphDraft, id: String) -> PackedStringArray:
 			lines.append("%s — trigger" % rule.id)
 		if not relay.is_empty() and rule.emit == relay:
 			lines.append("%s — rule output" % rule.id)
-		for i in rule.steps.size():
-			var step: StepData = rule.steps[i]
+		var steps := _flatten_steps(rule.steps)
+		for i in steps.size():
+			var step: StepData = steps[i]
 			if _waits_for(step, id):
 				lines.append("%s - step %d (wait_for_call)" % [rule.id, i + 1])
 			if not relay.is_empty() and data.relay_for(step) == relay:
@@ -164,9 +165,17 @@ static func _replace_references(data: GraphDraft, old_id: String, new_id: String
 	for rule in data.rules:
 		if rule.trigger == old_id:
 			rule.trigger = new_id
-		for step in rule.steps:
+		for step: StepData in _flatten_steps(rule.steps):
 			if _waits_for(step, old_id):
 				step.args[0] = ExprText.format_literal(StringName(new_id))
+
+static func _flatten_steps(steps: Array) -> Array[StepData]:
+	var result: Array[StepData] = []
+	for step: StepData in steps:
+		result.append(step)
+		for branch in step.parallel_branches:
+			result.append_array(_flatten_steps(branch))
+	return result
 
 static func _waits_for(step: StepData, event: String) -> bool:
 	if step.verb != &"wait_for_call" or step.args.is_empty():
