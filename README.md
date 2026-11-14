@@ -131,6 +131,24 @@ Use expressions such as `payload.action == "confirm"`, `payload.accepted == true
 
 Use the built-in `add_var` step to update numeric Blackboard counters. It reads the current value when it runs, so multiple Calls accumulate and later steps see the new value. Integer keys accept whole-number positive or negative deltas; float keys accept fractional deltas. Saved counters continue from the values in your Stage's injected save dictionary.
 
+### Declare gameplay Blackboard writers
+
+Use `StageDefinition.external_writers` to declare outputs supplied by gameplay. Each `BlackboardWriterData` names a Blackboard key, a source label, and the output type. The editor treats these as producers when checking guards and reports undeclared keys or type mismatches. Existing `external_vars` entries remain supported as anonymous producers.
+
+For scene components, add a `BlackboardWriter` node and fill its `callboard_writers` list. Call `publish(key, value)` for continuous values or discrete state changes; the write goes through `Stage.write_var()` and the live Blackboard view shows the source label. A custom Stage can instead override `_declare_external_writers()` and call `register_external_writer()`. `fire_relay_once()` also records its `source_id` as the latch writer. Use Calls for discrete events that should start rules; use Blackboard writes for current state that guards should observe.
+
+For a saved per-gift flag, a `GiftTarget` can declare its output on the Stage and write through the typed wrapper:
+
+```gdscript
+func _declare_external_writers() -> void:
+    register_external_writer(&"delivered_robot", &"gift_target:robot", "bool")
+
+func mark_delivered() -> void:
+    write_var(&"delivered_robot", true, &"gift_target:robot")
+```
+
+Define `delivered_robot` as a saved Boolean in the Blackboard. Pair it with a saved `gifts_delivered` counter and the graph's `add_var` step when a house needs aggregate completion progress.
+
 The built-in staging verbs include timed `light`, audio playback, rotation, `AnimationPlayer` playback and posing, material-safe `flash`/`jump`, and `gameplay_event`. Waiting options are explicit for audio, rotation, and animation playback; those waits are released when a Stage deactivates. Connect to `stage.gameplay_event` to handle authored IDs and argument dictionaries in your game. Existing `stage.scored` and `score(points)` behavior remains available. See the [Staging verbs API](docs/api.md#built-in-verbs) for parameter and validation details.
 
 To add a Blackboard numeric guard, enter a comparison such as `score >= 10` below Requires, Forbids, or Cancel If and press **Add**. Supported operators are `>`, `>=`, `<`, `<=`, `==`, and `!=`.

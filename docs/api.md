@@ -43,12 +43,13 @@ When `SceneTree.paused` is true, rule delays, repeat ticks, timed lights, and th
 | `deactivate() -> void` | Cancels current runs and queued triggers, releases waits registered with `RuleEngine.interruptible()`, and clears pending diagnostics. Stage exit also cancels runs. |
 | `fire(event: StringName, payload := {}) -> void` | Dispatches a Call ID such as `deliver` or a relay event ID such as `relay:calm_guard`. The optional dictionary is the event payload available to guards and steps. The engine runs any asynchronous work. |
 | `get_var(key: StringName) -> Variant` | Reads the resolved Blackboard value. An unknown key returns `null`. |
-| `write_var(key: StringName, value: Variant) -> void` | Writes a declared key using its Variant type. Integer inputs to float keys are converted to floats. |
+| `write_var(key: StringName, value: Variant, writer: StringName = &"") -> void` | Writes a declared key using its Variant type. Integer inputs to float keys are converted to floats. An optional writer label appears in the live Blackboard view. |
 | `is_set(key: StringName) -> bool` | Returns the value's truthiness. |
 | `define_local(key, default_val = false, state_key = &"")` | Defines a key on the runtime Blackboard. Its initial value is rebuilt on each Stage load. |
 | `define_saved(key, default_val = false, state_key = &"")` | Defines a key backed by `saved_vars`. The optional stable key selects the entry in the save dictionary. |
 | `has_fired(rule_id: StringName) -> bool` | Checks whether a rule has a one-shot latch. Pass the current rule ID after a rename. |
 | `fire_relay_once(relay, latch, source_id, source_event) -> bool` | Uses a declared Boolean Blackboard key as a latch. If it is false, writes true, emits `rule_fired(source_id, source_event)`, then dispatches `relay:<relay>`. Returns false for an empty relay, an invalid latch key, or an already set latch. Pass the bare relay name. |
+| `register_external_writer(key, source = &"gameplay", value_type = "Variant") -> void` | Declares a gameplay producer before validation. Supported explicit types are `bool`, `int`, `float`, `String`, and `StringName`; `Variant` leaves type compatibility to runtime writes. |
 | `check() -> Array[String]` | Runs the rule validator on the built Stage. |
 
 ### Typed event payloads
@@ -80,6 +81,7 @@ Connect to `stage.gameplay_event` after loading the Stage. The addon emits the a
 | --- | --- |
 | `_build_props() -> void` | Create or bind props before rule steps are compiled. |
 | `_build_blackboard() -> void` | Define or initialize script-owned keys after authored defaults are applied. |
+| `_declare_external_writers() -> void` | Call `register_external_writer()` for outputs provided by Stage gameplay code. Runs after authored keys are applied and before graph validation. |
 | `_restore_state() -> void` | Restore scene presentation after the graph is built. The demo uses this to restore the guard's position and reward visibility. |
 | `_make_verbs(context: StepContext) -> CoreVerbs` | Return the verb factory. The default is `StagingVerbs.new(context)`. Put game-specific effects and Blackboard key defaults in a Stage-specific subclass. |
 
@@ -96,6 +98,7 @@ Use `@tool` on the Stage script and custom verb factory so Callboard can analyze
 | `external_calls` | Events supplied by gameplay. Use bare IDs for Calls and `relay:<name>` IDs for external relays. Include `arrive` when using that lifecycle trigger. |
 | `call_positions` | Saved graph positions keyed by external event ID. |
 | `external_vars` | Declared Blackboard keys that gameplay writes. This tells validation which values have a writer outside the graph. |
+| `external_writers` | `BlackboardWriterData` resources describing key, source label, and output type for typed gameplay producers. These declarations satisfy guard producer checks and are checked against the Blackboard schema. |
 | `variables`, `rules`, `groups` | Authored subresources. Rule steps are stored with the rule. |
 
 Use the generated `.tscn` when loading a Stage that relies on scene-assigned nodes. `StageDefinition.instantiate()` creates a Stage from its script and assigns the definition. Find working examples in [Stage 01](../demo/stages/stage_01/) and the [scene-assigned prop fixture](../addons/callboard/tests/fixtures/assigned_prop_stage.tscn).
@@ -113,7 +116,7 @@ Step arguments and delays are evaluated at graph compilation using Godot's [Expr
 | `has(key)`, `is_set(key)` | Test whether a key is declared or whether its value is truthy. |
 | `alias(old_key, new_key)`, `resolve_key(key)` | Support renamed keys. Callboard records aliases when it renames authored variables. |
 
-The `changed(key, value)` signal is forwarded as `Stage.var_changed`. Use the write methods when gameplay changes a value so validation and notifications apply.
+The `changed(key, value)` signal is forwarded as `Stage.var_changed`. Use the write methods when gameplay changes a value so validation and notifications apply. `BlackboardWriter` is a scene component with an exported `callboard_writers` list and a `publish(key, value)` method; the Stage collects its declarations during editor analysis and runtime setup. Custom scene nodes may expose the same property. The live Blackboard shows the most recent non-empty writer label for each key.
 
 ## TriggerArea
 

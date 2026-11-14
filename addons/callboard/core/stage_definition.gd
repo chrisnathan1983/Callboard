@@ -16,6 +16,8 @@ static var _string_token_pattern: RegEx
 ## Canvas positions for external event nodes, keyed by event ID.
 @export var call_positions: Dictionary = {}
 @export var external_vars := PackedStringArray()
+## Typed external Blackboard producers. `external_vars` remains supported as an anonymous declaration.
+@export var external_writers: Array[BlackboardWriterData] = []
 @export var variables: Array = []
 @export var rules: Array = []
 @export var groups: Array = []
@@ -127,6 +129,13 @@ func apply_blackboard(stage: Stage) -> void:
 	_migrate()
 	stage.external_calls.assign(external_calls)
 	stage.external_vars.assign(external_vars)
+	stage.external_writers.clear()
+	for writer: BlackboardWriterData in external_writers:
+		if writer != null:
+			var copy := writer.duplicate_data()
+			if copy.source.is_empty():
+				copy.source = &"gameplay"
+			stage.external_writers.append(copy)
 	stage.payload_schema = payload_schema()
 	if stage.engine != null:
 		stage.engine.payload_schema = stage.payload_schema
@@ -137,6 +146,7 @@ func apply_blackboard(stage: Stage) -> void:
 			stage.define_local(variable.key, variable.default_value, variable.state_key)
 		for alias in variable.aliases:
 			stage.bb.alias(alias, variable.key)
+	stage.collect_scene_blackboard_writers()
 
 func payload_schema() -> Dictionary:
 	_migrate()

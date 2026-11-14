@@ -12,6 +12,7 @@ var variables: Array[VariableData] = []
 var groups: Array[GroupData] = []
 var external_calls: Array[String] = []
 var external_vars: Array[String] = []
+var external_writers: Array[BlackboardWriterData] = []
 var payload_fields: Array[PayloadFieldData] = []
 var call_positions: Dictionary = {}
 var catalog: Array = []
@@ -50,6 +51,7 @@ func snapshot() -> Dictionary:
 		"groups": groups.map(func(group: GroupData) -> Dictionary: return group.to_dictionary()),
 		"external_calls": external_calls.duplicate(),
 		"external_vars": external_vars.duplicate(),
+		"external_writers": external_writers.map(func(writer: BlackboardWriterData) -> Dictionary: return writer.to_dictionary()),
 		"payload_fields": payload_fields.map(func(field: PayloadFieldData) -> Dictionary: return field.to_dictionary()),
 		"call_positions": call_positions.duplicate(true),
 	}
@@ -60,6 +62,7 @@ func restore(snapshot_data: Dictionary) -> void:
 	groups.assign(snapshot_data["groups"].map(GroupData.from_dictionary))
 	external_calls.assign(snapshot_data["external_calls"])
 	external_vars.assign(snapshot_data["external_vars"])
+	external_writers.assign(snapshot_data.get("external_writers", []).map(BlackboardWriterData.from_dictionary))
 	payload_fields.assign(snapshot_data.get("payload_fields", []).map(PayloadFieldData.from_dictionary))
 	call_positions = snapshot_data["call_positions"].duplicate(true)
 	step_metadata.clear()

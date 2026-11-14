@@ -191,7 +191,10 @@ func refresh_live(stage: Stage) -> void:
 	for key in _live_labels:
 		var value: Variant = stage.get_var(StringName(key))
 		var l: Label = _live_labels[key]
+		var writer: StringName = stage.bb.last_writers.get(StringName(key), &"")
 		l.text = "Live: " + str(value)
+		if not writer.is_empty():
+			l.text += "  ·  Writer: " + String(writer)
 		l.tooltip_text = l.text
 		Style.tint(l, Style.SUCCESS if value is bool and value else Style.TEXT)
 	var latched: PackedStringArray = []

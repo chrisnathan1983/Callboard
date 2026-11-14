@@ -28,6 +28,69 @@ func _initialize() -> void:
 
 	var bb := Blackboard.new()
 	bb.define(&"lamp_on", &"local", false)
+	var scene_writer := BlackboardWriterData.new()
+	scene_writer.key = &"lamp_on"
+	scene_writer.source = &"yard_sensor"
+	scene_writer.value_type = "bool"
+	var externally_guarded := Rule.new(&"external_guard", &"sensor_changed")
+	externally_guarded.requires = [&"lamp_on"]
+	externally_guarded.steps.append(Step.new(func(_context: Dictionary) -> void: pass))
+	var external_writer_problems := RuleValidator.check(
+		[externally_guarded], bb, [&"sensor_changed"], [], {}, [scene_writer])
+	ok = _check("declared external Blackboard writers satisfy guard producer analysis",
+		not external_writer_problems.any(func(problem: String) -> bool: return "nothing sets it" in problem)) and ok
+	var wrong_writer := scene_writer.duplicate_data()
+	wrong_writer.value_type = "String"
+	external_writer_problems = RuleValidator.check(
+		[externally_guarded], bb, [&"sensor_changed"], [], {}, [wrong_writer])
+	ok = _check("external Blackboard writer declarations report incompatible output types",
+		external_writer_problems.any(func(problem: String) -> bool: return "outputs String" in problem)) and ok
+	var missing_writer := scene_writer.duplicate_data()
+	missing_writer.key = &"missing_output"
+	external_writer_problems = RuleValidator.check(
+		[externally_guarded], bb, [&"sensor_changed"], [], {}, [missing_writer])
+	ok = _check("external Blackboard writer declarations reject undeclared keys",
+		external_writer_problems.any(func(problem: String) -> bool: return "not declared on the Blackboard" in problem)) and ok
+	bb.write(&"lamp_on", true, &"yard_sensor")
+	ok = _check("Blackboard retains the source label of the latest accepted write",
+		bb.last_writers.get(&"lamp_on") == &"yard_sensor") and ok
+	var writer_definition := StageDefinition.new()
+	writer_definition.external_calls = PackedStringArray(["sensor_changed"])
+	var sensor_value := VariableData.new()
+	sensor_value.key = &"sensor_active"
+	sensor_value.default_value = false
+	var output_value := VariableData.new()
+	output_value.key = &"lamp_on"
+	output_value.default_value = false
+	writer_definition.variables = [sensor_value, output_value]
+	var external_rule_data := RuleData.new()
+	external_rule_data.id = &"sensor_guard"
+	external_rule_data.trigger = &"sensor_changed"
+	external_rule_data.requires = PackedStringArray(["sensor_active"])
+	var external_rule_step := StepData.new()
+	external_rule_step.verb = &"set_var"
+	external_rule_step.args = PackedStringArray(['&"lamp_on"', "true"])
+	external_rule_data.steps.append(external_rule_step)
+	writer_definition.rules = [external_rule_data]
+	var scene_output := BlackboardWriterData.new()
+	scene_output.key = &"sensor_active"
+	scene_output.value_type = "bool"
+	var writer_component := BlackboardWriter.new()
+	writer_component.name = "yard_sensor"
+	writer_component.callboard_writers.append(scene_output)
+	var writer_stage := Stage.new()
+	writer_stage.definition = writer_definition
+	writer_stage.add_child(writer_component)
+	root.add_child(writer_stage)
+	writer_stage.build()
+	var stage_writer_diagnostics := writer_stage.check()
+	writer_component.publish(&"sensor_active", true)
+	ok = _check("scene BlackboardWriter declarations feed editor/runtime guard validation and publish typed values",
+		writer_stage.external_writers.size() == 1
+		and not stage_writer_diagnostics.any(func(problem: String) -> bool: return "nothing sets it" in problem)
+		and writer_stage.get_var(&"sensor_active") and writer_stage.bb.last_writers.get(&"sensor_active") == &"yard_sensor") and ok
+	root.remove_child(writer_stage)
+	writer_stage.free()
 	var undeclared_changes := [0]
 	bb.changed.connect(func(_key: StringName, _value: Variant) -> void: undeclared_changes[0] += 1)
 	bb.write(&"missing", true)
@@ -118,11 +181,16 @@ func _initialize() -> void:
 	var relay_stage := Stage.new()
 	relay_stage.build()
 	relay_stage.define_local(&"wrong_latch_type", 0)
+	relay_stage.define_saved(&"sensor_latched", false)
+	relay_stage.register_external_writer(&"sensor_latched", &"yard_sensor", "bool")
 	var relay_emitted: Array[StringName] = []
 	relay_stage.rule_fired.connect(func(id: StringName, _event: StringName) -> void: relay_emitted.append(id))
 	ok = _check("a relay latch requires a Boolean Blackboard key",
 		not relay_stage.fire_relay_once(&"ready", &"wrong_latch_type", &"source", &"interact")
 		and relay_emitted.is_empty() and relay_stage.get_var(&"wrong_latch_type") == 0) and ok
+	ok = _check("external relay latch writes retain their gameplay source",
+		relay_stage.fire_relay_once(&"ready", &"sensor_latched", &"yard_sensor", &"sensor_changed")
+		and relay_stage.bb.last_writers.get(&"sensor_latched") == &"yard_sensor") and ok
 	relay_stage.free()
 
 	bb.alias(&"previous_lamp_name", &"lamp_on")

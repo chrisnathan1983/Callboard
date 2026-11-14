@@ -39,6 +39,9 @@ static func rename_key(data: GraphDraft, old: String, new_key: String) -> void:
 		data.external_vars.erase(old)
 		if not data.external_vars.has(new_key):
 			data.external_vars.append(new_key)
+	for writer: BlackboardWriterData in data.external_writers:
+		if writer.key == old:
+			writer.key = StringName(new_key)
 	for rule in data.rules:
 		for field in GUARDS:
 			var guards: PackedStringArray = rule.get(field)

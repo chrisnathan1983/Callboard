@@ -36,10 +36,10 @@ Keep the readme in sync with the code.
 
 ## 5. External Blackboard writers
 
-- [ ] Add an editor-facing registration mechanism for external Blackboard writers. Let addon components and gameplay scripts declare which keys they own, including keys passed to latch helpers and per-gift saved keys owned by a `GiftTarget`. Keep existing `external_vars` declarations valid.
-- [ ] Use the same declarations in editor analysis and runtime validation. Treat declared external writes as producers, flag undeclared or incompatible keys, and keep warnings for keys with no known producer. Route actual writes through the typed Blackboard API and expose the writer source in the live debugger when available.
-- [ ] Document how scene components publish continuous or per-frame state as Blackboard values or discrete Calls. Give scripts a supported way to declare their outputs so a stage author can see where a guard's inputs come from, including how a `GiftTarget` declares and writes its saved delivered flag through the typed Blackboard API.
-- **Done when** a scene component's declared output can feed a guard without a false warning, an undeclared key is diagnosed, and an external latch appears as a writer.
+- [x] Add an editor-facing registration mechanism for external Blackboard writers. Let addon components and gameplay scripts declare which keys they own, including keys passed to latch helpers and per-gift saved keys owned by a `GiftTarget`. Keep existing `external_vars` declarations valid.
+- [x] Use the same declarations in editor analysis and runtime validation. Treat declared external writes as producers, flag undeclared or incompatible keys, and keep warnings for keys with no known producer. Route actual writes through the typed Blackboard API and expose the writer source in the live debugger when available.
+- [x] Document how scene components publish continuous or per-frame state as Blackboard values or discrete Calls. Give scripts a supported way to declare their outputs so a stage author can see where a guard's inputs come from, including how a `GiftTarget` declares and writes its saved delivered flag through the typed Blackboard API.
+- **Done when** a scene component's declared output can feed a guard without a false warning, an undeclared key is diagnosed, and an external latch appears as a writer. **Complete:** `BlackboardWriter` scene nodes expose typed declarations collected by Stage analysis and runtime setup; scripts can declare outputs with `register_external_writer()`. Validation diagnoses missing keys and type mismatches while preserving legacy `external_vars`. Typed writes track source labels in the live Blackboard, including `fire_relay_once()` latches. README/API docs show continuous values, discrete Calls, and per-gift saved Boolean declarations. Unit and editor coverage verifies guard producer detection, type diagnostics, component publishing, and latch attribution.
 
 ## 6. Stage persistence and activation
 

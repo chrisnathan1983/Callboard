@@ -18,6 +18,7 @@ var graph_errors: Array[String] = []
 ## Call IDs, external relay event IDs, and keys supplied by gameplay code.
 var external_calls: Array[StringName] = [&"arrive"]
 var external_vars: Array[StringName] = []
+var external_writers: Array[BlackboardWriterData] = []
 var payload_schema: Dictionary = {}
 
 func _ready() -> void:
@@ -32,6 +33,8 @@ func build() -> void:
 	_build_props()
 	if definition:
 		definition.apply_blackboard(self)
+	collect_scene_blackboard_writers()
+	_declare_external_writers()
 	_build_blackboard()
 	if definition:
 		graph_errors = definition.apply_graph(self)
@@ -53,6 +56,8 @@ func rebuild_for_analysis(draft: StageDefinition) -> bool:
 	definition = draft
 	_create_runtime_services()
 	definition.apply_blackboard(self)
+	collect_scene_blackboard_writers()
+	_declare_external_writers()
 	_build_blackboard()
 	graph_errors = definition.apply_graph(self)
 	return true
@@ -68,6 +73,35 @@ func _make_verbs(context: StepContext) -> CoreVerbs:
 	return StagingVerbs.new(context)
 
 func _build_props() -> void: pass
+## Declare keys written by gameplay code. Called after Blackboard definitions are applied.
+func _declare_external_writers() -> void: pass
+
+## Register a typed external producer. Call from `_declare_external_writers()` or a
+## scene component's `callboard_writers` export so editor analysis can see the output.
+func register_external_writer(key: StringName, source: StringName = &"gameplay", value_type := "Variant") -> void:
+	var writer := BlackboardWriterData.new()
+	writer.key = key
+	writer.source = source
+	writer.value_type = value_type
+	for existing: BlackboardWriterData in external_writers:
+		if existing.key == writer.key and existing.source == writer.source:
+			existing.value_type = writer.value_type
+			return
+	external_writers.append(writer)
+
+## Gather declarations from scene nodes that export `callboard_writers`.
+func collect_scene_blackboard_writers() -> void:
+	for node in find_children("*", "Node", true, false):
+		for property: Dictionary in node.get_property_list():
+			if property.name != "callboard_writers":
+				continue
+			var declarations: Variant = node.get("callboard_writers")
+			if declarations is Array:
+				for writer: Variant in declarations:
+					if writer is BlackboardWriterData:
+						var source: StringName = writer.source if not writer.source.is_empty() else StringName(node.name)
+						register_external_writer(writer.key, source, writer.value_type)
+			break
 ## Initialize values after authored defaults and props are available.
 func _build_blackboard() -> void: pass
 ## Restore the resolved look of props from saved state without animation.
@@ -102,8 +136,13 @@ func define_local(key: StringName, default_val: Variant = false, state_key: Stri
 func get_var(key: StringName) -> Variant:
 	return bb.get_var(key)
 
-func write_var(key: StringName, value: Variant) -> void:
-	bb.write(key, value)
+func write_var(key: StringName, value: Variant, writer: StringName = &"") -> void:
+	if writer.is_empty():
+		for declaration: BlackboardWriterData in external_writers:
+			if declaration.key == bb.resolve_key(key):
+				writer = declaration.source
+				break
+	bb.write(key, value, writer)
 
 func is_set(key: StringName) -> bool:
 	return bb.is_set(key)
@@ -141,7 +180,7 @@ func fire_relay_once(relay: StringName, latch: StringName, source_id: StringName
 		return false
 	if is_set(latch):
 		return false
-	write_var(latch, true)
+	write_var(latch, true, source_id)
 	rule_fired.emit(source_id, source_event)
 	fire(StringName("relay:" + relay))
 	return true
@@ -160,7 +199,7 @@ func _event_is_known(event: StringName) -> bool:
 	return false
 
 func check() -> Array[String]:
-	var problems := RuleValidator.check(engine.rules, bb, external_calls, external_vars, payload_schema)
+	var problems := RuleValidator.check(engine.rules, bb, external_calls, external_vars, payload_schema, external_writers)
 	if verbs is StagingVerbs:
 		for rule: Rule in engine.rules:
 			for step: Step in rule.steps:

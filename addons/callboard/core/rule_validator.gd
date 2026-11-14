@@ -3,7 +3,7 @@ class_name RuleValidator extends RefCounted
 
 static func check(rules: Array[Rule], bb: Blackboard,
 		external_calls: Array[StringName], external_vars: Array[StringName],
-		payload_schema: Dictionary = {}) -> Array[String]:
+		payload_schema: Dictionary = {}, external_writers: Array[BlackboardWriterData] = []) -> Array[String]:
 	var problems: Array[String] = []
 	var emitted := {}
 	var settable := {}
@@ -15,6 +15,20 @@ static func check(rules: Array[Rule], bb: Blackboard,
 			payload_names[event_id][field_name] = payload_schema[event_id][field_name]
 	for k in external_vars:
 		settable[bb.resolve_key(k)] = true
+	for writer: BlackboardWriterData in external_writers:
+		if writer == null:
+			continue
+		var key: StringName = bb.resolve_key(writer.key)
+		if not bb.has(writer.key):
+			problems.append("external writer '%s' declares '%s', which is not declared on the Blackboard" % [writer.source, writer.key])
+			continue
+		settable[key] = true
+		var expected_type: int = writer.type_id()
+		var declared_type: int = bb.schema[key].get("type", TYPE_NIL)
+		if expected_type != TYPE_NIL and expected_type != declared_type \
+				and not (expected_type == TYPE_INT and declared_type == TYPE_FLOAT):
+			problems.append("external writer '%s' outputs %s for '%s', which is declared as %s" % [
+				writer.source, writer.value_type, writer.key, type_string(declared_type)])
 	for r in rules:
 		if seen.has(r.id):
 			problems.append("duplicate rule id '%s'" % r.id)

@@ -8,6 +8,7 @@ var local := {}
 var saved: Dictionary          # injected by the manager
 var _saved_names := {}        # saved storage key -> current Blackboard name
 var _aliases: Dictionary = {} # original Blackboard name -> current name
+var last_writers: Dictionary = {} # current Blackboard name -> most recent writer label
 
 func _init(p_saved := {}) -> void:
 	saved = p_saved
@@ -33,7 +34,7 @@ func get_var(key: StringName) -> Variant:
 	var entry: Dictionary = schema.get(key, {})
 	return saved.get(entry["state_key"]) if entry.get("scope") == &"saved" else local.get(key)
 
-func write(key: StringName, value: Variant) -> void:
+func write(key: StringName, value: Variant, writer: StringName = &"") -> void:
 	key = resolve_key(key)
 	if not schema.has(key):
 		push_error("Undeclared Blackboard key '%s'" % key)
@@ -44,6 +45,8 @@ func write(key: StringName, value: Variant) -> void:
 	if typeof(value) != entry["type"]:
 		push_warning("Blackboard write to '%s' rejected: expected type %d, got %d." % [key, entry["type"], typeof(value)])
 		return
+	if not writer.is_empty():
+		last_writers[key] = writer
 	var is_saved: bool = entry["scope"] == &"saved"
 	var values := saved if is_saved else local
 	var storage_key: StringName = entry["state_key"] if is_saved else key

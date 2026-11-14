@@ -9,7 +9,7 @@ func _init(p_context: StepContext) -> void:
 
 func set_var(key: StringName, value: Variant = true) -> Step:
 	var bb := context.bb
-	var step := Step.new(func(_c: Dictionary) -> void: bb.write(key, value))
+	var step := Step.new(func(c: Dictionary) -> void: bb.write(key, value, _rule_writer(c)))
 	step.sets = [key]
 	return step
 
@@ -26,14 +26,19 @@ func add_var(key: StringName, delta: float) -> Step:
 			if not is_equal_approx(delta, roundf(delta)):
 				push_warning("Callboard add_var skipped: fractional delta for integer key '%s'." % key)
 				return
-			bb.write(key, int(bb.get_var(key)) + int(delta))
+			bb.write(key, int(bb.get_var(key)) + int(delta), _rule_writer(_c))
 		elif key_type == TYPE_FLOAT:
-			bb.write(key, float(bb.get_var(key)) + delta)
+			bb.write(key, float(bb.get_var(key)) + delta, _rule_writer(_c))
 		else:
 			push_warning("Callboard add_var skipped: Blackboard key '%s' must be int or float." % key))
 	step.reads = [key]
 	step.sets = [key]
 	return step
+
+func _rule_writer(context_data: Dictionary) -> StringName:
+	var callboard: Dictionary = context_data.get("_callboard", {})
+	var rule: Rule = callboard.get("rule") as Rule
+	return StringName("rule:" + String(rule.id)) if rule != null else &"rule"
 
 func score(points: int) -> Step:
 	var emit_score := context.score
