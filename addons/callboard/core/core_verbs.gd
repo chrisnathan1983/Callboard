@@ -68,6 +68,45 @@ func add_var(key: StringName, delta: float) -> Step:
 	step.sets = [key]
 	return step
 
+## Invert a declared Boolean value when the step executes. The Blackboard's
+## write path owns scope-specific persistence, notifications, and attribution.
+func toggle_var(key: StringName) -> Step:
+	var bb := context.bb
+	var step := Step.new(func(c: Dictionary) -> void:
+		var resolved := bb.resolve_key(key)
+		if not bb.schema.has(resolved):
+			push_warning("Callboard toggle_var skipped: Blackboard key '%s' is not declared." % key)
+			return
+		if bb.schema[resolved].get("type", TYPE_NIL) != TYPE_BOOL:
+			push_warning("Callboard toggle_var skipped: Blackboard key '%s' must be Boolean." % key)
+			return
+		bb.write(key, not bool(bb.get_var(key)), _rule_writer(c), _dispatch_context(c)))
+	step.reads = [key]
+	step.sets = [key]
+	return step
+
+## Restore a declared Blackboard key to its authored default. All supported
+## values pass through Blackboard.write so Local, Saved, and Shared scopes keep
+## their normal persistence, change notifications, and writer attribution.
+func reset_var(key: StringName) -> Step:
+	var bb := context.bb
+	var step := Step.new(func(c: Dictionary) -> void:
+		var resolved := bb.resolve_key(key)
+		if not bb.schema.has(resolved):
+			push_warning("Callboard reset_var skipped: Blackboard key '%s' is not declared." % key)
+			return
+		var entry: Dictionary = bb.schema[resolved]
+		if not entry.has("default") or typeof(entry["default"]) != entry.get("type", TYPE_NIL):
+			push_warning("Callboard reset_var skipped: Blackboard key '%s' has an unsupported default." % key)
+			return
+		var default_value: Variant = entry["default"]
+		if default_value is Array or default_value is Dictionary:
+			default_value = default_value.duplicate(true)
+		bb.write(key, default_value, _rule_writer(c), _dispatch_context(c)))
+	step.reads = [key]
+	step.sets = [key]
+	return step
+
 ## Run the first branch whose guard matches, or the explicit default branch.
 ## Branch arrays and their steps execute in the order supplied. The RuleEngine
 ## owns branch cancellation, including Restart, Cancel If, and Stage teardown.

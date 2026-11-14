@@ -100,11 +100,25 @@ func _test_add_var_editor() -> bool:
 	var integer_delta := inspector._arg_widget(step, 1, entry["args"][1]) as SpinBox
 	step.args[0] = '&"ratio"'
 	var float_delta := inspector._arg_widget(step, 1, entry["args"][1]) as SpinBox
+	var toggle_entry := VerbCatalog.find(draft.catalog, "toggle_var")
+	var toggle_step := StepData.new()
+	toggle_step.verb = &"toggle_var"
+	toggle_step.args = PackedStringArray(['&"enabled"'])
+	var toggle_picker := inspector._arg_widget(toggle_step, 0, toggle_entry["args"][0]) as OptionButton
+	var reset_entry := VerbCatalog.find(draft.catalog, "reset_var")
+	var reset_step := StepData.new()
+	reset_step.verb = &"reset_var"
+	reset_step.args = PackedStringArray(['&"counter"'])
+	var reset_picker := inspector._arg_widget(reset_step, 0, reset_entry["args"][0]) as OptionButton
 	var ok := _check("add_var step editor offers only numeric keys and matches delta precision to the selected key",
 		key_picker != null and key_picker.item_count == 2
 		and key_picker.get_item_text(0) == "counter" and key_picker.get_item_text(1) == "ratio"
 		and integer_delta != null and integer_delta.step == 1.0
-		and float_delta != null and float_delta.step == 0.05)
+		and float_delta != null and float_delta.step == 0.05) \
+		and _check("toggle_var key picker limits choices to Boolean defaults while reset_var offers every declared key",
+			toggle_picker != null and toggle_picker.item_count == 1
+			and toggle_picker.get_item_text(0) == "enabled"
+			and reset_picker != null and reset_picker.item_count == 3)
 	inspector.free()
 	return ok
 

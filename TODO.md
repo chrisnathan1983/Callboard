@@ -110,9 +110,9 @@ The first five items retain the high priority assigned in `TODO.md`.
   - [x] Support `String` and `StringName` Blackboard equality and inequality for named states, such as `operating_mode == "standby"`. Blackboard storage already accepts string defaults.
   - [x] Keep parsing, type checking, rename/reference tracking, overlap analysis, and the guard editor in sync. Use the numeric and unknown-type rules from §1. Compound formulas remain conservative in overlap analysis when exclusivity cannot be proved.
 
-- [ ] **Add typed `toggle_var` and `reset_var`.** See [CoreVerbs](addons/callboard/core/core_verbs.gd) and [Blackboard](addons/callboard/core/blackboard.gd).
+- [x] **Add typed `toggle_var` and `reset_var`.** See [CoreVerbs](addons/callboard/core/core_verbs.gd) and [Blackboard](addons/callboard/core/blackboard.gd).
   - [x] `set_var` and `add_var` handle declared keys; the Blackboard schema retains their declared defaults.
-  - [ ] Toggle Boolean keys and reset supported keys to their declared defaults through the normal write API. Specify persistence, notification, and writer behavior for Saved, Shared, and any Session scope. Validate unsupported targets in the editor.
+  - [x] Toggle Boolean keys and reset supported keys to their declared defaults through the normal write API. Local, Saved, and Shared writes retain scope-specific persistence, notifications, and writer attribution. Session scope is tracked in §3; these verbs will continue to use the same write path when it is added. The editor restricts toggle targets to Boolean keys and validation rejects invalid keys and defaults.
 
 ## 3. State, restoration, and Stage lifecycle
 

@@ -940,6 +940,8 @@ func _arg_widget(step: StepData, i: int, param: Dictionary) -> Control:
 				for variable: VariableData in _data.variables:
 					if step.verb == &"add_var" and typeof(variable.default_value) not in [TYPE_INT, TYPE_FLOAT]:
 						continue
+					if step.verb == &"toggle_var" and typeof(variable.default_value) != TYPE_BOOL:
+						continue
 					keys.append(String(variable.key))
 				var cur_key: String = String(lit["value"]) if lit["ok"] else ""
 				if not keys.has(cur_key):

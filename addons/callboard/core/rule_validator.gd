@@ -98,6 +98,30 @@ static func check(rules: Array[Rule], bb: Blackboard,
 							problems.append("rule '%s' add_var delta must be numeric" % r.id)
 						elif target_type == TYPE_INT and delta is float and not is_equal_approx(delta, roundf(delta)):
 							problems.append("rule '%s' add_var delta for integer key '%s' must be a whole number" % [r.id, target])
+			if s.verb == &"toggle_var":
+				if s.args.is_empty():
+					problems.append("rule '%s' has a toggle_var step without a key" % r.id)
+				else:
+					var target: Variant = s.args[0]
+					if not target is StringName:
+						problems.append("rule '%s' toggle_var target must be a Blackboard key" % r.id)
+					elif not bb.has(target):
+						problems.append("rule '%s' toggle_var target '%s' is not declared on the Blackboard" % [r.id, target])
+					elif bb.schema[bb.resolve_key(target)].get("type", TYPE_NIL) != TYPE_BOOL:
+						problems.append("rule '%s' toggle_var target '%s' must be Boolean" % [r.id, target])
+			if s.verb == &"reset_var":
+				if s.args.is_empty():
+					problems.append("rule '%s' has a reset_var step without a key" % r.id)
+				else:
+					var target: Variant = s.args[0]
+					if not target is StringName:
+						problems.append("rule '%s' reset_var target must be a Blackboard key" % r.id)
+					elif not bb.has(target):
+						problems.append("rule '%s' reset_var target '%s' is not declared on the Blackboard" % [r.id, target])
+					else:
+						var entry: Dictionary = bb.schema[bb.resolve_key(target)]
+						if not entry.has("default") or typeof(entry["default"]) != entry.get("type", TYPE_NIL):
+							problems.append("rule '%s' reset_var target '%s' has an unsupported default" % [r.id, target])
 	for r in rules:
 		if r.one_shot and r.reentry != Rule.ReentryPolicy.IGNORE:
 			problems.append("rule '%s' is one-shot and must use Ignore re-entry" % r.id)

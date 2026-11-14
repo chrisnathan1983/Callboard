@@ -234,6 +234,8 @@ The default factory is [`StagingVerbs`](../core/staging_verbs.gd), which inherit
 | --- | --- | --- |
 | Core | `set_var(key, value = true)` | Write a Blackboard value. |
 | Core | `add_var(key, delta)` | Add a positive or negative numeric delta to an `int` or `float` Blackboard value when the step executes. Integer keys require a whole-number delta. |
+| Core | `toggle_var(key)` | Invert a declared Boolean Blackboard value when the step executes. Other key types are rejected by validation and skipped with a warning at runtime. |
+| Core | `reset_var(key)` | Write a declared key's authored default when the step executes. It supports any default whose Variant type matches the declaration. |
 | Core | `score(points)` | Emit a score delta. |
 | Core | `repeat_emit(interval, tick)` | Emit `relay:<tick>` every interval in seconds until the rule is cancelled. This step occupies the rule while it runs. |
 | Staging | `show_node(n, should_be_visible = true)` | Set a `Node3D`'s visibility. |
@@ -247,6 +249,8 @@ The default factory is [`StagingVerbs`](../core/staging_verbs.gd), which inherit
 | Staging | `pose_animation(player, animation, time = 0.0)` | Seek to a time in a named clip and pause there. |
 | Staging | `gameplay_event(event_id, arguments = {})` | Emit `Stage.gameplay_event` for host-owned behavior such as doors, quests, or inventory. |
 | Staging | `flash(m)`, `jump(m)` | Tint compatible `BaseMaterial3D` overrides or mesh surfaces. Materials are duplicated for the target instance; `jump` still performs its hop when no tintable material exists. |
+
+`toggle_var` and `reset_var` read the current value and write through `Blackboard.write()`. Local values remain Stage-local; Saved values update the Stage save dictionary; Shared values use the store's ordered, type-checked commit. Changed values emit the normal change notifications and record the running rule as writer. Rejected and unchanged writes retain the existing Blackboard behavior. Session scope is not implemented yet; when it is added, these verbs will continue to use the same write path.
 
 When `move_to` and `jump` overlap on the same node, the latest step controls its position. Earlier steps finish on their original schedule so their rules can continue.
 

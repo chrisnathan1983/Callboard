@@ -588,6 +588,7 @@ func _initialize() -> void:
 	ok = _test_shared_write_order() and ok
 	ok = _test_emit_relay() and ok
 	ok = _test_runtime_step_inputs() and ok
+	ok = await _test_blackboard_toggle_reset() and ok
 	ok = await _test_authored_waits() and ok
 	ok = _test_on_change_triggers() and ok
 	ok = await _test_dispatch_limits_and_ancestry() and ok
@@ -822,6 +823,130 @@ func _test_emit_relay() -> bool:
 		and _check("emit_relay payload mappings validate source and destination schema types",
 		valid_types and mismatch_reported) \
 		and _check("immediate relay cycles carry ancestry into the engine depth limit", cycle_stopped[0]))
+
+func _test_blackboard_toggle_reset() -> bool:
+	var saved_values := {&"saved_reset": true}
+	var local_bb := Blackboard.new(saved_values)
+	local_bb.define(&"local_flag", &"local", false)
+	local_bb.define(&"saved_toggle", &"saved", false)
+	local_bb.define(&"saved_reset", &"saved", false)
+	local_bb.define(&"counter", &"local", 7)
+	local_bb.define(&"label", &"local", "default")
+	local_bb.define(&"items", &"local", [1, 2])
+	local_bb.write(&"counter", 10, &"setup")
+	local_bb.write(&"label", "changed", &"setup")
+	local_bb.write(&"items", [9], &"setup")
+	var engine := RuleEngine.new(local_bb, {}, Callable())
+	var verbs := CoreVerbs.new(StepContext.new(local_bb, engine, null, Callable()))
+	var local_toggle := verbs.toggle_var(&"local_flag")
+	local_toggle.verb = &"toggle_var"
+	local_toggle.args = [&"local_flag"]
+	var toggle_saved := verbs.toggle_var(&"saved_toggle")
+	toggle_saved.verb = &"toggle_var"
+	toggle_saved.args = [&"saved_toggle"]
+	var reset_saved := verbs.reset_var(&"saved_reset")
+	reset_saved.verb = &"reset_var"
+	reset_saved.args = [&"saved_reset"]
+	var reset_counter := verbs.reset_var(&"counter")
+	reset_counter.verb = &"reset_var"
+	reset_counter.args = [&"counter"]
+	var reset_label := verbs.reset_var(&"label")
+	reset_label.verb = &"reset_var"
+	reset_label.args = [&"label"]
+	var reset_items := verbs.reset_var(&"items")
+	reset_items.verb = &"reset_var"
+	reset_items.args = [&"items"]
+	var local_rule := Rule.new(&"state_ops", &"state_ops")
+	local_rule.steps = [local_toggle, toggle_saved, reset_saved, reset_counter, reset_label, reset_items]
+	engine.rules = [local_rule]
+	var changes: Array[Dictionary] = []
+	local_bb.value_changed.connect(func(key: StringName, previous: Variant, value: Variant,
+			scope: StringName, writer: StringName, _dispatch: Dictionary) -> void:
+		changes.append({"key": key, "previous": previous, "value": value,
+			"scope": scope, "writer": writer}))
+	engine.fire(&"state_ops")
+	await process_frame
+	var local_state_ok: bool = local_bb.get_var(&"local_flag") == true \
+		and local_bb.get_var(&"saved_toggle") == true \
+		and local_bb.get_var(&"saved_reset") == false \
+		and saved_values[&"saved_toggle"] == true and saved_values[&"saved_reset"] == false \
+		and local_bb.get_var(&"counter") == 7 \
+		and local_bb.get_var(&"label") == "default" \
+		and local_bb.get_var(&"items") == [1, 2]
+	var writer_and_scope_ok: bool = local_bb.last_writers.get(&"local_flag") == &"rule:state_ops" \
+		and local_bb.last_writers.get(&"saved_toggle") == &"rule:state_ops" \
+		and local_bb.last_writers.get(&"saved_reset") == &"rule:state_ops" \
+		and changes.any(func(change: Dictionary) -> bool:
+			return change["key"] == &"saved_reset" and change["scope"] == &"saved" \
+			and change["writer"] == &"rule:state_ops") \
+		and local_toggle.reads == [&"local_flag"] and local_toggle.sets == [&"local_flag"] \
+		and reset_counter.reads == [&"counter"] and reset_counter.sets == [&"counter"]
+	var reset_only_engine := RuleEngine.new(local_bb, {}, Callable())
+	var reset_only := CoreVerbs.new(StepContext.new(local_bb, reset_only_engine, null, Callable())).reset_var(&"saved_reset")
+	reset_only.verb = &"reset_var"
+	reset_only.args = [&"saved_reset"]
+	var reset_only_rule := Rule.new(&"reset_only", &"reset_only")
+	reset_only_rule.steps = [reset_only]
+	reset_only_engine.rules = [reset_only_rule]
+	var before_noop_reset := changes.filter(func(change: Dictionary) -> bool:
+		return change["key"] == &"saved_reset").size()
+	reset_only_engine.fire(&"reset_only")
+	await process_frame
+	var unchanged_reset_quiet := changes.filter(func(change: Dictionary) -> bool:
+		return change["key"] == &"saved_reset").size() == before_noop_reset
+
+	var store := StageStateStore.new()
+	var shared_source := Blackboard.new({}, store.shared_values)
+	var shared_receiver := Blackboard.new({}, store.shared_values)
+	shared_source.define(&"shared_flag", &"shared", false, &"reset_test_flag")
+	shared_receiver.define(&"shared_flag", &"shared", false, &"reset_test_flag")
+	store.register_blackboard(shared_source)
+	store.register_blackboard(shared_receiver)
+	shared_source.write(&"shared_flag", true, &"setup")
+	var shared_engine := RuleEngine.new(shared_source, {}, Callable())
+	var shared_verbs := CoreVerbs.new(StepContext.new(shared_source, shared_engine, null, Callable()))
+	var reset_shared := shared_verbs.reset_var(&"shared_flag")
+	reset_shared.verb = &"reset_var"
+	reset_shared.args = [&"shared_flag"]
+	var toggle_shared := shared_verbs.toggle_var(&"shared_flag")
+	toggle_shared.verb = &"toggle_var"
+	toggle_shared.args = [&"shared_flag"]
+	var shared_rule := Rule.new(&"shared_state_ops", &"shared_state_ops")
+	shared_rule.steps = [reset_shared, toggle_shared]
+	shared_engine.rules = [shared_rule]
+	var receiver_changes: Array = []
+	shared_receiver.value_changed.connect(func(key: StringName, _previous: Variant, value: Variant,
+			scope: StringName, writer: StringName, _dispatch: Dictionary) -> void:
+		if key == &"shared_flag":
+			receiver_changes.append({"value": value, "scope": scope, "writer": writer}))
+	shared_engine.fire(&"shared_state_ops")
+	await process_frame
+	var shared_state_ok: bool = store.shared_values[&"reset_test_flag"] == true \
+		and shared_source.get_var(&"shared_flag") == true \
+		and shared_receiver.get_var(&"shared_flag") == true \
+		and receiver_changes.size() == 2 \
+		and receiver_changes[0]["value"] == false and receiver_changes[1]["value"] == true \
+		and receiver_changes.all(func(change: Dictionary) -> bool:
+			return change["scope"] == &"shared" and change["writer"] == &"rule:shared_state_ops")
+	store.unregister_blackboard(shared_source)
+	store.unregister_blackboard(shared_receiver)
+
+	var invalid_toggle := verbs.toggle_var(&"counter")
+	invalid_toggle.verb = &"toggle_var"
+	invalid_toggle.args = [&"counter"]
+	var missing_reset := verbs.reset_var(&"missing")
+	missing_reset.verb = &"reset_var"
+	missing_reset.args = [&"missing"]
+	var invalid_rule := Rule.new(&"invalid_state_ops", &"state_ops")
+	invalid_rule.steps = [invalid_toggle, missing_reset]
+	var validation := RuleValidator.check([invalid_rule], local_bb, [&"state_ops"], [&"counter"])
+	return _check("toggle_var and reset_var use typed values and normal Local/Saved writes",
+		local_state_ok and writer_and_scope_ok and unchanged_reset_quiet) \
+		and _check("Shared toggle/reset operations commit in order and notify all registered Blackboards",
+			shared_state_ok) \
+		and _check("toggle_var and reset_var validator reject wrong-type and undeclared keys",
+			validation.any(func(problem: String) -> bool: return "must be Boolean" in problem)
+			and validation.any(func(problem: String) -> bool: return "not declared on the Blackboard" in problem))
 
 func _test_runtime_step_inputs() -> bool:
 	var stage_script := GDScript.new()
