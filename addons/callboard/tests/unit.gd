@@ -526,6 +526,7 @@ func _initialize() -> void:
 	ok = await _test_queue() and ok
 	ok = await _test_conditional_groups() and ok
 	ok = await _test_random_groups() and ok
+	ok = await _test_core_verb_branch_factories() and ok
 	ok = _test_signal_callbacks_accept_arguments() and ok
 	ok = await _test_playback_wait_exits() and ok
 	ok = await _test_cancel_if_interrupts_a_wait() and ok
@@ -1874,6 +1875,102 @@ func _test_random_groups() -> bool:
 		and weighted_selected == ["branch=2; weighted"]) \
 		and _check("managed Stage reload restores per-group random state", restored
 		and retained_state.get(&"random:test_group", {}).get("state", -1) == 123456)
+
+func _test_core_verb_branch_factories() -> bool:
+	var bb := Blackboard.new()
+	bb.define(&"knows_answer", &"local", false)
+	bb.define(&"has_hint", &"local", false)
+	var engine := RuleEngine.new(bb, {}, Callable())
+	var verbs := CoreVerbs.new(StepContext.new(bb, engine, null, Callable()))
+	var dialogue: Array[String] = []
+	var conditional := verbs.branch_if([&"knows_answer", &"has_hint", &""], [
+		[Step.new(func(_c: Dictionary) -> void: dialogue.append("answer"))],
+		[Step.new(func(_c: Dictionary) -> void: dialogue.append("hint"))],
+		[Step.new(func(_c: Dictionary) -> void: dialogue.append("ask"))],
+	], 2)
+	var dialogue_rule := Rule.new(&"dialogue_branch_api", &"dialogue")
+	dialogue_rule.steps = [conditional]
+	engine.rules = [dialogue_rule]
+	bb.write(&"knows_answer", true)
+	bb.write(&"has_hint", true)
+	engine.fire(&"dialogue")
+	await process_frame
+	await process_frame
+	bb.write(&"knows_answer", false)
+	engine.fire(&"dialogue")
+	await process_frame
+	await process_frame
+	bb.write(&"has_hint", false)
+	engine.fire(&"dialogue")
+	await process_frame
+	await process_frame
+	var dialogue_order_ok := dialogue == ["answer", "hint", "ask"] \
+		and conditional.verb == &"conditional" \
+		and conditional.branch_conditions == [&"knows_answer", &"has_hint", &""]
+
+	var idle_engine := RuleEngine.new(Blackboard.new(), {}, Callable())
+	var idle_verbs := CoreVerbs.new(StepContext.new(idle_engine.bb, idle_engine, null, Callable()))
+	var idle_choices: Array[String] = []
+	var idle_branches: Array[Array] = []
+	for index in 8:
+		var animation_name := "idle_%02d" % (index + 1)
+		idle_branches.append([Step.new(func(_c: Dictionary) -> void:
+			idle_choices.append(animation_name))])
+	var idle_step := idle_verbs.choose_random(idle_branches, PackedFloat32Array(),
+		28411, &"eight_idle_animations")
+	var idle_rule := Rule.new(&"idle_animation_pool", &"idle")
+	idle_rule.steps = [idle_step]
+	idle_engine.rules = [idle_rule]
+	for _i in 16:
+		idle_engine.fire(&"idle")
+		await process_frame
+		await process_frame
+	var replay_engine := RuleEngine.new(Blackboard.new(), {}, Callable())
+	var replay_verbs := CoreVerbs.new(StepContext.new(replay_engine.bb, replay_engine, null, Callable()))
+	var replay_choices: Array[String] = []
+	var replay_branches: Array[Array] = []
+	for index in 8:
+		var animation_name := "idle_%02d" % (index + 1)
+		replay_branches.append([Step.new(func(_c: Dictionary) -> void:
+			replay_choices.append(animation_name))])
+	var replay_rule := Rule.new(&"idle_animation_pool", &"idle")
+	replay_rule.steps = [replay_verbs.choose_random(replay_branches, PackedFloat32Array(),
+		28411, &"eight_idle_animations")]
+	replay_engine.rules = [replay_rule]
+	for _i in 16:
+		replay_engine.fire(&"idle")
+		await process_frame
+		await process_frame
+	var seen_idle_animations: Array[String] = []
+	for animation_name in idle_choices:
+		if not animation_name in seen_idle_animations:
+			seen_idle_animations.append(animation_name)
+	var idle_sequence_ok := idle_choices.size() == 16 and seen_idle_animations.size() == 8 \
+		and idle_choices == replay_choices \
+		and idle_choices.all(func(name: String) -> bool: return name in [
+			"idle_01", "idle_02", "idle_03", "idle_04", "idle_05", "idle_06", "idle_07", "idle_08"])
+
+	var cancel_engine := RuleEngine.new(Blackboard.new(), {}, func(_seconds: float) -> Signal: return clock_tick)
+	var cancelled_branch_work: Array[String] = []
+	var cancel_verbs := CoreVerbs.new(StepContext.new(cancel_engine.bb, cancel_engine, null, Callable()))
+	var delayed_branch: Array[Array] = [[Step.new(func(_c: Dictionary) -> void:
+		cancelled_branch_work.append("ran")).after(1.0)]]
+	var cancel_rule := Rule.new(&"cancelled_script_branch", &"cancel_branch")
+	cancel_rule.steps = [cancel_verbs.choose_random(delayed_branch, PackedFloat32Array(),
+		77, &"cancelled_group")]
+	cancel_engine.rules = [cancel_rule]
+	cancel_engine.fire(&"cancel_branch")
+	await process_frame
+	cancel_engine.cancel_all()
+	clock_tick.emit()
+	await process_frame
+	await process_frame
+	return _check("CoreVerbs.branch_if routes conditional dialogue in authored first-match order",
+		dialogue_order_ok) \
+		and _check("CoreVerbs.choose_random reproducibly selects from eight ordered idle animation branches",
+			idle_sequence_ok) \
+		and _check("script-created random branches remain cancellable with their owning rule",
+			cancelled_branch_work.is_empty())
 
 func _check(label: String, condition: bool) -> bool:
 	print(("  ok   " if condition else "  FAIL ") + label)

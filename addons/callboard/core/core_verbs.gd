@@ -68,6 +68,20 @@ func add_var(key: StringName, delta: float) -> Step:
 	step.sets = [key]
 	return step
 
+## Run the first branch whose guard matches, or the explicit default branch.
+## Branch arrays and their steps execute in the order supplied. The RuleEngine
+## owns branch cancellation, including Restart, Cancel If, and Stage teardown.
+func branch_if(conditions: Array[StringName], branches: Array[Array],
+		default_branch_index: int = -1) -> Step:
+	return Step.conditional(conditions, branches, default_branch_index)
+
+## Choose one ordered branch. Selection 0 is uniform and 1 uses relative
+## non-negative weights. Give the group a stable ID to preserve its seeded
+## selection stream across branch or step reordering and managed Stage reloads.
+func choose_random(branches: Array[Array], weights: PackedFloat32Array = PackedFloat32Array(),
+		seed_value: int = 1, stable_group_id: StringName = &"", selection: int = 0) -> Step:
+	return Step.random_choice(branches, weights, seed_value, stable_group_id, selection)
+
 func _rule_writer(context_data: Dictionary) -> StringName:
 	var callboard: Dictionary = context_data.get("_callboard", {})
 	var rule: Rule = callboard.get("rule") as Rule

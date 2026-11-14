@@ -101,10 +101,13 @@ The first five items retain the high priority assigned in `TODO.md`.
   - [x] Add conditional step groups with first-match guards and one explicit Otherwise branch. Execute only the selected branch, preserve nested steps in resources, and allow branch reorder and guard-key renames.
   - [x] Add uniform and weighted random selection with an authored seed and restorable per-group RNG state across managed Stage reloads.
   - [x] Validate conditional guards, default paths, and supported operand types. Show branch conditions in board tooltips and selected outcomes in the live trace.
+  - [x] Expose `CoreVerbs.branch_if()` and `CoreVerbs.choose_random()` as script-facing entry points backed by `Step.conditional()` and `Step.random_choice()`. Preserve branch order, cancellation, and seeded selection. Cover conditional dialogue responses and repeatable selection across a pool of eight idle animations.
 
 - [ ] **Expand guard expressions.** See [GuardExpression](addons/callboard/core/guard_expression.gd) and [RuleValidator](addons/callboard/core/rule_validator.gd).
   - [x] Existing guards support Blackboard truthiness and numeric comparisons with literals, plus typed payload comparisons and `has()`/`missing()` checks.
-  - [ ] Add OR and grouping, key-to-key comparisons such as `completed_count >= required_count`, and String/StringName Blackboard comparisons for named states. Blackboard storage already accepts string defaults. The guard evaluator currently restricts Blackboard comparisons to numbers.
+  - [ ] Add OR and grouping to the guard parser with `any(sensor_active, override_enabled)`.
+  - [ ] Support key-to-key comparisons such as `completed_count >= required_count`, resolving both keys through the Blackboard schema and applying the operand type rules from §1.
+  - [ ] Support `String` and `StringName` Blackboard equality and inequality for named states, such as `operating_mode == "standby"`. Blackboard storage already accepts string defaults.
   - [ ] Keep parsing, type checking, rename/reference tracking, overlap analysis, and the guard editor in sync. Use the numeric and unknown-type rules from §1.
 
 - [ ] **Add typed `toggle_var` and `reset_var`.** See [CoreVerbs](addons/callboard/core/core_verbs.gd) and [Blackboard](addons/callboard/core/blackboard.gd).
@@ -120,11 +123,14 @@ The first five items retain the high priority assigned in `TODO.md`.
 
 - [ ] **Add a store-level cross-Stage event bus.** See [StageStateStore](addons/callboard/core/stage_state_store.gd) and [Stage](addons/callboard/core/stage.gd).
   - [x] The store maintains stable Stage instance IDs and shares values. Managed Stages can load dormant and ignore ordinary Calls until activation.
-  - [ ] Deliver typed messages to active, loaded recipients. Define a policy for dormant and unloaded recipients, such as bounded delivery upon activation or recording a durable state change. Specify routing, ordering, replay/deduplication, and when messages expire or survive a save.
+  - [ ] Add `StageStateStore.broadcast_event()` for typed, live delivery to one or more active, loaded Stage instances. Cover both a targeted `sensor:activated` event and a `system_overload` event routed to multiple Stages.
+  - [ ] Add `CoreVerbs.emit_cross_stage()` so an authored rule can send the same events with a payload through the store.
+  - [ ] Define a policy for dormant and unloaded recipients, such as bounded delivery upon activation or recording a durable state change. Specify routing, ordering, replay/deduplication, and when messages expire or survive a save.
   - [ ] Validate declared targets and payload contracts across Stage definitions. Include cross-Stage routes in the dispatch budget and traces.
 
 - [ ] **Add Session scope and reset rules.** See [Blackboard](addons/callboard/core/blackboard.gd), [StageStateStore](addons/callboard/core/stage_state_store.gd), and [BlackboardPanel](addons/callboard/editor/blackboard_panel.gd).
   - [x] Local, Saved, and Shared scopes exist. Store-backed Saved values and latches persist by Stage instance ID.
+  - [ ] Use `&"session"` as the scope identifier for per-session Blackboard variables such as `ambient_level` and `sequence_reversed`. Expose `reset_session()` as the host hook to restore those variables to their declared defaults at a session boundary.
   - [ ] Define host-controlled session start/reset, session counters and flags across Stage reloads, and how session state interacts with durable profile progression and one-shot latches. Make scope, reset rules, and serialization behavior explicit in the UI and API.
 
 - [ ] **Extend declarative restoration.** See [StageRestorationBinding](addons/callboard/core/stage_restoration_binding.gd) and [Stage](addons/callboard/core/stage.gd).
@@ -141,7 +147,8 @@ The first five items retain the high priority assigned in `TODO.md`.
 
 - [ ] **Make contact triggers game-agnostic.** See [TriggerArea](addons/callboard/core/trigger_area.gd).
   - [x] `TriggerArea` supports Enter and Interact. Interactions already expose host eligibility/handling hooks, accepted and rejected Calls, and payloads.
-  - [ ] Honor scene-configured collision layers and masks, and make actor/body filtering optional and configurable. `_ready()` replaces both collision bitfields today, and the enter handler only accepts two fixed group names. Define compatibility for scenes relying on those defaults.
+  - [ ] Expose `TriggerArea.trigger_groups` for optional filtering by Godot body group. Cover matching and nonmatching bodies, including movable props, projectiles, and vehicles. Define compatibility for scenes relying on the existing group defaults.
+  - [ ] Honor the scene-configured collision layer and mask and expose an optional `collision_mask_override`. Define compatibility for scenes relying on the current collision defaults.
   - [ ] Support arbitrary body/prop contacts and an Exit Call or mode. Specify which body information is available in the payload and how managed/dormant Stages handle entry and exit.
 
 - [ ] **Provide a generic item interaction and delivery contract.** The source proposals differ on whether inventory should be core. The existing addon delegates policy to the host. Confirm the scope of any optional reusable inventory component.
