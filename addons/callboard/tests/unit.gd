@@ -1489,6 +1489,8 @@ func _test_managed_stages_and_restoration() -> bool:
 		[&"arrival_count", "saved", 0],
 		[&"town_bell", "shared", false],
 		[&"garage_door_transform", "saved", Transform3D.IDENTITY],
+		[&"selected_variant", "saved", 1],
+		[&"garage_rotation", "saved", Vector3.ZERO],
 	]:
 		var variable := VariableData.new()
 		variable.key = variable_spec[0]
@@ -1553,7 +1555,17 @@ func _test_managed_stages_and_restoration() -> bool:
 	binding_door.key = &"garage_door_transform"
 	binding_door.kind = StageRestorationBinding.Kind.TRANSFORM
 	binding_door.target_path = NodePath("GarageDoor")
-	definition.restoration_bindings.assign([binding_window, binding_skateboard_window, binding_pose, binding_pose_only, binding_door])
+	var binding_choice := StageRestorationBinding.new()
+	binding_choice.key = &"selected_variant"
+	binding_choice.kind = StageRestorationBinding.Kind.CHILD_INDEX
+	binding_choice.target_path = NodePath("GiftVariant")
+	binding_choice.child_choices = [NodePath("GiftVariant/RobotVariant"), NodePath("GiftVariant/SkateboardVariant")]
+	var binding_rotation := StageRestorationBinding.new()
+	binding_rotation.key = &"garage_rotation"
+	binding_rotation.kind = StageRestorationBinding.Kind.PROPERTY
+	binding_rotation.target_path = NodePath("GarageDoor")
+	binding_rotation.property_name = &"rotation"
+	definition.restoration_bindings.assign([binding_window, binding_skateboard_window, binding_pose, binding_pose_only, binding_door, binding_choice, binding_rotation])
 
 	var template := Stage.new()
 	template.name = "Stage"
@@ -1570,6 +1582,15 @@ func _test_managed_stages_and_restoration() -> bool:
 	garage_door.name = "GarageDoor"
 	template.add_child(garage_door)
 	garage_door.owner = template
+	var variant_root := Node3D.new()
+	variant_root.name = "GiftVariant"
+	template.add_child(variant_root)
+	variant_root.owner = template
+	for variant_name: String in ["RobotVariant", "SkateboardVariant"]:
+		var variant_node := Node3D.new()
+		variant_node.name = variant_name
+		variant_root.add_child(variant_node)
+		variant_node.owner = template
 	var doghouse := Marker3D.new()
 	doghouse.name = "RedDoghouse"
 	doghouse.position = Vector3(3, 0, 2)
@@ -1642,6 +1663,17 @@ func _test_managed_stages_and_restoration() -> bool:
 	ok = _check("standalone animation pose binding validates Boolean keys and animation names",
 		pose_errors.any(func(problem: String) -> bool: return "must be Boolean" in problem)
 		and pose_errors.any(func(problem: String) -> bool: return "animation 'missing_pose'" in problem)) and ok
+	var invalid_property := StageRestorationBinding.new()
+	invalid_property.key = &"gifts_delivered"
+	invalid_property.kind = StageRestorationBinding.Kind.PROPERTY
+	invalid_property.target_path = NodePath("GarageDoor")
+	invalid_property.property_name = &"rotation"
+	var property_errors := invalid_property.validate(stage)
+	var binding_roundtrip := StageRestorationBinding.from_dictionary(binding_choice.to_dictionary())
+	ok = _check("typed child choices and generic property bindings validate types and serialize settings",
+		property_errors.any(func(problem: String) -> bool: return "type does not match" in problem)
+		and binding_roundtrip.kind == StageRestorationBinding.Kind.CHILD_INDEX
+		and binding_roundtrip.child_choices == binding_choice.child_choices) and ok
 	var actor := Node3D.new()
 	root.add_child(actor)
 	var gift_target := stage.get_node("RobotGiftTarget") as TriggerArea
@@ -1695,6 +1727,8 @@ func _test_managed_stages_and_restoration() -> bool:
 	store.unload_stage(conflict_stage)
 	var garage_transform := Transform3D(Basis.IDENTITY, Vector3(0, 1.2, 0))
 	stage.write_var(&"garage_door_transform", garage_transform)
+	stage.write_var(&"selected_variant", 0)
+	stage.write_var(&"garage_rotation", Vector3(0.1, 0.3, 0.6))
 	store.unload_stage(neighbor)
 	store.unload_stage(stage)
 	actor.queue_free()
@@ -1745,9 +1779,14 @@ func _test_managed_stages_and_restoration() -> bool:
 	await process_frame
 	var completed_robot_window := all_gifts_restored.get_node("BedroomWindowRobot") as Node3D
 	var completed_skateboard_window := all_gifts_restored.get_node("BedroomWindowSkateboard") as Node3D
+	var completed_garage := all_gifts_restored.get_node("GarageDoor") as Node3D
+	var completed_robot_variant := all_gifts_restored.get_node("GiftVariant/RobotVariant") as Node3D
+	var completed_skateboard_variant := all_gifts_restored.get_node("GiftVariant/SkateboardVariant") as Node3D
 	ok = _check("each gift restores its own visual and the saved counter after the next reload",
 		completed_robot_window.visible and completed_skateboard_window.visible
 		and all_gifts_restored.get_var(&"gifts_delivered") == 2
+		and completed_robot_variant.visible and not completed_skateboard_variant.visible
+		and completed_garage.rotation.is_equal_approx(Vector3(0.1, 0.3, 0.6))
 		and is_equal_approx((all_gifts_restored.get_node("Buster/Visual") as Node3D).position.y, 0.1875)
 		and not (all_gifts_restored.get_node("Buster/AnimationPlayer") as AnimationPlayer).is_playing()) and ok
 	store.unload_stage(all_gifts_restored)

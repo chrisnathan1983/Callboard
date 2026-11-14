@@ -2,7 +2,7 @@
 class_name StageRestorationBinding extends Resource
 ## Applies resolved Blackboard state to a scene node without replaying an animation.
 
-enum Kind { VISIBILITY, TRANSFORM, SNAP_TO_MARKER, POSE_ANIMATION }
+enum Kind { VISIBILITY, TRANSFORM, SNAP_TO_MARKER, POSE_ANIMATION, CHILD_INDEX, PROPERTY }
 
 @export var key: StringName
 @export var kind: Kind = Kind.VISIBILITY
@@ -11,12 +11,16 @@ enum Kind { VISIBILITY, TRANSFORM, SNAP_TO_MARKER, POSE_ANIMATION }
 @export var animation_player_path: NodePath
 @export var animation_name: StringName
 @export_range(0.0, 3600.0, 0.01) var animation_time := 0.0
+@export var child_choices: Array[NodePath] = []
+@export var property_name: StringName
 
 func to_dictionary() -> Dictionary:
 	return {
 		"key": String(key), "kind": kind, "target_path": String(target_path),
 		"marker_path": String(marker_path), "animation_player_path": String(animation_player_path),
 		"animation_name": String(animation_name), "animation_time": animation_time,
+		"child_choices": child_choices.map(func(path: NodePath) -> String: return String(path)),
+		"property_name": String(property_name),
 	}
 
 static func from_dictionary(data: Dictionary) -> StageRestorationBinding:
@@ -28,6 +32,9 @@ static func from_dictionary(data: Dictionary) -> StageRestorationBinding:
 	binding.animation_player_path = NodePath(data.get("animation_player_path", ""))
 	binding.animation_name = StringName(data.get("animation_name", ""))
 	binding.animation_time = float(data.get("animation_time", 0.0))
+	for path: Variant in data.get("child_choices", []):
+		binding.child_choices.append(NodePath(path))
+	binding.property_name = StringName(data.get("property_name", ""))
 	return binding
 
 func apply(stage: Stage) -> void:
@@ -55,6 +62,19 @@ func apply(stage: Stage) -> void:
 		Kind.POSE_ANIMATION:
 			if bool(value) and target is AnimationPlayer:
 				_apply_pose_to_player(target as AnimationPlayer)
+		Kind.CHILD_INDEX:
+			if not target is Node or typeof(value) != TYPE_INT or value < 0 or value >= child_choices.size():
+				return
+			for index: int in range(child_choices.size()):
+				var choice := stage.get_node_or_null(child_choices[index])
+				if choice is CanvasItem or choice is Node3D:
+					choice.visible = index == value
+		Kind.PROPERTY:
+			var info := _find_property(target, property_name)
+			if info.is_empty() or not _property_value_matches(value, info):
+				return
+			var set_value: Variant = float(value) if typeof(value) == TYPE_INT and int(info.get("type", TYPE_NIL)) == TYPE_FLOAT else value
+			target.set(property_name, set_value)
 
 func validate(stage: Stage) -> Array[String]:
 	var problems: Array[String] = []
@@ -90,6 +110,32 @@ func validate(stage: Stage) -> Array[String]:
 					problems.append("animation pose binding key '%s' must be Boolean" % key)
 				if not target is AnimationPlayer:
 					problems.append("animation pose target '%s' must be AnimationPlayer" % target_path)
+			Kind.CHILD_INDEX:
+				if value_type != TYPE_INT:
+					problems.append("child index binding key '%s' must be an integer" % key)
+				if not target is Node:
+					problems.append("child index binding target '%s' must be a Node" % target_path)
+				if child_choices.is_empty():
+					problems.append("child index binding requires at least one child choice")
+				for choice_path: NodePath in child_choices:
+					var choice := stage.get_node_or_null(choice_path)
+					if choice == null or not (choice is CanvasItem or choice is Node3D):
+						problems.append("child choice '%s' was not found or does not support visibility" % choice_path)
+					elif target != null and target is Node and not (target as Node).is_ancestor_of(choice):
+						problems.append("child choice '%s' is not beneath binding target '%s'" % [choice_path, target_path])
+				if typeof(stage.bb.get_var(key)) == TYPE_INT and (int(stage.bb.get_var(key)) < 0 or int(stage.bb.get_var(key)) >= child_choices.size()):
+					problems.append("child index binding key '%s' value is outside its %d choices" % [key, child_choices.size()])
+			Kind.PROPERTY:
+				if property_name.is_empty():
+					problems.append("property binding requires a property name")
+				else:
+					var property_info := _find_property(target, property_name)
+					if property_info.is_empty():
+						problems.append("property '%s' was not found or is read-only on '%s'" % [property_name, target_path])
+					elif not _types_compatible(value_type, int(property_info.get("type", TYPE_NIL))):
+						problems.append("property binding key '%s' type does not match property '%s'" % [key, property_name])
+					elif not _property_value_matches(stage.bb.get_var(key), property_info):
+						problems.append("property binding value for key '%s' is incompatible with property '%s'" % [key, property_name])
 	if kind == Kind.SNAP_TO_MARKER:
 		var marker := stage.get_node_or_null(marker_path)
 		if not marker is Marker3D:
@@ -113,6 +159,32 @@ func validate(stage: Stage) -> Array[String]:
 	elif not animation_player_path.is_empty() or not animation_name.is_empty():
 		problems.append("AnimationPlayer pose settings are only supported for marker or standalone animation pose bindings")
 	return problems
+
+func _find_property(target: Object, name: StringName) -> Dictionary:
+	if target == null or not is_instance_valid(target) or name.is_empty():
+		return {}
+	for property: Dictionary in target.get_property_list():
+		if StringName(property.get("name", "")) != name:
+			continue
+		if int(property.get("usage", 0)) & PROPERTY_USAGE_READ_ONLY:
+			return {}
+		return property
+	return {}
+
+func _types_compatible(source_type: int, target_type: int) -> bool:
+	return source_type == target_type or (source_type == TYPE_INT and target_type == TYPE_FLOAT)
+
+func _value_matches_type(value: Variant, target_type: int) -> bool:
+	return typeof(value) == target_type or (typeof(value) == TYPE_INT and target_type == TYPE_FLOAT)
+
+func _property_value_matches(value: Variant, info: Dictionary) -> bool:
+	if not _value_matches_type(value, int(info.get("type", TYPE_NIL))):
+		return false
+	if typeof(value) == TYPE_OBJECT and value != null:
+		var expected_class := String(info.get("class_name", ""))
+		if not expected_class.is_empty() and value is Object and not (value as Object).is_class(expected_class):
+			return false
+	return true
 
 func _apply_pose(stage: Stage) -> void:
 	if animation_player_path.is_empty() or animation_name.is_empty():
