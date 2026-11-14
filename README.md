@@ -21,13 +21,15 @@ Open [project.godot](project.godot) in Godot **4.7** and press **F5**. The plugi
 2. Get a squeak permit at the yellow desk. You can do this before or after distracting the inspector.
 3. Deliver the duck at City Hall to earn 200 points and meet the new deputy. Try the door early to see what the clerk says when the inspection lamp is on, the inspector is still on duty, or the permit is missing.
 
-| Control | Action |
-| --- | --- |
-| **WASD** or **arrow keys** | Move |
-| **E** | Interact |
-| **F1** | Toggle the live Callboard |
-| **R** | Reload the Stage and reset local variables |
-| **X** | Clear saved variables, one-shot latches, and score, then reload |
+| Touch or mouse | Keyboard | Action |
+| --- | --- | --- |
+| Drag anywhere in the play area | **WASD** or **arrow keys** | Move |
+| Tap the action button when it appears | **E** | Interact with a nearby prop |
+| Tap **Callboard** | **F1** | Toggle the live Callboard when available |
+| Tap **Reload** | **R** | Reload the Stage and reset local variables |
+| Tap **Start fresh** | **X** | Clear saved variables, one-shot latches, and score, then reload |
+
+The movement stick appears under your finger or mouse and follows as you drag. After your first drag, the stick hides whenever you release it. On a touchscreen, hold the stick with one finger and tap the bottom-center action button with another.
 
 Search for `deliver` in the Callboard toolbar and toggle **Isolate** to follow the four rules that share the Call. The two distractions converge on `calm_guard`, while a successful delivery emits `duck_delivered` to cue both the clerk and the inspector.
 

@@ -6,25 +6,25 @@
 [ext_resource type="Script" path="res://demo/scripts/props/bump_prop.gd" id="4_pad"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_Ground"]
-albedo_color = Color(0.92, 0.95, 1, 1)
+albedo_color = Color(0.34, 0.48, 0.46, 1)
 
 [sub_resource type="BoxMesh" id="BoxMesh_Ground"]
 size = Vector3(24, 0.1, 18)
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_Building"]
-albedo_color = Color(0.55, 0.35, 0.25, 1)
+albedo_color = Color(0.32, 0.47, 0.58, 1)
 
 [sub_resource type="BoxMesh" id="BoxMesh_Building"]
 size = Vector3(7, 3.5, 3)
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_Door"]
-albedo_color = Color(0.25, 0.16, 0.12, 1)
+albedo_color = Color(0.11, 0.22, 0.32, 1)
 
 [sub_resource type="BoxMesh" id="BoxMesh_Door"]
 size = Vector3(1.5, 2.2, 0.12)
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_DoorStep"]
-albedo_color = Color(0.4, 0.35, 0.32, 1)
+albedo_color = Color(0.71, 0.66, 0.56, 1)
 
 [sub_resource type="BoxMesh" id="BoxMesh_DoorStep"]
 size = Vector3(3, 0.2, 1.4)
@@ -43,7 +43,7 @@ albedo_color = Color(1, 0.95, 0.6, 1)
 size = Vector3(0.25, 0.25, 0.25)
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_Shelter"]
-albedo_color = Color(0.7, 0.2, 0.15, 1)
+albedo_color = Color(0.74, 0.28, 0.24, 1)
 
 [sub_resource type="BoxMesh" id="BoxMesh_Shelter"]
 size = Vector3(1.6, 1, 1.6)
@@ -101,13 +101,31 @@ size = Vector3(3.2, 2, 2.4)
 size = Vector3(3.5, 2, 3.5)
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_PadMesh"]
-albedo_color = Color(0.2, 0.3, 0.8, 1)
+albedo_color = Color(0.24, 0.53, 0.78, 1)
 
 [sub_resource type="BoxMesh" id="BoxMesh_PadMesh"]
 size = Vector3(0.7, 0.7, 1.1)
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_Bump"]
 size = Vector3(1.8, 2, 2.2)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_Paving"]
+albedo_color = Color(0.62, 0.64, 0.54, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_MainWalk"]
+size = Vector3(3.2, 0.04, 13.2)
+
+[sub_resource type="BoxMesh" id="BoxMesh_CrossWalk"]
+size = Vector3(14, 0.04, 2.6)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_Trim"]
+albedo_color = Color(0.79, 0.73, 0.57, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_Cornice"]
+size = Vector3(7.4, 0.28, 3.35)
+
+[sub_resource type="BoxMesh" id="BoxMesh_Column"]
+size = Vector3(0.32, 2.8, 0.36)
 
 [node name="Stage01" type="Node3D" node_paths=PackedStringArray("guard", "lamp") unique_id=779149304]
 script = ExtResource("1_01y1u")
@@ -124,6 +142,31 @@ mesh = SubResource("BoxMesh_Ground")
 position = Vector3(0, 1.75, -6)
 material_override = SubResource("StandardMaterial3D_Building")
 mesh = SubResource("BoxMesh_Building")
+
+[node name="MainWalk" type="MeshInstance3D" parent="."]
+position = Vector3(0, 0, 2.4)
+material_override = SubResource("StandardMaterial3D_Paving")
+mesh = SubResource("BoxMesh_MainWalk")
+
+[node name="CrossWalk" type="MeshInstance3D" parent="."]
+position = Vector3(0, 0.005, -2.25)
+material_override = SubResource("StandardMaterial3D_Paving")
+mesh = SubResource("BoxMesh_CrossWalk")
+
+[node name="Cornice" type="MeshInstance3D" parent="Building"]
+position = Vector3(0, 1.64, 0)
+material_override = SubResource("StandardMaterial3D_Trim")
+mesh = SubResource("BoxMesh_Cornice")
+
+[node name="LeftColumn" type="MeshInstance3D" parent="Building"]
+position = Vector3(-1.35, -0.35, 1.54)
+material_override = SubResource("StandardMaterial3D_Trim")
+mesh = SubResource("BoxMesh_Column")
+
+[node name="RightColumn" type="MeshInstance3D" parent="Building"]
+position = Vector3(1.35, -0.35, 1.54)
+material_override = SubResource("StandardMaterial3D_Trim")
+mesh = SubResource("BoxMesh_Column")
 
 [node name="Door" type="MeshInstance3D" parent="."]
 position = Vector3(0, 1.1, -4.45)
@@ -266,7 +309,7 @@ no_depth_test = true
 pixel_size = 0.009
 modulate = Color(1, 0.95, 0.79, 1)
 outline_modulate = Color(0.035, 0.045, 0.075, 1)
-text = "CITY HALL\n[E] Deliver duck"
+text = "City Hall"
 font_size = 72
 outline_size = 12
 
@@ -277,7 +320,7 @@ no_depth_test = true
 pixel_size = 0.009
 modulate = Color(1, 0.9, 0.86, 1)
 outline_modulate = Color(0.035, 0.045, 0.075, 1)
-text = "[E] Offer decoy"
+text = "Decoy station"
 font_size = 72
 outline_size = 12
 
@@ -299,6 +342,6 @@ no_depth_test = true
 pixel_size = 0.009
 modulate = Color(1, 0.93, 0.68, 1)
 outline_modulate = Color(0.035, 0.045, 0.075, 1)
-text = "[E] Squeak permit"
+text = "Permit desk"
 font_size = 72
 outline_size = 12

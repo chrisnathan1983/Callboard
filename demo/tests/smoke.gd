@@ -253,16 +253,106 @@ func _test_game_scene() -> bool:
 	game.stage.scored.emit(25)
 	await process_frame
 	var ok := _check("the game manager updates the HUD after scoring",
-		game.score == 25 and hud.hud.text.begins_with("Score: 25"))
+		game.score == 25 and hud._score.text == "Score: 25")
 	var has_debug_board := OS.is_debug_build() and ResourceLoader.exists(
 		"res://addons/callboard/editor/callboard.gd", "Script")
 	ok = _check("the HUD mounts the hidden live panel when available",
 		(hud.board_panel != null and not hud.board_panel.visible) if has_debug_board
 		else hud.board_panel == null) and ok
+	ok = (await _test_touch_controls(game)) and ok
 	ok = (await _test_demo_paths(game)) and ok
 	game.queue_free()
 	await process_frame
 	return ok
+
+func _test_touch_controls(game: GameManager) -> bool:
+	var hud := game.hud
+	var player := game.get_node("WorldManager/Player") as Player
+	var stick_center := hud._stick.get_global_rect().get_center()
+	var touch_start := game.get_viewport().get_visible_rect().size * Vector2(0.75, 0.5)
+	var ok := _check("the first-use hint sits above the bottom-center action button",
+		hud._move_hint.visible and is_equal_approx(stick_center.x, hud._interact.get_global_rect().get_center().x)
+		and stick_center.y < hud._interact.get_global_rect().position.y)
+	var mouse_press := InputEventMouseButton.new()
+	mouse_press.button_index = MOUSE_BUTTON_LEFT
+	mouse_press.pressed = true
+	mouse_press.position = root.get_final_transform() * touch_start
+	Input.parse_input_event(mouse_press)
+	Input.flush_buffered_events()
+	ok = _check("a mouse press away from the hint starts the stick without moving",
+		hud._stick._pointer == 0 and player.touch_movement == Vector2.ZERO) and ok
+	var mouse_drag := InputEventMouseMotion.new()
+	mouse_drag.button_mask = MOUSE_BUTTON_MASK_LEFT
+	mouse_drag.position = root.get_final_transform() * (touch_start + Vector2(0, -100))
+	Input.parse_input_event(mouse_drag)
+	Input.flush_buffered_events()
+	var start := player.position
+	for frame in range(3):
+		await physics_frame
+	ok = _check("mouse dragging the stick moves the player",
+		player.touch_movement.y < -0.25 and player.position.z < start.z) and ok
+	mouse_press = mouse_press.duplicate() as InputEventMouseButton
+	mouse_press.position = mouse_drag.position
+	mouse_press.pressed = false
+	Input.parse_input_event(mouse_press)
+	Input.flush_buffered_events()
+	ok = _check("releasing the mouse clears movement", player.touch_movement == Vector2.ZERO) and ok
+	ok = _check("the first drag dismisses the idle hint",
+		hud._stick.has_moved and hud._stick._pointer == -1 and not hud._move_hint.visible) and ok
+
+	player.global_position = (game.stage.get_node("DecoyArea") as TriggerArea).global_position
+	for frame in range(3):
+		await physics_frame
+	var action_center := hud._interact.get_global_rect().get_center()
+	_send_touch(1, action_center, true)
+	ok = _check("the action button takes priority over starting the stick",
+		hud._stick._pointer == -1 and hud._button_pointer == 1) and ok
+	_send_touch(1, action_center, false, true)
+	_send_touch(0, touch_start, true)
+	var drag := InputEventScreenDrag.new()
+	drag.index = 0
+	drag.position = touch_start + Vector2(104, 0)
+	root.push_input(drag, true)
+	var knob := hud._stick.get_global_transform_with_canvas() * (hud._stick._origin + hud._stick._offset)
+	ok = _check("the floating stick follows a finger at full travel",
+		player.touch_movement.is_equal_approx(Vector2.RIGHT)
+		and knob.is_equal_approx(drag.position)) and ok
+	_send_touch(1, action_center, true)
+	# Use the same real resolver while keeping the gameplay smoke test's score intact.
+	var selected := player.interaction_resolver.selected_trigger
+	var interactions: Array[bool] = []
+	selected.set_interaction_handler(func(_actor: Node, _context: Dictionary) -> Dictionary:
+		interactions.append(true)
+		return {"accepted": false})
+	_send_touch(1, action_center, false)
+	selected.set_interaction_handler(Callable())
+	ok = _check("a second finger taps the selected interaction while holding movement",
+		interactions == [true] and player.touch_movement.is_equal_approx(Vector2.RIGHT)) and ok
+	_send_touch(0, drag.position, false, true)
+	ok = _check("a canceled touch clears movement", player.touch_movement == Vector2.ZERO) and ok
+	if hud.board_panel:
+		var board_center := hud._board_button.get_global_rect().get_center()
+		_send_touch(0, touch_start, true)
+		root.push_input(drag, true)
+		_send_touch(1, board_center, true)
+		_send_touch(1, board_center, false)
+		ok = _check("opening Callboard by touch cancels held movement",
+			hud.board_panel.visible and player.touch_movement == Vector2.ZERO) and ok
+		_send_touch(0, touch_start, false)
+		board_center = hud._board_button.get_global_rect().get_center()
+		_send_touch(1, board_center, true)
+		_send_touch(1, board_center, false)
+		ok = _check("the Callboard touch button returns to the demo",
+			not hud.board_panel.visible and hud._stick.is_visible_in_tree()) and ok
+	return ok
+
+func _send_touch(index: int, position: Vector2, pressed: bool, canceled := false) -> void:
+	var event := InputEventScreenTouch.new()
+	event.index = index
+	event.position = position
+	event.pressed = pressed
+	event.canceled = canceled
+	root.push_input(event, true)
 
 func _test_demo_paths(game: GameManager) -> bool:
 	var stage := game.stage as Stage01

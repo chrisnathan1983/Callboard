@@ -1,11 +1,12 @@
 class_name Player extends CharacterBody3D
-## Minimal player: WASD / arrows to move, E to use the shared interaction resolver.
+## Moves with the keyboard or HUD stick and uses the shared interaction resolver.
 
 const SPEED := 6.0
 const LAYER_PLAYER := StageCollisionLayers.PLAYER
 const LAYER_TRIGGER := StageCollisionLayers.TRIGGER
 
 var stunned := false
+var touch_movement := Vector2.ZERO
 var _stun_timer: SceneTreeTimer
 var _reach: Area3D
 var interaction_resolver: InteractionResolver
@@ -15,7 +16,7 @@ func _ready() -> void:
 	collision_layer = LAYER_PLAYER
 	collision_mask = StageCollisionLayers.WORLD
 	add_to_group(&"Player")
-	_mat.albedo_color = Color(0.85, 0.1, 0.1)
+	_mat.albedo_color = Color("147d7d")
 	var body := MeshInstance3D.new()
 	var capsule := CapsuleMesh.new()
 	capsule.radius = 0.45
@@ -46,8 +47,9 @@ func _ready() -> void:
 func _physics_process(_delta: float) -> void:
 	var dir := Vector3.ZERO
 	if not stunned:
-		var input := Input.get_vector(&"move_left", &"move_right", &"move_forward", &"move_back")
-		dir = Vector3(input.x, 0.0, input.y)
+		var keyboard := Input.get_vector(&"move_left", &"move_right", &"move_forward", &"move_back")
+		var movement := keyboard if not keyboard.is_zero_approx() else touch_movement
+		dir = Vector3(movement.x, 0.0, movement.y)
 	velocity = dir * SPEED
 	move_and_slide()
 
@@ -72,4 +74,4 @@ func stun(seconds: float) -> void:
 func _end_stun() -> void:
 	_stun_timer = null
 	stunned = false
-	_mat.albedo_color = Color(0.85, 0.1, 0.1)
+	_mat.albedo_color = Color("147d7d")
