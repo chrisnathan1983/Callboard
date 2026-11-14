@@ -8,6 +8,7 @@ const ExportPlugin := preload("res://addons/callboard/editor/export_plugin.gd")
 const Settings := preload("res://addons/callboard/core/callboard_settings.gd")
 
 var board: Callboard
+var test_runner: VBoxContainer
 var _opened := false
 var _last_stage_folders: Array[String] = []
 var _stage_dialog: ConfirmationDialog
@@ -25,6 +26,8 @@ func _enter_tree() -> void:
 		EditorInterface.get_resource_filesystem().update_file(path))
 	EditorInterface.get_editor_main_screen().add_child(board)
 	_make_visible(false)
+	test_runner = preload("res://addons/callboard/editor/test_runner_panel.gd").new()
+	add_control_to_bottom_panel(test_runner, "Callboard Tests")
 	add_tool_menu_item(MENU_ITEM, _on_create_stage_pressed)
 	_export_plugin = ExportPlugin.new()
 	add_export_plugin(_export_plugin)
@@ -36,6 +39,10 @@ func _exit_tree() -> void:
 		fs.filesystem_changed.disconnect(_on_filesystem_changed)
 	if is_instance_valid(board):
 		board.queue_free()
+	if is_instance_valid(test_runner):
+		test_runner.shutdown()
+		remove_control_from_bottom_panel(test_runner)
+		test_runner.queue_free()
 	remove_tool_menu_item(MENU_ITEM)
 	if _export_plugin:
 		remove_export_plugin(_export_plugin)

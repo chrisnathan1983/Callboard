@@ -107,7 +107,7 @@ args = PackedStringArray("100")
 [sub_resource type="Resource" id="Resource_v3yqw"]
 script = ExtResource("2_sw6iv")
 id = &"z1_decoy"
-trigger = &"offer:decoy"
+trigger = &"give:decoy"
 requires = PackedStringArray()
 forbids = PackedStringArray("guard_calmed")
 cancel_if = PackedStringArray()
@@ -171,7 +171,7 @@ args = PackedStringArray("window")
 [sub_resource type="Resource" id="Resource_dw20m"]
 script = ExtResource("2_sw6iv")
 id = &"z1_caught"
-trigger = &"deliver"
+trigger = &"give:duck"
 requires = PackedStringArray("lamp_on")
 forbids = PackedStringArray()
 cancel_if = PackedStringArray()
@@ -199,7 +199,7 @@ args = PackedStringArray("reward")
 [sub_resource type="Resource" id="Resource_w4bi3"]
 script = ExtResource("2_sw6iv")
 id = &"z1_delivered"
-trigger = &"deliver"
+trigger = &"give:duck"
 requires = PackedStringArray("guard_calmed", "permit_stamped")
 forbids = PackedStringArray("lamp_on")
 cancel_if = PackedStringArray()
@@ -284,7 +284,7 @@ args = PackedStringArray("window", "\"Inspector Biscuit\\nis still on duty.\"", 
 [sub_resource type="Resource" id="Resource_cbhw2"]
 script = ExtResource("2_sw6iv")
 id = &"z1_on_duty"
-trigger = &"deliver"
+trigger = &"give:duck"
 requires = PackedStringArray()
 forbids = PackedStringArray("lamp_on", "guard_calmed")
 cancel_if = PackedStringArray()
@@ -302,7 +302,7 @@ args = PackedStringArray("window", "\"Does that duck\\nhave a permit?\"", "2.5")
 [sub_resource type="Resource" id="Resource_42g1q"]
 script = ExtResource("2_sw6iv")
 id = &"z1_permit_needed"
-trigger = &"deliver"
+trigger = &"give:duck"
 requires = PackedStringArray("guard_calmed")
 forbids = PackedStringArray("permit_stamped", "lamp_on")
 cancel_if = PackedStringArray()
@@ -385,12 +385,12 @@ state_key = &"permit_stamped"
 script = ExtResource("1_6haco")
 stage_script = ExtResource("2_nih50")
 preview_scene_path = "res://demo/stages/stage_01/stage_01.tscn"
-external_calls = PackedStringArray("arrive", "deliver", "offer:decoy", "relay:treat_out", "file:permit")
+external_calls = PackedStringArray("arrive", "give:duck", "give:decoy", "relay:treat_out", "file:permit")
 call_positions = {
 "arrive": Vector2(-150, 110),
-"deliver": Vector2(810, 345),
+"give:duck": Vector2(810, 345),
 "file:permit": Vector2(-140, 1140),
-"offer:decoy": Vector2(-150, 755),
+"give:decoy": Vector2(-150, 755),
 "relay:treat_out": Vector2(-150, 530)
 }
 external_vars = PackedStringArray("treat_out")

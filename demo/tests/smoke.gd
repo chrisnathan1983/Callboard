@@ -23,7 +23,7 @@ func _initialize() -> void:
 	stage.activate()
 	stage.activate()
 	ok = _check("activating twice starts only one standoff loop", fired.count(&"z1_standoff") == 1) and ok
-	stage.fire(&"deliver")
+	stage.fire(&"give:duck")
 	ok = _check("a dark lamp still requires the guard to be off duty",
 		fired.has(&"z1_on_duty") and not stage.has_fired(&"z1_delivered")) and ok
 	var changes: Array = []
@@ -33,8 +33,8 @@ func _initialize() -> void:
 	ok = _check("stage forwards Blackboard writes to gameplay listeners",
 		changes == [[&"guard_calmed", true]] and stage.saved_vars[&"guard_calmed"]) and ok
 	stage.fire(&"file:permit")
-	stage.fire(&"deliver")
-	stage.fire(&"deliver")
+	stage.fire(&"give:duck")
+	stage.fire(&"give:duck")
 	await process_frame
 
 	var delivered_count := 0
