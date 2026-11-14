@@ -26,11 +26,135 @@ static func read(stage: Stage) -> GraphDraft:
 	for field: PayloadFieldData in definition.payload_fields:
 		data.payload_fields.append(field.duplicate(true))
 	data.call_positions = definition.call_positions.duplicate(true)
+	data.scene_analysis_current = true
 	_read_results(data, stage)
 	return data
 
-## Builds and validates a draft stage, then copies step metadata back onto the model.
-## A retained instance can be passed by an editor session to avoid rebuilding scene props.
+## Load authored resources and run checks that do not instantiate a Stage,
+## execute Stage hooks, invoke custom verb factories, or evaluate step arguments.
+static func inspect_definition_resources(path: String) -> GraphDraft:
+	var definition := ResourceLoader.load(path, "", ResourceLoader.CACHE_MODE_IGNORE) as StageDefinition
+	if definition == null:
+		return GraphDraft.load_error("Cannot load StageDefinition from %s" % path)
+	definition._migrate()
+	var data := GraphDraft.new()
+	data.definition = definition
+	data.managed_lifecycle = definition.managed_lifecycle
+	for binding: StageRestorationBinding in definition.restoration_bindings:
+		data.restoration_bindings.append(binding.duplicate())
+	for rule: RuleData in definition.rules:
+		data.rules.append(rule.duplicate_deep(Resource.DEEP_DUPLICATE_ALL))
+	for variable: VariableData in definition.variables:
+		data.variables.append(variable.duplicate_deep(Resource.DEEP_DUPLICATE_ALL))
+	for group: GroupData in definition.groups:
+		data.groups.append(group.duplicate())
+	data.external_calls.assign(definition.external_calls)
+	data.external_vars.assign(definition.external_vars)
+	for writer: BlackboardWriterData in definition.external_writers:
+		data.external_writers.append(writer.duplicate_data())
+	for field: PayloadFieldData in definition.payload_fields:
+		data.payload_fields.append(field.duplicate(true))
+	data.call_positions = definition.call_positions.duplicate(true)
+	var bb := Blackboard.new()
+	data.catalog = RuntimeVerbCatalog.from_factory(StagingVerbs.new(StepContext.new(bb, null, null, Callable())))
+	validate_resources(data)
+	return data
+
+## Validate authored structure without invoking project code. Checks that need
+## scene props, custom verbs, or expression values are left for `analyze()`.
+static func validate_resources(data: GraphDraft) -> void:
+	data.errors.clear()
+	data.warnings.clear()
+	data.scene_analysis_current = false
+	data.step_metadata.clear()
+	var keys := {}
+	for variable: VariableData in data.variables:
+		if variable.key.is_empty() or not variable.key.is_valid_identifier():
+			data.errors.append("Blackboard key '%s' is not a valid identifier" % variable.key)
+		if keys.has(variable.key):
+			data.errors.append("duplicate Blackboard key '%s'" % variable.key)
+		keys[variable.key] = variable.default_value
+		for alias in variable.aliases:
+			keys[alias] = variable.default_value
+	for key: StringName in data.external_vars:
+		keys[key] = null
+	for writer: BlackboardWriterData in data.external_writers:
+		if writer != null:
+			keys[writer.key] = null
+	var payloads := {}
+	for field: PayloadFieldData in data.payload_fields:
+		if field.key.is_empty() or not field.key.is_valid_identifier() or field.key in [&"payload", &"_callboard"]:
+			data.errors.append("payload field '%s' has an invalid name" % field.key)
+		if field.type_name not in ["bool", "int", "float", "String"]:
+			data.errors.append("payload field '%s' has an unsupported type '%s'" % [field.key, field.type_name])
+		if not payloads.has(field.event_id):
+			payloads[field.event_id] = {}
+		if payloads[field.event_id].has(field.key):
+			data.errors.append("payload field '%s' is declared more than once for '%s'" % [field.key, field.event_id])
+		payloads[field.event_id][field.key] = field.value_type()
+	var seen_rules := {}
+	var custom_verbs := {}
+	var emitted := {}
+	var listening := {}
+	for rule: RuleData in data.rules:
+		if rule.id.is_empty() or not rule.id.is_valid_identifier():
+			data.errors.append("rule ID '%s' is not a valid identifier" % rule.id)
+		if seen_rules.has(rule.id):
+			data.errors.append("duplicate rule id '%s'" % rule.id)
+		seen_rules[rule.id] = true
+		if rule.trigger.is_empty():
+			data.warnings.append("rule '%s' has no trigger" % rule.id)
+		else:
+			listening[rule.trigger] = true
+		if rule.one_shot and rule.reentry != Rule.ReentryPolicy.IGNORE:
+			data.errors.append("rule '%s' is one-shot and must use Ignore re-entry" % rule.id)
+		if rule.reentry not in Rule.ReentryPolicy.values():
+			data.errors.append("rule '%s' has an invalid re-entry policy" % rule.id)
+		if rule.steps.is_empty() and rule.emit.is_empty():
+			data.warnings.append("rule '%s' has no steps or completion relay" % rule.id)
+		if not rule.emit.is_empty():
+			emitted[StringName("relay:" + String(rule.emit))] = true
+		for guard: StringName in rule.requires + rule.forbids + rule.cancel_if:
+			var parsed := GuardExpression.parse(String(guard))
+			if not parsed["ok"]:
+				data.errors.append("rule '%s' has an invalid guard '%s'" % [rule.id, guard])
+			elif parsed["payload"] and payloads.has(rule.trigger):
+				if not parsed.get("presence", "").is_empty() or parsed["comparison"]:
+					if not payloads[rule.trigger].has(parsed["key"]):
+						data.errors.append("rule '%s' checks undeclared payload field '%s' for trigger '%s'" % [rule.id, parsed["key"], rule.trigger])
+			elif not parsed["payload"] and not keys.has(parsed["key"]):
+				data.warnings.append("rule '%s' checks key '%s', which is not declared in the StageDefinition; scene analysis will check script-defined keys" % [rule.id, parsed["key"]])
+		for step: StepData in rule.steps:
+			if step.verb.is_empty():
+				data.errors.append("rule '%s' has a step with no verb" % rule.id)
+			elif RuntimeVerbCatalog.find(data.catalog, String(step.verb)).is_empty():
+				custom_verbs[step.verb] = true
+			if step.verb == &"repeat_emit" and step.args.size() > 1:
+				var relay := ExprText.parse_literal(step.args[1])
+				if relay.ok and relay.value is StringName and not relay.value.is_empty():
+					emitted[StringName("relay:" + String(relay.value))] = true
+					var metadata := GraphDraft.StepAnalysis.new()
+					metadata.relay = String(relay.value)
+					metadata.relay_argument = 1
+					data.step_metadata[step] = metadata
+			if not step.delay.is_empty():
+				var delay := ExprText.parse_literal(step.delay)
+				if delay.ok and not (delay.value is int or delay.value is float):
+					data.errors.append("rule '%s' step delay must be numeric" % rule.id)
+				elif delay.ok and float(delay.value) < 0.0:
+					data.errors.append("rule '%s' step delay must be zero or greater" % rule.id)
+	for event_id in emitted:
+		if not listening.has(event_id):
+			data.warnings.append("'%s' is emitted but no rule listens to it" % event_id)
+	if not custom_verbs.is_empty():
+		var names: Array = custom_verbs.keys()
+		names.sort()
+		data.warnings.append("Custom verbs require scene analysis: %s" % ", ".join(names))
+
+## Scene-backed analysis. This instantiates the preview and executes Stage build
+## hooks, the verb factory, and authored argument expressions. Call explicitly
+## from Analyze Scene or Save; ordinary editing should use validate_resources().
+## A retained reusable instance avoids rebuilding props on repeated analyses.
 static func analyze(data: GraphDraft, cached_stage: Stage = null, retain_instance := false) -> Stage:
 	var draft := make_definition(data)
 	var tree := Engine.get_main_loop() as SceneTree
@@ -88,6 +212,7 @@ static func make_definition(data: GraphDraft) -> StageDefinition:
 	draft._migrate()
 	return draft
 
+## Scene-backed inspection for runtime/editor tests and explicit preview analysis.
 static func inspect_definition(path: String) -> GraphDraft:
 	var definition := ResourceLoader.load(path, "", ResourceLoader.CACHE_MODE_IGNORE) as StageDefinition
 	if definition == null:
@@ -111,6 +236,9 @@ static func _analysis_error(definition: StageDefinition) -> String:
 	return "Assign a script extending Stage to the StageDefinition."
 
 static func _read_results(data: GraphDraft, stage: Stage) -> void:
+	data.scene_analysis_current = true
+	data.catalog = RuntimeVerbCatalog.from_factory(stage.verbs)
+	data.props = RuntimeVerbCatalog.props_of(stage)
 	data.errors.assign(stage.graph_errors)
 	data.warnings.assign(stage.check())
 	data.step_metadata.clear()

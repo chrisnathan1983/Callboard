@@ -59,10 +59,10 @@ The first five items retain the high priority assigned in `TODO.md`.
   - [x] Align payload schema behavior: a missing event schema permits dynamic values checked at runtime, while a declared event schema rejects undeclared fields and enforces declared types.
   - [x] Compare integer/integer operands exactly for payload and Blackboard guards. Preserve approximate equality for float/float and mixed int/float comparisons, and test numeric ordering and equality behavior.
 
-- [ ] **Make editor validation safe to run while editing.** See [RuleGraphReader](addons/callboard/model/rule_graph_reader.gd), [Stage](addons/callboard/core/stage.gd), and [StageDefinition](addons/callboard/core/stage_definition.gd).
+- [x] **Make editor validation safe to run while editing.** See [RuleGraphReader](addons/callboard/model/rule_graph_reader.gd), [Stage](addons/callboard/core/stage.gd), and [StageDefinition](addons/callboard/core/stage_definition.gd).
   - [x] Analysis has opt-in preview-prop reuse via `can_reuse_analysis_props()` and can resolve scene-assigned props.
-  - [ ] Separate resource-only checks from scene-backed checks. The analysis path can parent a preview in the editor tree, run Stage build hooks, and evaluate argument expressions and verb factories. Reuse reduces scene rebuilds but still recompiles the graph.
-  - [ ] Make scene-backed checks explicit and document which `@tool` callbacks, Stage hooks, and step factories must be safe during preview. Verify ordinary static edits avoid executing project setup or custom expressions.
+  - [x] Separate resource-only checks from scene-backed checks. Opening a definition, ordinary edits, undo/redo, and relay renames use resource checks without instantiating a Stage or evaluating authored expressions. **Analyze Scene** and **Save** run scene-backed compilation.
+  - [x] Make scene-backed checks explicit and document preview behavior. The API reference lists script initialization, tree callbacks, Stage hooks, verb factories, and authored expressions that may execute. Editor smoke tests verify opening and editing do not instantiate the preview or rerun Stage setup; explicit analysis resolves scene props.
 
 - [ ] **Restore original colors after overlapping mesh effects.** See [`StagingVerbs.flash()`](addons/callboard/core/staging_verbs.gd).
   - [x] The effect isolates materials and uses the latest tween's ownership while allowing earlier tweens to finish and release waiting rules.

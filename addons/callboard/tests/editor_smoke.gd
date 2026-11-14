@@ -36,14 +36,27 @@ func _test_scene_assigned_props() -> bool:
 	var board := Callboard.new()
 	root.add_child(board)
 	board.open_script(TMP_PATH)
+	var opened_without_scene := board._analysis_stage == null and not board._data.scene_analysis_current
+	board._changed("use_scene_prop")
+	var edit_did_not_instantiate := board._analysis_stage == null
+	board.analyze_scene()
 	var ok := _check("Callboard resolves exported and @onready props from a differently named preview scene",
-		board._data.errors.is_empty() and board._data.warnings.is_empty())
+		board._data.errors.is_empty() and board._data.warnings.is_empty()
+		and board._analysis_stage.get_meta(&"fixture_build_props_count", 0) == 1)
+	ok = _check("opening and ordinary edits run resource-only validation without creating a preview Stage",
+		opened_without_scene and edit_did_not_instantiate) and ok
+	var analyzed_stage := board._analysis_stage
+	board._changed("use_scene_prop")
+	ok = _check("ordinary edits do not rerun Stage setup after explicit scene analysis",
+		board._analysis_stage == analyzed_stage
+		and board._analysis_stage.get_meta(&"fixture_build_props_count", 0) == 1) and ok
 	if ok:
 		board.add_call_name("preview_fixture_call")
 		board.save()
 		ok = _check("Callboard saves omit the transient analysis source",
 			not "metadata/_analysis_scene_source" in FileAccess.get_file_as_string(TMP_PATH)) and ok
 		board.open_script(TMP_PATH)
+		board.analyze_scene()
 		var reloaded: StageDefinition = board._data.definition
 		ok = _check("Callboard save preserves the explicit preview scene",
 			reloaded != null and reloaded.preview_scene_path == definition.preview_scene_path

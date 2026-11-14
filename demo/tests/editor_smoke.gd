@@ -131,7 +131,7 @@ func _test_board_editing() -> bool:
 	var stage_paths := board._collect_all_stage_definition_paths()
 	ok = _check("board: discovers the demo stage from the project settings",
 		stage_paths.has(DEFINITION_PATH)) and ok
-	board.open_script(DEFINITION_PATH)
+	_open_analyzed(board, DEFINITION_PATH)
 	var d := board._data
 	board.view._rule_nodes["z1_bark"].position_offset = Vector2(555, 77)
 
@@ -149,7 +149,7 @@ func _test_board_editing() -> bool:
 	var retained_stage: Stage = board._analysis_stage
 	var retained_prop_count := retained_stage.get_child_count()
 	board._changed("new_rule")
-	ok = _check("analysis reuses the built scene props between edits",
+	ok = _check("ordinary edits preserve preview props without rebuilding the scene",
 		board._analysis_stage == retained_stage and retained_stage.get_child_count() == retained_prop_count) and ok
 
 	board.connect_wire({"rule": "z1_bark", "port": 0}, "new_rule")
@@ -210,7 +210,7 @@ func _test_save_and_history() -> bool:
 	var original := FileAccess.get_file_as_string(TMP_PATH)
 	var b2 := Callboard.new()
 	root.add_child(b2)
-	b2.open_script(TMP_PATH)
+	_open_analyzed(b2, TMP_PATH)
 	await process_frame
 	var d2 := b2._data
 	ok = _check("adding an event creates a wireable event card",
@@ -256,6 +256,7 @@ func _test_save_and_history() -> bool:
 	ok = _check("redo reconnects event wire", _rule(d2, "z1_decoy").trigger == "doorbell") and ok
 	_rule(d2, "z1_standoff").steps[0].args[0] = "@@"
 	b2._changed("z1_standoff")
+	b2.analyze_scene()
 	ok = _check("broken edit: compile failure detected", not d2.errors.is_empty()) and ok
 	b2._on_rule_selected("z1_calm")
 	var note_index: int = d2.errors.find_custom(func(note: String) -> bool: return "'z1_standoff'" in note)
@@ -316,7 +317,7 @@ func _test_save_and_history() -> bool:
 	ok = _check("undo after saving is an unsaved edit", b2._dirty) and ok
 	b2.redo()
 	ok = _check("redo to saved state clears unsaved indicator", not b2._dirty) and ok
-	b2.open_script(TMP_PATH)
+	_open_analyzed(b2, TMP_PATH)
 	ok = _check("reopening resource restores moved rule position",
 		b2.view.get_positions()["z1_bark"] == saved_rule_pos) and ok
 	ok = _check("reopening resource restores moved Call position",
@@ -336,15 +337,16 @@ func _test_debounced_history() -> bool:
 	board._debounce_edits = true
 	root.add_child(board)
 	await process_frame
-	board.open_script(TMP_PATH)
+	_open_analyzed(board, TMP_PATH)
 	var id := "z1_standoff"
 	var step: StepData = _rule(board._data, id).steps[0]
 	step.args[1] = '&"updated_tick"'
 	board.inspector.changed.emit(id)
-	var ok := _check("scheduled edit records immediately and defers analysis",
+	var ok := _check("scheduled edit records immediately and defers resource checks",
 		board.is_dirty() and board._data.relay_for(step) == "standoff_tick" and not board._analysis_debounce.is_stopped())
 	await create_timer(0.15).timeout
-	ok = _check("debounced analysis updates relay metadata", board._data.relay_for(step) == "updated_tick") and ok
+	ok = _check("debounced resource checks derive literal relay metadata without scene analysis",
+		board._data.relay_for(step) == "updated_tick" and not board._data.scene_analysis_current) and ok
 	board.undo()
 	step = _rule(board._data, id).steps[0]
 	ok = _check("one undo restores the authored relay and its metadata",
@@ -370,7 +372,7 @@ func _test_canvas_actions() -> bool:
 	var board := Callboard.new()
 	board.size = Vector2(1280, 720)
 	root.add_child(board)
-	board.open_script(DEFINITION_PATH)
+	_open_analyzed(board, DEFINITION_PATH)
 	await process_frame
 	var view := board.view
 	var ok := _check("rule settings starts hidden", not board._settings_window.visible)
@@ -456,7 +458,7 @@ func _test_event_and_relay_edits() -> bool:
 		return false
 	var board := Callboard.new()
 	root.add_child(board)
-	board.open_script(TMP_PATH)
+	_open_analyzed(board, TMP_PATH)
 	await process_frame
 	board._connections_button.button_pressed = true
 	board._refresh_connections("give:decoy")
@@ -554,7 +556,7 @@ func _test_rename_saved_state() -> bool:
 		return false
 	var board := Callboard.new()
 	root.add_child(board)
-	board.open_script(TMP_PATH)
+	_open_analyzed(board, TMP_PATH)
 	board._on_rule_selected("z1_delivered")
 	board.inspector._set_id("delivered")
 	board.undo()
@@ -620,7 +622,7 @@ func _test_rename_saved_state() -> bool:
 func _test_numeric_undo() -> bool:
 	var board := Callboard.new()
 	root.add_child(board)
-	board.open_script(DEFINITION_PATH)
+	_open_analyzed(board, DEFINITION_PATH)
 	await process_frame
 	board.blackboard._on_add(1)
 	var row := board.blackboard._rows.get_child(board.blackboard._rows.get_child_count() - 1)
@@ -714,6 +716,10 @@ func _test_live_debug() -> bool:
 	ok = _check("debug stays open when switching between connections and Blackboard", panels_open and debug_still_open) and ok
 	ok = _check("live connections can fire Calls but not relays", call_can_fire and relay_has_no_fire) and ok
 	return _check("live debug records Calls fired from the connections panel", traced_call) and ok
+
+func _open_analyzed(board: Callboard, path: String) -> void:
+	board.open_script(path)
+	board.analyze_scene()
 
 func _rule(draft: GraphDraft, id: String) -> RuleData:
 	return draft.find_rule(id)

@@ -87,7 +87,6 @@ static func rename(data: GraphDraft, id: String, new_name: String) -> String:
 	draft.props = data.props
 	draft.restore(data.snapshot())
 	var old_relay := id.trim_prefix(RELAY_PREFIX)
-	var renamed_steps: Array[StepData] = []
 	for rule_index in draft.rules.size():
 		var rule := draft.rules[rule_index]
 		var original_rule := data.rules[rule_index]
@@ -96,21 +95,29 @@ static func rename(data: GraphDraft, id: String, new_name: String) -> String:
 		for step_index in rule.steps.size():
 			var step := rule.steps[step_index]
 			var original_step := original_rule.steps[step_index]
+			var original_analysis: GraphDraft.StepAnalysis = data.step_metadata.get(original_step)
+			if original_analysis != null:
+				var copied_analysis := GraphDraft.StepAnalysis.new()
+				copied_analysis.relay = original_analysis.relay
+				copied_analysis.relay_argument = original_analysis.relay_argument
+				draft.step_metadata[step] = copied_analysis
 			if data.relay_for(original_step) != old_relay:
 				continue
-			var arg := data.step_metadata[original_step].relay_argument
+			var arg := original_analysis.relay_argument if original_analysis != null else -1
 			var params: Array = VerbCatalog.find(draft.catalog, step.verb).get("args", [])
 			if arg < 0 or arg >= params.size():
 				return "Rename the relay in the %s verb used by %s." % [step.verb, rule.id]
 			var value: Variant = new_name if params[arg]["type"] == TYPE_STRING else StringName(new_name)
 			VerbCatalog.set_arg(draft, step, arg, ExprText.format_literal(value))
-			renamed_steps.append(step)
+			draft.step_metadata[step].relay = new_name
 	_replace_references(draft, id, new_id)
-	RuleGraphReader.analyze(draft)
-	if renamed_steps.any(func(step: StepData) -> bool: return draft.relay_for(step) != new_name):
-		return "The edited steps could not emit the new relay. Check the verb arguments."
+	RuleGraphReader.validate_resources(draft)
 	data.external_calls = draft.external_calls
 	data.rules = draft.rules
+	data.step_metadata = draft.step_metadata
+	data.errors = draft.errors
+	data.warnings = draft.warnings
+	data.scene_analysis_current = false
 	return ""
 
 static func remove(data: GraphDraft, id: String) -> String:

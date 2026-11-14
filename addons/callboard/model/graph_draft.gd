@@ -22,6 +22,8 @@ var props: Array = []
 var errors: Array[String] = []
 var warnings: Array[String] = []
 var load_failed := false
+## False until a user explicitly runs scene-backed validation or saves the draft.
+var scene_analysis_current := false
 
 # Compiled metadata is keyed by draft step identity and never enters undo history.
 var step_metadata: Dictionary[StepData, StepAnalysis] = {}

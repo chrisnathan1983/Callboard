@@ -37,6 +37,7 @@ var _debounce_edits := Engine.is_editor_hint()
 var _pending_selection := ""
 var _accum := 0.0
 var _save_button: Button
+var _analyze_scene_button: Button
 var _reload_button: Button
 var _undo_button: Button
 var _redo_button: Button
@@ -94,6 +95,8 @@ func _init() -> void:
 			_picker.custom_minimum_size.x *= _picker.get_theme_default_base_scale())
 	_picker.item_selected.connect(_on_picker)
 	stage_tools.add_child(_picker)
+	_analyze_scene_button = _icon_button(&"Search", "Analyze Scene", "Run scene-backed validation. This instantiates the preview and runs @tool Stage hooks, custom verb factories, and authored step expressions.", analyze_scene)
+	stage_tools.add_child(_analyze_scene_button)
 	_save_button = _icon_button(&"Save", "Save", "Save stage (Ctrl/Cmd+S)", save)
 	_reload_button = _icon_button(&"Reload", "Reload", "Reload stage from disk", _request_reload)
 	_reload_dialog.title = "Reload Stage"
@@ -355,7 +358,7 @@ func open_script(path: String) -> void:
 	_picker.tooltip_text = path
 	_dirty = false
 	_selected = ""
-	_show(RuleGraphReader.inspect_definition(path), true)
+	_show(RuleGraphReader.inspect_definition_resources(path), true)
 
 func _on_picker(i: int) -> void:
 	if _dirty:
@@ -406,6 +409,9 @@ func _analyze_data() -> void:
 	_analysis_debounce.stop()
 	_pending_selection = ""
 	var definition: StageDefinition = _data.definition
+	if definition == null:
+		_data.scene_analysis_current = false
+		return
 	var scene_source := definition.analysis_scene_path()
 	var script_path := definition.stage_script.resource_path if definition.stage_script else ""
 	var source_key := scene_source + "|" + script_path
@@ -413,6 +419,25 @@ func _analyze_data() -> void:
 		_clear_analysis_stage()
 	_analysis_stage = RuleGraphReader.analyze(_data, _analysis_stage, true)
 	_analysis_source_key = source_key if _analysis_stage != null else ""
+	if not _data.scene_analysis_current:
+		_data.warnings.append("Scene analysis could not create a preview Stage.")
+
+## Explicitly run project-backed analysis after ordinary resource-only editing.
+func analyze_scene() -> void:
+	if not _editable or _data.definition == null:
+		return
+	_sync_layout()
+	RuleGraphReader.validate_resources(_data)
+	_analyze_data()
+	blackboard.show_data(_data, true, false)
+	view.update_data(_data)
+	if _data.find_rule(_selected) != null:
+		_on_rule_selected(_selected)
+	_update_status()
+	if _data.scene_analysis_current:
+		_set_status("Scene analysis complete", Style.SUCCESS)
+	else:
+		_set_status("Scene analysis failed; see the diagnostics", Style.ERROR)
 
 func _clear_analysis_stage() -> void:
 	if _analysis_stage != null and is_instance_valid(_analysis_stage):
@@ -432,6 +457,7 @@ func _show(data: GraphDraft, editable: bool, live := false, reuse_graph := false
 	_expanded_connections.clear()
 	_clear_selection()
 	_editable = editable
+	_analyze_scene_button.visible = editable
 	for b in _edit_buttons:
 		b.visible = editable
 	_create_tools.visible = editable
@@ -456,6 +482,7 @@ func _show(data: GraphDraft, editable: bool, live := false, reuse_graph := false
 
 func _update_status() -> void:
 	_save_button.disabled = not _editable or _path.is_empty()
+	_analyze_scene_button.disabled = not _editable or _path.is_empty()
 	_undo_button.disabled = not _editable or not _history.can_undo()
 	_redo_button.disabled = not _editable or not _history.can_redo()
 	_create_call_button.disabled = not _editable
@@ -472,9 +499,11 @@ func _update_status() -> void:
 	var t := "%d %s" % [rules, "rule" if rules == 1 else "rules"]
 	if _dirty:
 		t = "Unsaved · " + t
+	if _editable and not _data.scene_analysis_current:
+		t += " · Scene analysis pending"
 	if is_instance_valid(_live):
 		t = "Live · " + t
-	_set_status(t, Style.WARNING if _dirty else Style.MUTED)
+	_set_status(t, Style.WARNING if _dirty or (_editable and not _data.scene_analysis_current) else Style.MUTED)
 	var counts := PackedStringArray()
 	if not _data.errors.is_empty():
 		counts.append("%d %s" % [_data.errors.size(), "error" if _data.errors.size() == 1 else "errors"])
@@ -554,7 +583,7 @@ func _restore_edit(state: Dictionary) -> void:
 	# Release the old inspector controls before replacing the draft resources.
 	inspector.clear()
 	_data.restore(state)
-	_analyze_data()
+	RuleGraphReader.validate_resources(_data)
 	blackboard.show_data(_data, true, false)
 	view.update_data(_data)
 	if _data.find_rule(_selected) != null:
@@ -762,7 +791,7 @@ func _changed(select_id: String, spin: SpinBox = null) -> void:
 		_record_edit(spin)
 		_spin_refresh_pending = true
 		return
-	_analyze_data()
+	RuleGraphReader.validate_resources(_data)
 	view.update_data(_data)
 	_selected = select_id
 	if _data.find_rule(select_id) == null:
@@ -919,9 +948,9 @@ func save() -> void:
 		return
 	if not _analysis_debounce.is_stopped():
 		_flush_debounced_change()
-	else:
-		_sync_layout()
-		_analyze_data()
+	_sync_layout()
+	RuleGraphReader.validate_resources(_data)
+	_analyze_data()
 	if not _data.errors.is_empty():
 		_set_status("Fix graph errors before saving.", Style.ERROR)
 		return

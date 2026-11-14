@@ -93,6 +93,8 @@ Connect to `stage.gameplay_event` after loading the Stage. The addon emits the a
 
 Use `@tool` on the Stage script and custom verb factory so Callboard can analyze them in the editor. Initialize typed prop references in the scene or in `_build_props()` before the editor or runtime compiles steps.
 
+Callboard opens StageDefinitions and processes ordinary graph edits with resource-only checks. These checks do not instantiate the Stage, run project setup, invoke custom verb factories, or evaluate authored step expressions. The **Analyze Scene** button runs the scene-backed checks explicitly; saving also runs them before writing. Scene analysis may instantiate the preview scene and run script initialization, tree callbacks, `_build_props()`, `_build_blackboard()`, `_declare_external_writers()`, `_make_verbs()`, and authored argument expressions. Keep `@tool` callbacks and these hooks safe to run in the editor: avoid starting gameplay, changing project files, or creating persistent external state. Prefer idempotent setup and release temporary resources when the preview is freed. Custom verb signatures and scene-assigned props become available after scene analysis.
+
 ## StageDefinition
 
 [`StageDefinition`](../core/stage_definition.gd) is the resource assigned to `Stage.definition`. The editor saves variables, rules, steps, and groups as typed subresources. Older dictionary-based definitions migrate to the current format and retain their persisted state keys.
