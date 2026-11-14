@@ -37,7 +37,8 @@ func cancel_all() -> void:
 	for tracker in _pending_callbacks.values():
 		var tracked_signal: Signal = tracker["signal"]
 		var callback: Callable = tracker["callback"]
-		if not tracked_signal.is_null() and tracked_signal.is_connected(callback):
+		var tracked_object := tracked_signal.get_object()
+		if is_instance_valid(tracked_object) and tracked_signal.is_connected(callback):
 			tracked_signal.disconnect(callback)
 	_pending_callbacks.clear()
 	pending_changed.emit(pending_snapshot())
@@ -46,7 +47,8 @@ func cancel_all() -> void:
 	for entry: Dictionary in cancelled:
 		var source: Signal = entry["source"]
 		var callback: Callable = entry["callback"]
-		if not source.is_null() and source.is_connected(callback):
+		var source_object := source.get_object()
+		if is_instance_valid(source_object) and source.is_connected(callback):
 			source.disconnect(callback)
 		entry["completion"].completed.emit()
 
@@ -142,7 +144,7 @@ func wait_tracked(seconds: float, rule_id: StringName, label: String) -> Signal:
 func interruptible(source: Signal) -> Signal:
 	var completion := AwaitedSignal.new()
 	var id := completion.get_instance_id()
-	var callback := _complete_wait.bind(id)
+	var callback := func(_emitted_value: Variant = null) -> void: _complete_wait(id)
 	_awaited_signals[id] = {"source": source, "callback": callback, "completion": completion}
 	source.connect(callback, CONNECT_ONE_SHOT)
 	return completion.completed

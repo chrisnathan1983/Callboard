@@ -185,11 +185,33 @@ func _test_player_and_bump(stage: Stage, fired: Array[StringName]) -> bool:
 func _test_staging_verbs(stage: Stage) -> bool:
 	var mesh := MeshInstance3D.new()
 	mesh.name = "EffectTestMesh"
-	mesh.material_override = Props.mat(Color(0.2, 0.4, 0.8))
+	var source_material := Props.mat(Color(0.2, 0.4, 0.8))
+	mesh.material_override = source_material
 	stage.add_child(mesh)
-	var material := mesh.material_override as BaseMaterial3D
-	var base := material.albedo_color
+	var base := source_material.albedo_color
 	var verbs := stage.verbs as StagingVerbs
+	var keyless_light := verbs.light(mesh, true)
+	keyless_light.fn.call({})
+	var keyless_light_works := mesh.visible and keyless_light.sets.is_empty()
+	mesh.hide()
+	var shared_mesh_resource := BoxMesh.new()
+	var shared_surface := Props.mat(Color(0.15, 0.35, 0.65))
+	shared_mesh_resource.surface_set_material(0, shared_surface)
+	var first_prop := MeshInstance3D.new()
+	first_prop.mesh = shared_mesh_resource
+	var second_prop := MeshInstance3D.new()
+	second_prop.mesh = shared_mesh_resource
+	stage.add_child(first_prop)
+	stage.add_child(second_prop)
+	var surface_flash := verbs.flash(first_prop).fn.call({}) as Signal
+	var first_effect_material := first_prop.get_active_material(0) as BaseMaterial3D
+	var second_effect_material := second_prop.get_active_material(0) as BaseMaterial3D
+	var isolated_surface_materials := (
+		first_effect_material != shared_surface and second_effect_material == shared_surface)
+	await surface_flash
+	var shared_surface_unchanged := shared_surface.albedo_color.is_equal_approx(Color(0.15, 0.35, 0.65))
+	first_prop.queue_free()
+	second_prop.queue_free()
 	var flash_rule := Rule.new(&"test_flash", &"test_flash")
 	var completed: Array[bool] = []
 	flash_rule.steps.append(verbs.flash(mesh))
@@ -200,8 +222,13 @@ func _test_staging_verbs(stage: Stage) -> bool:
 	stage.fire(&"test_flash")
 	stage.fire(&"test_jump")
 	await create_timer(1.0).timeout
+	var material := mesh.material_override as BaseMaterial3D
 	var ok := _check("jump restores its original material color and height",
-		material.albedo_color.is_equal_approx(base) and is_zero_approx(mesh.position.y))
+		material.albedo_color.is_equal_approx(base) and is_zero_approx(mesh.position.y)
+		and material != source_material and source_material.albedo_color.is_equal_approx(base))
+	ok = _check("timed-light key is optional for visibility-only actions", keyless_light_works) and ok
+	ok = _check("surface tint duplicates shared materials on only the target mesh",
+		isolated_surface_materials and shared_surface_unchanged) and ok
 	ok = _check("an interrupted flash advances the rule and clears its active state",
 		completed == [true] and stage.engine.active_snapshot().is_empty()) and ok
 	await verbs.flash(mesh).fn.call({})
@@ -210,6 +237,83 @@ func _test_staging_verbs(stage: Stage) -> bool:
 	mesh.position.y = 2.0
 	await verbs.jump(mesh).fn.call({})
 	ok = _check("a later jump returns to the mesh's new height", is_equal_approx(mesh.position.y, 2.0)) and ok
+	var bare_mesh := MeshInstance3D.new()
+	bare_mesh.mesh = BoxMesh.new()
+	stage.add_child(bare_mesh)
+	await verbs.jump(bare_mesh).fn.call({})
+	ok = _check("jump still performs its transform when the mesh has no tintable material",
+		is_zero_approx(bare_mesh.position.y)) and ok
+	bare_mesh.queue_free()
+
+	var rotation_target := Node3D.new()
+	stage.add_child(rotation_target)
+	var rotate_step := verbs.rotate_to(rotation_target, Vector3(0, 0.6, 0), 0.05, true)
+	await rotate_step.fn.call({})
+	ok = _check("rotate_to waits for the requested rotation tween",
+		is_equal_approx(rotation_target.rotation.y, 0.6)) and ok
+
+	var animated_root := Node3D.new()
+	var animated_target := Node3D.new()
+	animated_target.name = "AnimatedTarget"
+	animated_root.add_child(animated_target)
+	var animation_player := AnimationPlayer.new()
+	animated_root.add_child(animation_player)
+	stage.add_child(animated_root)
+	var animation := Animation.new()
+	animation.length = 0.1
+	var track := animation.add_track(Animation.TYPE_VALUE)
+	animation.track_set_path(track, NodePath("AnimatedTarget:rotation"))
+	animation.track_insert_key(track, 0.0, Vector3.ZERO)
+	animation.track_insert_key(track, 0.1, Vector3(0, 0.8, 0))
+	var animation_library := AnimationLibrary.new()
+	animation_library.add_animation(&"turn", animation)
+	animation_player.add_animation_library(&"", animation_library)
+	var animation_finished := [false]
+	var animation_rule := Rule.new(&"test_animation", &"test_animation")
+	animation_rule.steps.append(verbs.play_animation(animation_player, &"turn", true))
+	animation_rule.steps.append(Step.new(func(_ctx: Dictionary) -> void: animation_finished[0] = true))
+	stage.engine.rules.append(animation_rule)
+	stage.fire(&"test_animation")
+	await create_timer(0.15).timeout
+	ok = _check("play_animation waits for the named AnimationPlayer clip",
+		animation_finished[0] and is_equal_approx(animated_target.rotation.y, 0.8)) and ok
+	var pose := verbs.pose_animation(animation_player, &"turn", 0.05)
+	pose.fn.call({})
+	await process_frame
+	ok = _check("pose_animation seeks and pauses at the requested clip time",
+		not animation_player.is_playing() and animated_target.rotation.y > 0.0) and ok
+	stage.engine.rules.erase(animation_rule)
+	animated_root.queue_free()
+	rotation_target.queue_free()
+
+	var emitted_gameplay_events: Array = []
+	stage.gameplay_event.connect(func(event_id: StringName, arguments: Dictionary) -> void:
+		emitted_gameplay_events.append([event_id, arguments.duplicate(true)]))
+	var outbound_step := verbs.gameplay_event(&"door_unlocked", {"door": &"north", "forced": false})
+	outbound_step.fn.call({})
+	ok = _check("gameplay_event emits a typed ID and copied argument payload",
+		emitted_gameplay_events == [[&"door_unlocked", {"door": &"north", "forced": false}]]) and ok
+
+	var audio := AudioStreamPlayer.new()
+	var audio_stream := AudioStreamGenerator.new()
+	audio_stream.buffer_length = 5.0
+	audio.stream = audio_stream
+	stage.add_child(audio)
+	var audio_completed := [false]
+	var audio_rule := Rule.new(&"test_audio", &"test_audio")
+	audio_rule.steps.append(verbs.play_audio(audio, true))
+	audio_rule.steps.append(Step.new(func(_ctx: Dictionary) -> void: audio_completed[0] = true))
+	stage.engine.rules.append(audio_rule)
+	stage.fire(&"test_audio")
+	await create_timer(0.05).timeout
+	var audio_waiting: bool = audio.playing and not audio_completed[0]
+	stage.deactivate()
+	await process_frame
+	ok = _check("play_audio can await completion and releases that wait on Stage deactivation",
+		audio_waiting and not audio_completed[0] and stage.engine._awaited_signals.is_empty()) and ok
+	audio.stop()
+	stage.engine.rules.erase(audio_rule)
+	audio.queue_free()
 	var destination := Node3D.new()
 	stage.add_child(destination)
 	destination.position = Vector3(2, 3, 4)

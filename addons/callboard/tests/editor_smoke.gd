@@ -8,6 +8,7 @@ func _initialize() -> void:
 	await process_frame
 	var ok := _test_scene_assigned_props()
 	ok = _test_add_var_editor() and ok
+	ok = _test_staging_verb_catalog_and_validation() and ok
 	ok = _test_layer_export_filter() and ok
 	ok = _test_factory() and ok
 	ok = _test_debug_panel() and ok
@@ -86,6 +87,49 @@ func _test_add_var_editor() -> bool:
 		and float_delta != null and float_delta.step == 0.05)
 	inspector.free()
 	return ok
+
+func _test_staging_verb_catalog_and_validation() -> bool:
+	var bb := Blackboard.new()
+	bb.define(&"light_on", &"local", false)
+	bb.define(&"wrong_type", &"local", 0)
+	var factory := StagingVerbs.new(StepContext.new(bb, null, null, Callable()))
+	var catalog := VerbCatalog.from_factory(factory)
+	var expected_verbs := ["light", "play_audio", "rotate_to", "play_animation", "pose_animation", "gameplay_event"]
+	var listed := expected_verbs.all(func(name: String) -> bool: return not VerbCatalog.find(catalog, name).is_empty())
+	var target := Node3D.new()
+	var light := factory.light(target, true, 1.0, &"light_on")
+	light.verb = &"light"
+	light.args = [target, true, 1.0, &"light_on"]
+	var valid_light := factory.validate_step(&"valid_light", light, bb).is_empty()
+	var optional_light := factory.light(target, true)
+	optional_light.verb = &"light"
+	optional_light.args = [target, true, 0.0, &""]
+	var empty_key_is_allowed := factory.validate_step(&"optional_light", optional_light, bb).is_empty()
+	var invalid_light := factory.light(target, true, 1.0, &"missing")
+	invalid_light.verb = &"light"
+	invalid_light.args = [target, true, 1.0, &"missing"]
+	var missing_key_is_reported := factory.validate_step(&"invalid_light", invalid_light, bb).any(
+		func(problem: String) -> bool: return "light key 'missing' is not declared" in problem)
+	invalid_light.args[3] = &"wrong_type"
+	var wrong_key_type_is_reported := factory.validate_step(&"invalid_light", invalid_light, bb).any(
+		func(problem: String) -> bool: return "must be Boolean" in problem)
+	var bad_audio := factory.play_audio(Node.new())
+	bad_audio.verb = &"play_audio"
+	bad_audio.args = [Node.new(), false]
+	var bad_target_is_reported := factory.validate_step(&"invalid_audio", bad_audio, bb).any(
+		func(problem: String) -> bool: return "play_audio target must" in problem)
+	var validation_stage := Stage.new()
+	validation_stage.build()
+	var invalid_audio_rule := Rule.new(&"invalid_audio", &"arrive")
+	invalid_audio_rule.steps.append(bad_audio)
+	validation_stage.engine.rules.append(invalid_audio_rule)
+	var stage_reports_bad_audio := validation_stage.check().any(
+		func(problem: String) -> bool: return "play_audio target must" in problem)
+	validation_stage.free()
+	target.free()
+	return _check("staging verbs appear in the picker and validate required targets and the optional Boolean light key",
+		listed and valid_light and empty_key_is_allowed and missing_key_is_reported
+		and wrong_key_type_is_reported and bad_target_is_reported and stage_reports_bad_audio)
 
 func _test_layer_export_filter() -> bool:
 	var test_path := "res://addons/callboard/tests/fixtures/assigned_prop_stage.tscn"

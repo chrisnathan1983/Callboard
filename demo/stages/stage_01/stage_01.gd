@@ -56,9 +56,9 @@ func can_reuse_analysis_props() -> bool:
 	return true
 
 func _make_verbs(context: StepContext) -> CoreVerbs:
-	# Extend StagingVerbs to keep built-in actions like show_node() and move_to().
-	# Stage01Verbs adds light() and stun_player(). Callboard reads their typed
-	# parameters and defaults for the step editor and validates the arguments.
+	# Extend StagingVerbs with Stage 01's stun_player() action. The generic light(),
+	# movement, audio, animation, and other reusable actions stay in the addon.
+	# Callboard reads the typed parameters and defaults for the step editor.
 	return Stage01Verbs.new(context)
 
 func _restore_state() -> void:

@@ -70,6 +70,9 @@ Step callables receive authored fields at the top level for compatibility and al
 | `rule_fired(rule_id: StringName, event: StringName)` | A rule starts, or `fire_relay_once()` reports the supplied source. |
 | `var_changed(key: StringName, value: Variant)` | An accepted write that changes the stored Blackboard value. The key uses its current name. |
 | `scored(points: int)` | A scoring step emits a score delta. The game owns the total. |
+| `gameplay_event(event_id: StringName, arguments: Dictionary)` | A `gameplay_event` step asks host code to apply a project-specific action. |
+
+Connect to `stage.gameplay_event` after loading the Stage. The addon emits the authored ID and a deep copy of the arguments; it does not interpret them. `Stage.scored` and the `score(points)` verb remain available for score deltas.
 
 ### Stage hooks
 
@@ -156,12 +159,22 @@ The default factory is [`StagingVerbs`](../addons/callboard/core/staging_verbs.g
 | Core | `score(points)` | Emit a score delta. |
 | Core | `repeat_emit(interval, tick)` | Emit `relay:<tick>` every interval in seconds until the rule is cancelled. This step occupies the rule while it runs. |
 | Staging | `show_node(n, should_be_visible = true)` | Set a `Node3D`'s visibility. |
+| Staging | `light(n, on, duration = 0.0, key = &"")` | Set visibility immediately. A positive duration turns it off at timeout, rule cancellation, or Stage deactivation. The optional key mirrors the Boolean state and must be declared as a Boolean Blackboard value. |
 | Staging | `pop(n)`, `bounce(n)` | Play a scale animation. |
 | Staging | `say(n, text, seconds = 1.0)` | Show temporary text at a node. |
 | Staging | `move_to(n, dest, offset = Vector3.ZERO, duration = 0.7)` | Tween a node to a target with an offset. |
-| Staging | `flash(m)`, `jump(m)` | Tint a mesh or animate a vertical hop. Both use a BaseMaterial3D material override. |
+| Staging | `play_audio(player, wait_for_completion = false)` | Play an `AudioStreamPlayer`, `AudioStreamPlayer2D`, or `AudioStreamPlayer3D`. Waiting holds the rule until the stream finishes. |
+| Staging | `rotate_to(n, target_rotation, duration = 0.25, wait_for_completion = true)` | Rotate a `Node3D` to Euler angles in radians. Set duration to zero for an immediate change or disable waiting to let the tween continue in the background. |
+| Staging | `play_animation(player, animation, wait_for_completion = true)` | Play a named `AnimationPlayer` clip. Waiting releases on clip completion or Stage deactivation. |
+| Staging | `pose_animation(player, animation, time = 0.0)` | Seek to a time in a named clip and pause there. |
+| Staging | `gameplay_event(event_id, arguments = {})` | Emit `Stage.gameplay_event` for host-owned behavior such as doors, quests, or inventory. |
+| Staging | `flash(m)`, `jump(m)` | Tint compatible `BaseMaterial3D` overrides or mesh surfaces. Materials are duplicated for the target instance; `jump` still performs its hop when no tintable material exists. |
 
 When `move_to` and `jump` overlap on the same node, the latest step controls its position. Earlier steps finish on their original schedule so their rules can continue.
+
+`light` writes the supplied key only when it is non-empty. A timed turn-on writes `true`, then writes `false` when it turns off. A newer activation owns the node, so an older timeout cannot turn off a newer light state. The editor reports missing targets, missing/non-Boolean light keys, absent audio streams, and missing animation clips before Stage activation.
+
+The wait options on `play_audio`, `rotate_to`, and `play_animation` are explicit. A waiting rule resumes when the source finishes; use a non-looping clip or stream when waiting for playback completion. Stage deactivation releases its wait. Non-waiting tween/audio/animation actions continue according to their Godot node's lifetime and process mode.
 
 ### Built-in cancellation behavior
 
@@ -171,12 +184,13 @@ The engine checks **Cancel If** before the first step and after each step or del
 | --- | --- |
 | `set_var`, `add_var`, `score`, `show_node` | Completed writes, score changes, and visibility changes stay applied. |
 | `repeat_emit` | Checks before each tick and stops emitting when cancelled. Deactivation releases its timer wait immediately. |
-| `pop`, `bounce`, `move_to` | The tween finishes while the Stage remains in the tree. Deactivation immediately releases the rule's wait. |
-| `flash`, `jump` | The animation finishes while the Stage remains in the tree. The current tint restores its base color and the current jump returns to its base height. Deactivation immediately releases the rule's wait. |
+| `pop`, `bounce`, `move_to`, waiting `rotate_to` | The tween finishes while the Stage remains in the tree. Deactivation immediately releases the rule's wait. |
+| `flash`, `jump` | The tint restores the target instance's base colors and the hop returns to its base height. Deactivation immediately releases the rule's wait. |
+| Waiting `play_audio`, `play_animation` | The rule waits for playback to finish. Stage deactivation immediately releases the wait. |
 | `say` | The label expires on its own timer. A later `say` on the same node replaces it and starts a new timer. |
-| `_light` | A timed activation turns off on timeout, cancellation of its run, or Stage deactivation. A newer activation owns the light. Untimed visibility and Blackboard changes stay applied. |
+| `light` | A timed activation turns off on timeout, cancellation of its run, or Stage deactivation. A newer activation owns the light. Untimed visibility and Blackboard changes stay applied. |
 
-The demo's [`Stage01Verbs`](../demo/stages/stage_01/stage_01_verbs.gd) supplies `light(n, on, duration = 0.0)`, which updates its `lamp_on` key, and `stun_player(seconds)`. It is selected by `Stage01._make_verbs()`; other games can define their own methods and actor lookup without inheriting demo group names. To build a key-agnostic light action, call the protected-by-convention `StagingVerbs._light(n, on, duration, key)` helper from your own verb method.
+The demo's [`Stage01Verbs`](../demo/stages/stage_01/stage_01_verbs.gd) adds only the game-specific `stun_player(seconds)` action. Its Stage now uses the reusable `StagingVerbs.light()` and supplies `&"lamp_on"` where graph rules need the Blackboard state.
 
 ## Custom verbs
 

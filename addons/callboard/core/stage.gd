@@ -4,6 +4,7 @@ class_name Stage extends Node3D
 
 signal rule_fired(rule_id: StringName, event: StringName)
 signal scored(points: int)
+signal gameplay_event(event_id: StringName, arguments: Dictionary)
 signal var_changed(key: StringName, value: Variant)
 
 @export var definition: StageDefinition
@@ -118,6 +119,14 @@ func fire(event: StringName, payload := {}) -> void:
 		push_warning("Stage '%s' fired unknown event '%s'. Declare gameplay events in external_calls." % [name, event])
 	engine.fire(event, payload)
 
+## Publish a typed request for host gameplay code. The Stage does not interpret event IDs.
+func publish_gameplay_event(event_id: StringName, arguments: Dictionary = {}) -> void:
+	if event_id.is_empty():
+		if OS.is_debug_build():
+			push_warning("Stage '%s' cannot publish a gameplay event with an empty ID." % name)
+		return
+	gameplay_event.emit(event_id, arguments.duplicate(true))
+
 ## Use a declared Boolean Blackboard key to latch a relay fired by gameplay code.
 func fire_relay_once(relay: StringName, latch: StringName, source_id: StringName, source_event: StringName) -> bool:
 	if bb == null or relay.is_empty():
@@ -152,6 +161,10 @@ func _event_is_known(event: StringName) -> bool:
 
 func check() -> Array[String]:
 	var problems := RuleValidator.check(engine.rules, bb, external_calls, external_vars, payload_schema)
+	if verbs is StagingVerbs:
+		for rule: Rule in engine.rules:
+			for step: Step in rule.steps:
+				problems.append_array((verbs as StagingVerbs).validate_step(rule.id, step, bb))
 	var seen_fields := {}
 	for field: PayloadFieldData in definition.payload_fields if definition != null else []:
 		if not field.key.is_valid_identifier() or field.key in [&"payload", &"_callboard"]:

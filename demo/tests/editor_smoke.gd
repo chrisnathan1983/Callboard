@@ -34,9 +34,12 @@ func _test_authored_resource_graph() -> bool:
 		and definition.groups[0] is GroupData) and ok
 	ok = _check("reader: compiles with no problems", data.errors.is_empty() and data.warnings.is_empty()) and ok
 	ok = _check("reader: every rule has a saved position", data.rules.all(func(rule: RuleData) -> bool: return rule.has_pos)) and ok
-	ok = _check("reader: step text keeps source expressions", ExprText.step_text(data.rules[1].steps[1].to_dictionary()) == "light(lamp, true, 3.5).after(0.25)") and ok
+	ok = _check("reader: step text keeps source expressions", ExprText.step_text(data.rules[1].steps[1].to_dictionary()) == 'light(lamp, true, 3.5, &"lamp_on").after(0.25)') and ok
 	ok = _check("reader: step emits come from runtime Steps", data.relay_for(data.rules[0].steps[0]) == "standoff_tick") and ok
-	ok = _check("catalog: 13 verbs incl. typed params", data.catalog.size() == 13 and VerbCatalog.find(data.catalog, "move_to")["args"][2]["type"] == TYPE_VECTOR3) and ok
+	var staged_actions := ["light", "play_audio", "rotate_to", "play_animation", "pose_animation", "gameplay_event"]
+	ok = _check("catalog exposes reusable staged actions with typed parameters",
+		staged_actions.all(func(name: String) -> bool: return not VerbCatalog.find(data.catalog, name).is_empty())
+		and VerbCatalog.find(data.catalog, "move_to")["args"][2]["type"] == TYPE_VECTOR3) and ok
 	var prop_names: Array = data.props.map(func(prop: Dictionary) -> String: return prop["name"])
 	ok = _check("Callboard discovers exported, onready, and scripted props",
 		["guard", "lamp", "window", "shelter", "reward", "treat", "decoy"].all(
