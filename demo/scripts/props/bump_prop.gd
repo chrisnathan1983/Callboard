@@ -21,7 +21,11 @@ func _ready() -> void:
 func _on_bump(body: Node3D) -> void:
 	if not body.is_in_group(&"Player"):
 		return
-	if not is_instance_valid(_stage) or not _stage.fire_relay_once(relay, relay, &"bump_prop", &"bump"):
+	# A body_entered callback can arrive in the same frame that a managed Stage
+	# is deactivated. Ignore that stale contact before asking Stage to dispatch.
+	if not is_instance_valid(_stage) or not _stage.accepts_calls():
+		return
+	if not _stage.fire_relay_once(relay, relay, &"bump_prop", &"bump"):
 		return
 	var t := create_tween()
 	t.tween_property(self, "scale", Vector3(1.25, 0.75, 1.25), 0.1)

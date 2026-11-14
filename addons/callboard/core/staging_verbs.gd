@@ -61,10 +61,17 @@ func play_audio(player: Node, wait_for_completion := false, timeout := 0.0) -> S
 		player.set_meta(AUDIO_PLAYBACK_META, ticket)
 		player.call("play")
 		if wait_for_completion:
+			# Godot only exposes a stream playback after the player has actually
+			# started. A stopped, paused-out, or not-yet-active player returns no
+			# playback instance and get_stream_playback() logs an engine error.
+			if not player.is_inside_tree() or not bool(player.get("playing")):
+				return null
 			var playback := player.call("get_stream_playback") as AudioStreamPlayback
 			var playback_id := playback.get_instance_id() if playback != null else 0
 			var playback_matches := func() -> bool:
 				if playback_id == 0 or not is_instance_valid(player):
+					return false
+				if not player.is_inside_tree() or not bool(player.get("playing")):
 					return false
 				var current := player.call("get_stream_playback") as AudioStreamPlayback
 				var matches: bool = (current != null and current.get_instance_id() == playback_id
