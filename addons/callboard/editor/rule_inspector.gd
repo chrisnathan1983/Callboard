@@ -203,10 +203,11 @@ func _build_rule() -> void:
 	add.text = "+ Add step"
 	add.flat = false
 	var verbs: Array = _data.catalog.map(func(v: Dictionary) -> String: return v["name"])
+	verbs.append("Parallel group")
 	for v in verbs:
 		add.get_popup().add_item(v)
 	add.get_popup().index_pressed.connect(func(i: int) -> void:
-		r.steps.append(VerbCatalog.new_step(_data, verbs[i]))
+		r.steps.append(_new_step_data(verbs[i]))
 		changed.emit(r.id)
 		_rebuild_later())
 	_box.add_child(add)
@@ -461,9 +462,12 @@ func _guard_menu(field: String) -> Control:
 # --- Steps ------------------------------------------------------------------------
 
 func _step_panel(idx: int) -> Control:
-	var step: StepData = _rule.steps[idx]
+	return _step_panel_in(_rule.steps, idx, 0)
+
+func _step_panel_in(steps: Array, idx: int, depth: int) -> Control:
+	var step: StepData = steps[idx]
 	var verb := VerbCatalog.find(_data.catalog, step.verb)
-	var params: Array = verb.get("args", [])
+	var params: Array = verb.get("args", []) if not verb.is_empty() else []
 	var vb := VBoxContainer.new()
 	vb.add_theme_constant_override("separation", 6)
 	var panel := Style.entry(vb)
@@ -473,18 +477,22 @@ func _step_panel(idx: int) -> Control:
 	head.add_child(num)
 	var ob := OptionButton.new()
 	var names: Array = _data.catalog.map(func(v: Dictionary) -> String: return v["name"])
-	if not names.has(step.verb):
-		names.append(step.verb)
+	names.append("Parallel group")
+	var displayed_verb := "Parallel group" if step.verb == &"parallel" else String(step.verb)
+	if not names.has(displayed_verb):
+		names.append(displayed_verb)
 	for n in names:
 		ob.add_item(n)
-	ob.select(names.find(step.verb))
+	ob.select(names.find(displayed_verb))
 	ob.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	ob.fit_to_longest_item = false
 	ob.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	ob.item_selected.connect(func(i: int) -> void:
-		var fresh := VerbCatalog.new_step(_data, names[i])
+		var fresh := _new_step_data(names[i])
 		step.verb = fresh.verb
 		step.args = fresh.args
+		step.parallel_branches = fresh.parallel_branches
+		step.join_parallel = fresh.join_parallel
 		changed.emit(_rule.id)
 		_rebuild_later())
 	head.add_child(ob)
@@ -493,9 +501,8 @@ func _step_panel(idx: int) -> Control:
 		Style.button_icon(b, &"MoveUp" if offset < 0 else &"MoveDown", "↑" if offset < 0 else "↓")
 		b.tooltip_text = "Move step up" if offset < 0 else "Move step down"
 		b.accessibility_name = b.tooltip_text
-		b.disabled = idx + offset < 0 or idx + offset >= _rule.steps.size()
+		b.disabled = idx + offset < 0 or idx + offset >= steps.size()
 		b.pressed.connect(func() -> void:
-			var steps: Array = _rule.steps
 			steps.remove_at(idx)
 			steps.insert(idx + offset, step)
 			changed.emit(_rule.id)
@@ -506,11 +513,13 @@ func _step_panel(idx: int) -> Control:
 	rm.tooltip_text = "Remove step"
 	rm.accessibility_name = rm.tooltip_text
 	rm.pressed.connect(func() -> void:
-		_rule.steps.remove_at(idx)
+		steps.remove_at(idx)
 		changed.emit(_rule.id)
 		_rebuild_later())
 	head.add_child(rm)
 	vb.add_child(head)
+	if step.verb == &"parallel":
+		vb.add_child(_parallel_panel(step, depth + 1))
 
 	for j in params.size():
 		var row := HBoxContainer.new()
@@ -551,6 +560,77 @@ func _step_panel(idx: int) -> Control:
 	delay_row.add_child(sp)
 	vb.add_child(delay_row)
 	return panel
+
+func _parallel_panel(step: StepData, depth: int) -> Control:
+	var container := VBoxContainer.new()
+	container.add_theme_constant_override("separation", 5)
+	var join := CheckBox.new()
+	join.text = "Wait for every branch"
+	join.tooltip_text = "When off, branch work continues under this rule run while the parent sequence advances."
+	join.button_pressed = step.join_parallel
+	join.toggled.connect(func(value: bool) -> void:
+		step.join_parallel = value
+		changed.emit(_rule.id))
+	container.add_child(join)
+	for branch_index in step.parallel_branches.size():
+		var branch: Array = step.parallel_branches[branch_index]
+		var contents := VBoxContainer.new()
+		contents.add_theme_constant_override("separation", 4)
+		var header := HBoxContainer.new()
+		header.add_child(Style.label("Branch %d" % (branch_index + 1), Style.EVENT, 11))
+		for offset in [-1, 1]:
+			var move := Button.new()
+			move.text = "↑" if offset < 0 else "↓"
+			move.tooltip_text = "Move branch up" if offset < 0 else "Move branch down"
+			move.disabled = branch_index + offset < 0 or branch_index + offset >= step.parallel_branches.size()
+			move.pressed.connect(func() -> void:
+				step.parallel_branches.remove_at(branch_index)
+				step.parallel_branches.insert(branch_index + offset, branch)
+				changed.emit(_rule.id)
+				_rebuild_later())
+			header.add_child(move)
+		var remove := Button.new()
+		remove.text = "Remove"
+		remove.tooltip_text = "Remove this branch and its steps"
+		remove.pressed.connect(func() -> void:
+			step.parallel_branches.remove_at(branch_index)
+			changed.emit(_rule.id)
+			_rebuild_later())
+		header.add_child(remove)
+		contents.add_child(header)
+		for child_index in branch.size():
+			contents.add_child(_step_panel_in(branch, child_index, depth))
+		contents.add_child(_add_branch_step_menu(branch))
+		container.add_child(Style.entry(contents))
+	var add_branch := Button.new()
+	add_branch.text = "+ Add branch"
+	add_branch.pressed.connect(func() -> void:
+		step.parallel_branches.append([])
+		changed.emit(_rule.id)
+		_rebuild_later())
+	container.add_child(add_branch)
+	return container
+
+func _add_branch_step_menu(steps: Array) -> Control:
+	var add := MenuButton.new()
+	add.text = "+ Add branch step"
+	add.flat = false
+	var verbs: Array = _data.catalog.map(func(v: Dictionary) -> String: return v["name"])
+	verbs.append("Parallel group")
+	for verb_name in verbs:
+		add.get_popup().add_item(verb_name)
+	add.get_popup().index_pressed.connect(func(index: int) -> void:
+		steps.append(_new_step_data(verbs[index]))
+		changed.emit(_rule.id)
+		_rebuild_later())
+	return add
+
+func _new_step_data(verb_name: String) -> StepData:
+	if verb_name == "Parallel group":
+		var step := StepData.new()
+		step.verb = &"parallel"
+		return step
+	return VerbCatalog.new_step(_data, verb_name)
 
 func _current(step: StepData, i: int, param: Dictionary) -> String:
 	if i < step.args.size():

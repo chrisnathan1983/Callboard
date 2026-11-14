@@ -89,11 +89,11 @@ The first five items retain the high priority assigned in `TODO.md`.
   - [x] Wait for a future Call or relay with an optional payload guard, or for a Blackboard condition. An already-true condition completes immediately. Matching Calls and relays still dispatch normally before the waiting sequence resumes.
   - [x] Success continues the sequence. Timeout ends it and can emit a recovery relay. Restart, Cancel If, and deactivation release the wait. Injected-clock tests cover first-result ordering, Restart, Stage deactivation, and a filtered host acknowledgment.
 
-- [ ] **Add sequential and parallel step groups.** See [`RuleEngine._run()`](addons/callboard/core/rule_engine.gd).
+- [x] **Add sequential and parallel step groups.** See [`RuleEngine._run()`](addons/callboard/core/rule_engine.gd).
   - [x] The engine awaits a rule's steps in order. Independent rules can already overlap, and some verbs support non-blocking playback.
   - [x] Add the runtime `Step.parallel()` group with ordered child sequences and an optional join. Joined groups wait for every branch; unjoined groups let the parent continue while the branches remain owned by its run. Restart, **Cancel If**, and Stage teardown cancel branch work; branch lifecycle is traced.
   - [x] Serialize nested `StepData` branches recursively with join mode, and compile authored groups into runtime `Step.parallel()` steps.
-  - [ ] Add Rule Inspector authoring for nested branches, including branch add/remove/reorder, per-branch step editing, and visible branch progress.
+  - [x] Add Rule Inspector authoring for nested branches, including branch add/remove/reorder and per-branch step editing. Branch start, completion, and cancellation events include branch details in the live trace.
 
 - [ ] **Add conditional branches and deterministic random choices inside a rule.** See [RuleData](addons/callboard/core/rule_data.gd), [StepData](addons/callboard/core/step_data.gd), and [RuleValidator](addons/callboard/core/rule_validator.gd).
   - [x] Separate rules can route by guards, with overlap diagnostics and an explicit allowance for intentional overlap.
@@ -215,3 +215,4 @@ The first five items retain the high priority assigned in `TODO.md`.
   - [x] CI targets Godot `4.7.2`, runs four suites before packaging, and checks runtime with authoring layers removed. Editor assertions cover the export filter, which removes tests from exports and strips authoring layers from release exports.
   - [ ] Build and install the actual ZIP in a blank addon-only fixture, enable the plugin, run a minimal Stage, and perform real debug and release exports. Check that expected assets are retained, developer tooling is available only with its suites, and the exported runtime starts.
   - [ ] Exercise repeated editor/plugin setup and teardown, Stage unload, and pending-wait cancellation. Diagnose the smoke suite's rendering RID and ObjectDB leaks, distinguish fixture cleanup from addon ownership, and gate regressions with teardown log checks.
+  - [ ] Re-enable package and release jobs after most TODO implementation work is complete by setting the GitHub Actions repository variable `CALLBOARD_PUBLISH_PACKAGES` to `true`. Until then, CI runs tests without building packages or publishing releases.

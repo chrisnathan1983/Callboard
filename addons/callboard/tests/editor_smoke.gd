@@ -8,6 +8,7 @@ func _initialize() -> void:
 	await process_frame
 	var ok := _test_scene_assigned_props()
 	ok = _test_add_var_editor() and ok
+	ok = _test_parallel_group_authoring() and ok
 	ok = _test_staging_verb_catalog_and_validation() and ok
 	ok = await _test_overlapping_flash_restores_surface_colors() and ok
 	ok = _test_layer_export_filter() and ok
@@ -103,6 +104,76 @@ func _test_add_var_editor() -> bool:
 		and float_delta != null and float_delta.step == 0.05)
 	inspector.free()
 	return ok
+
+func _test_parallel_group_authoring() -> bool:
+	var draft := GraphDraft.new()
+	draft.catalog = VerbCatalog.from_factory(CoreVerbs.new(
+		StepContext.new(Blackboard.new(), null, null, Callable())))
+	var rule := RuleData.new()
+	rule.id = &"parallel_authoring"
+	rule.trigger = &"start"
+	var group := StepData.new()
+	group.verb = &"parallel"
+	rule.steps = [group]
+	draft.rules = [rule]
+	var inspector := RuleInspector.new()
+	inspector.show_rule(rule, draft)
+	var add_branch: Button
+	for control: Node in inspector.find_children("*", "Button", true, false):
+		var button := control as Button
+		if button != null and button.text == "+ Add branch":
+			add_branch = button
+			break
+	if add_branch == null:
+		inspector.free()
+		return _check("parallel group inspector exposes branch creation", false)
+	add_branch.pressed.emit()
+	var branch_created := group.parallel_branches.size() == 1
+	var group_panel := inspector._parallel_panel(group, 1)
+	var add_step: MenuButton
+	for control: Node in group_panel.find_children("*", "MenuButton", true, false):
+		var menu := control as MenuButton
+		if menu != null and menu.text == "+ Add branch step":
+			add_step = menu
+			break
+	if add_step != null and not draft.catalog.is_empty():
+		add_step.get_popup().index_pressed.emit(0)
+	var step_created := not group.parallel_branches.is_empty() \
+		and group.parallel_branches[0].size() == 1
+	var first_branch: Array = group.parallel_branches[0]
+	group.parallel_branches.append([inspector._new_step_data("score")])
+	var join_visible := false
+	for control: Node in group_panel.find_children("*", "CheckBox", true, false):
+		var check := control as CheckBox
+		if check != null and check.text == "Wait for every branch":
+			join_visible = true
+			break
+	group_panel.free()
+	group_panel = inspector._parallel_panel(group, 1)
+	var move_down: Button
+	for control: Node in group_panel.find_children("*", "Button", true, false):
+		var button := control as Button
+		if button != null and button.text == "↓":
+			move_down = button
+			break
+	if move_down != null:
+		move_down.pressed.emit()
+	var reordered := group.parallel_branches.size() == 2 and group.parallel_branches[1] == first_branch
+	group_panel.free()
+	group_panel = inspector._parallel_panel(group, 1)
+	var remove_branch: Button
+	for control: Node in group_panel.find_children("*", "Button", true, false):
+		var button := control as Button
+		if button != null and button.text == "Remove":
+			remove_branch = button
+			break
+	if remove_branch != null:
+		remove_branch.pressed.emit()
+	var removed := group.parallel_branches.size() == 1
+	group_panel.free()
+	inspector.free()
+	return _check("parallel inspector adds editable branches and child steps with join control",
+		branch_created and step_created and join_visible and reordered and removed)
 
 func _test_staging_verb_catalog_and_validation() -> bool:
 	var bb := Blackboard.new()
