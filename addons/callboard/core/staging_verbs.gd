@@ -263,7 +263,7 @@ func flash(m: MeshInstance3D) -> Step:
 		var t := host.create_tween()
 		for i in materials.size():
 			var material := materials[i]
-			var base := _base_color(m, material)
+			var base := _base_color(material)
 			material.albedo_color = tint
 			if i > 0:
 				t.parallel()
@@ -280,7 +280,7 @@ func jump(m: MeshInstance3D) -> Step:
 			var color_tween := host.create_tween()
 			for i in materials.size():
 				var material := materials[i]
-				var base := _base_color(m, material)
+				var base := _base_color(material)
 				var set_color := _color_setter(m, material, color_tween)
 				if i > 0:
 					color_tween.parallel()
@@ -400,12 +400,11 @@ func _isolated_effect_material(material: BaseMaterial3D) -> BaseMaterial3D:
 	isolated.set_meta(ISOLATED_MATERIAL_META, true)
 	return isolated
 
-func _base_color(m: MeshInstance3D, material: BaseMaterial3D) -> Color:
-	var saved: Dictionary = m.get_meta(BASE_COLOR_META) if m.has_meta(BASE_COLOR_META) else {}
-	if saved.get("material_id") != material.get_instance_id():
-		saved = {"material_id": material.get_instance_id(), "color": material.albedo_color}
-		m.set_meta(BASE_COLOR_META, saved)
-	return saved["color"]
+func _base_color(material: BaseMaterial3D) -> Color:
+	if not material.has_meta(BASE_COLOR_META):
+		material.set_meta(BASE_COLOR_META, material.albedo_color)
+	var base_color: Color = material.get_meta(BASE_COLOR_META)
+	return base_color
 
 ## Replacing the tint leaves earlier tweens free to finish and resume waiting rules.
 func _color_setter(mesh: MeshInstance3D, material: BaseMaterial3D, tween: Tween) -> Callable:

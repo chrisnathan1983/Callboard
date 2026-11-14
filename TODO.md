@@ -64,9 +64,9 @@ The first five items retain the high priority assigned in `TODO.md`.
   - [x] Separate resource-only checks from scene-backed checks. Opening a definition, ordinary edits, undo/redo, and relay renames use resource checks without instantiating a Stage or evaluating authored expressions. **Analyze Scene** and **Save** run scene-backed compilation.
   - [x] Make scene-backed checks explicit and document preview behavior. The API reference lists script initialization, tree callbacks, Stage hooks, verb factories, and authored expressions that may execute. Editor smoke tests verify opening and editing do not instantiate the preview or rerun Stage setup; explicit analysis resolves scene props.
 
-- [ ] **Restore original colors after overlapping mesh effects.** See [`StagingVerbs.flash()`](addons/callboard/core/staging_verbs.gd).
+- [x] **Restore original colors after overlapping mesh effects.** See [`StagingVerbs.flash()`](addons/callboard/core/staging_verbs.gd).
   - [x] The effect isolates materials and uses the latest tween's ownership while allowing earlier tweens to finish and release waiting rules.
-  - [ ] Cache the untinted base color per isolated material or surface. The current cache stores one material ID/color pair per mesh, so another flash can capture an in-flight tint. Verify overlap on a multi-surface mesh with different base colors and keep unrelated instances unaffected.
+  - [x] Cache the untinted base color on each isolated material. A regression overlaps two flashes across a multi-surface mesh with distinct base colors and verifies a sibling mesh using the same source resource remains unchanged.
 
 ## 2. Rule language and control flow
 

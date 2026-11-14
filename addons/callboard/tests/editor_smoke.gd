@@ -9,6 +9,7 @@ func _initialize() -> void:
 	var ok := _test_scene_assigned_props()
 	ok = _test_add_var_editor() and ok
 	ok = _test_staging_verb_catalog_and_validation() and ok
+	ok = await _test_overlapping_flash_restores_surface_colors() and ok
 	ok = _test_layer_export_filter() and ok
 	ok = _test_factory() and ok
 	ok = _test_debug_panel() and ok
@@ -143,6 +144,53 @@ func _test_staging_verb_catalog_and_validation() -> bool:
 	return _check("staging verbs appear in the picker and validate required targets and the optional Boolean light key",
 		listed and valid_light and empty_key_is_allowed and missing_key_is_reported
 		and wrong_key_type_is_reported and bad_target_is_reported and stage_reports_bad_audio)
+
+func _test_overlapping_flash_restores_surface_colors() -> bool:
+	var host := Node3D.new()
+	root.add_child(host)
+	var mesh_data := ArrayMesh.new()
+	var arrays: Array = []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = PackedVector3Array([
+		Vector3.ZERO, Vector3.RIGHT, Vector3.UP,
+	])
+	arrays[Mesh.ARRAY_NORMAL] = PackedVector3Array([
+		Vector3.FORWARD, Vector3.FORWARD, Vector3.FORWARD,
+	])
+	arrays[Mesh.ARRAY_INDEX] = PackedInt32Array([0, 1, 2])
+	var surface_colors := [Color(0.2, 0.4, 0.8), Color(0.7, 0.3, 0.1)]
+	for color: Color in surface_colors:
+		mesh_data.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+		var source_material := StandardMaterial3D.new()
+		source_material.albedo_color = color
+		mesh_data.surface_set_material(mesh_data.get_surface_count() - 1, source_material)
+	var target := MeshInstance3D.new()
+	target.mesh = mesh_data
+	host.add_child(target)
+	var unrelated := MeshInstance3D.new()
+	unrelated.mesh = mesh_data
+	host.add_child(unrelated)
+	var bb := Blackboard.new()
+	var factory := StagingVerbs.new(StepContext.new(bb, null, host, Callable()))
+	var flash_step := factory.flash(target)
+	var first_completion: Signal = flash_step.fn.call({})
+	await process_frame
+	var second_completion: Signal = flash_step.fn.call({})
+	await first_completion
+	await second_completion
+	var restored := true
+	for surface in surface_colors.size():
+		var material := target.get_active_material(surface) as BaseMaterial3D
+		restored = restored and material != null and material.albedo_color.is_equal_approx(surface_colors[surface])
+	var sibling_untouched := true
+	for surface in surface_colors.size():
+		var material := unrelated.get_active_material(surface) as BaseMaterial3D
+		sibling_untouched = sibling_untouched and material != null \
+			and material.albedo_color.is_equal_approx(surface_colors[surface])
+	host.free()
+	await process_frame
+	return (_check("overlapping flash restores distinct base colors on every mesh surface", restored)
+		and _check("flash material isolation leaves another instance using the source mesh untouched", sibling_untouched))
 
 func _test_layer_export_filter() -> bool:
 	var test_path := "res://addons/callboard/tests/fixtures/assigned_prop_stage.tscn"
