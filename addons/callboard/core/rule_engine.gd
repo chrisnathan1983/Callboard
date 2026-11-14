@@ -144,7 +144,7 @@ func wait_tracked(seconds: float, rule_id: StringName, label: String) -> Signal:
 func interruptible(source: Signal) -> Signal:
 	var completion := AwaitedSignal.new()
 	var id := completion.get_instance_id()
-	var callback := func(_emitted_value: Variant = null) -> void: _complete_wait(id)
+	var callback := func(..._emitted_values: Array) -> void: _complete_wait(id)
 	_awaited_signals[id] = {"source": source, "callback": callback, "completion": completion}
 	source.connect(callback, CONNECT_ONE_SHOT)
 	return completion.completed
@@ -167,7 +167,7 @@ func track_signal(signal_to_track: Signal, rule_id: StringName, label: String, s
 		"duration": seconds,
 	}
 	pending_changed.emit(pending_snapshot())
-	var callback := func() -> void: _finish_tracked_signal(id)
+	var callback := func(..._emitted_values: Array) -> void: _finish_tracked_signal(id)
 	_pending_callbacks[id] = {"signal": signal_to_track, "callback": callback}
 	signal_to_track.connect(callback, CONNECT_ONE_SHOT)
 

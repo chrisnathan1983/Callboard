@@ -2,6 +2,7 @@ extends SceneTree
 ## Deterministic validator, router and clock-injection tests.
 
 signal clock_tick
+signal two_argument_tick(value: int, label: String)
 
 func _initialize() -> void:
 	var ok := true
@@ -432,11 +433,33 @@ func _initialize() -> void:
 
 	ok = _test_restart() and ok
 	ok = _test_queue() and ok
+	ok = _test_signal_callbacks_accept_arguments() and ok
 	ok = _test_retriggered_light() and ok
 	ok = _test_light_from_restarted_run() and ok
 	ok = await _test_managed_stages_and_restoration() and ok
 	print("UNIT: ", "PASS" if ok else "FAIL")
 	quit(0 if ok else 1)
+
+func _test_signal_callbacks_accept_arguments() -> bool:
+	var engine := RuleEngine.new(Blackboard.new(), {}, Callable())
+	var completion_seen := [false]
+	var completion := engine.interruptible(two_argument_tick)
+	completion.connect(func() -> void: completion_seen[0] = true)
+	engine.track_signal(two_argument_tick, &"signal_arity", "two-argument signal")
+	var pending_before_emit := engine.pending_snapshot().size() == 1
+	two_argument_tick.emit(23, "finished")
+	var ok := _check("wait and diagnostic callbacks accept signals with two arguments",
+		pending_before_emit and completion_seen[0] and engine._awaited_signals.is_empty()
+		and engine.pending_snapshot().is_empty() and two_argument_tick.get_connections().is_empty())
+	engine.cancel_all()
+	var cancelled_engine := RuleEngine.new(Blackboard.new(), {}, Callable())
+	cancelled_engine.interruptible(two_argument_tick)
+	cancelled_engine.track_signal(two_argument_tick, &"signal_arity", "cancelled two-argument signal")
+	cancelled_engine.cancel_all()
+	ok = _check("cancelling a wait disconnects its source and clears diagnostics",
+		cancelled_engine._awaited_signals.is_empty() and cancelled_engine.pending_snapshot().is_empty()
+		and two_argument_tick.get_connections().is_empty()) and ok
+	return ok
 
 func _test_managed_stages_and_restoration() -> bool:
 	var definition := StageDefinition.new()
