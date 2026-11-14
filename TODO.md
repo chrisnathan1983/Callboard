@@ -136,7 +136,7 @@ The first five items retain the high priority assigned in `TODO.md`.
 
 - [ ] **Extend declarative restoration.** See [StageRestorationBinding](addons/callboard/core/stage_restoration_binding.gd) and [Stage](addons/callboard/core/stage.gd).
   - [x] Saved/Shared keys can restore visibility, a local `Transform3D`, or a marker's global transform. Marker restoration can optionally seek and pause an `AnimationPlayer` at a resolved pose. Bindings run after `_restore_state()` and before activation, with runtime and validation coverage.
-  - [ ] Add standalone animation pose binding. Current validation expressly limits pose settings to marker bindings, although live rules have `pose_animation`.
+  - [x] Add standalone animation pose binding. A saved/shared/session Boolean key gates a resolved `AnimationPlayer` pose without requiring a marker or moving its target; the binding validates the key and clip and restores after `_restore_state()`.
   - [ ] Add a typed variant binding (for example, an integer selects a child, material, or animation), generic property binding, and specific light, audio, and particle state where lifecycle handling calls for it. Simple light visibility already works through visibility binding.
   - [ ] Validate key type and scope, target and property compatibility, variant choices, and resources. Define restoration behavior so reloads reconstruct state and avoid replaying transient cues by default.
 

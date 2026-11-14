@@ -2,7 +2,7 @@
 class_name StageRestorationBinding extends Resource
 ## Applies resolved Blackboard state to a scene node without replaying an animation.
 
-enum Kind { VISIBILITY, TRANSFORM, SNAP_TO_MARKER }
+enum Kind { VISIBILITY, TRANSFORM, SNAP_TO_MARKER, POSE_ANIMATION }
 
 @export var key: StringName
 @export var kind: Kind = Kind.VISIBILITY
@@ -52,6 +52,9 @@ func apply(stage: Stage) -> void:
 				return
 			(target as Node3D).global_transform = marker.global_transform
 			_apply_pose(stage)
+		Kind.POSE_ANIMATION:
+			if bool(value) and target is AnimationPlayer:
+				_apply_pose_to_player(target as AnimationPlayer)
 
 func validate(stage: Stage) -> Array[String]:
 	var problems: Array[String] = []
@@ -60,8 +63,8 @@ func validate(stage: Stage) -> Array[String]:
 		return problems
 	var value_type: int = stage.bb.schema[stage.bb.resolve_key(key)].get("type", TYPE_NIL)
 	var scope: StringName = stage.bb.schema[stage.bb.resolve_key(key)].get("scope", &"local")
-	if scope == &"local":
-		problems.append("restoration binding key '%s' must use saved or shared scope" % key)
+	if scope not in [&"saved", &"shared", &"session"]:
+		problems.append("restoration binding key '%s' must use saved, shared, or session scope" % key)
 	var target := stage.get_node_or_null(target_path)
 	if target == null:
 		problems.append("restoration binding target '%s' was not found" % target_path)
@@ -82,6 +85,11 @@ func validate(stage: Stage) -> Array[String]:
 					problems.append("marker binding key '%s' must be Boolean" % key)
 				if not target is Node3D:
 					problems.append("marker binding target '%s' must be Node3D" % target_path)
+			Kind.POSE_ANIMATION:
+				if value_type != TYPE_BOOL:
+					problems.append("animation pose binding key '%s' must be Boolean" % key)
+				if not target is AnimationPlayer:
+					problems.append("animation pose target '%s' must be AnimationPlayer" % target_path)
 	if kind == Kind.SNAP_TO_MARKER:
 		var marker := stage.get_node_or_null(marker_path)
 		if not marker is Marker3D:
@@ -94,15 +102,26 @@ func validate(stage: Stage) -> Array[String]:
 				problems.append("restoration AnimationPlayer '%s' was not found" % animation_player_path)
 			elif not player.has_animation(animation_name):
 				problems.append("restoration animation '%s' was not found on '%s'" % [animation_name, animation_player_path])
+	elif kind == Kind.POSE_ANIMATION:
+		if not animation_player_path.is_empty():
+			problems.append("standalone animation pose uses target_path for its AnimationPlayer")
+		if animation_name.is_empty():
+			problems.append("standalone animation pose requires an animation name")
+		var player := stage.get_node_or_null(target_path) as AnimationPlayer
+		if player != null and not animation_name.is_empty() and not player.has_animation(animation_name):
+			problems.append("restoration animation '%s' was not found on '%s'" % [animation_name, target_path])
 	elif not animation_player_path.is_empty() or not animation_name.is_empty():
-		problems.append("AnimationPlayer pose settings are only supported for marker restoration")
+		problems.append("AnimationPlayer pose settings are only supported for marker or standalone animation pose bindings")
 	return problems
 
 func _apply_pose(stage: Stage) -> void:
 	if animation_player_path.is_empty() or animation_name.is_empty():
 		return
 	var player := stage.get_node_or_null(animation_player_path) as AnimationPlayer
-	if player == null or not player.has_animation(animation_name):
+	_apply_pose_to_player(player)
+
+func _apply_pose_to_player(player: AnimationPlayer) -> void:
+	if player == null or not is_instance_valid(player) or animation_name.is_empty() or not player.has_animation(animation_name):
 		return
 	player.play(animation_name)
 	player.seek(animation_time, true)

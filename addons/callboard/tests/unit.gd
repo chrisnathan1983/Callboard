@@ -1543,11 +1543,17 @@ func _test_managed_stages_and_restoration() -> bool:
 	binding_pose.animation_player_path = NodePath("Buster/AnimationPlayer")
 	binding_pose.animation_name = &"sleep"
 	binding_pose.animation_time = 5.0
+	var binding_pose_only := StageRestorationBinding.new()
+	binding_pose_only.key = &"delivered_skateboard"
+	binding_pose_only.kind = StageRestorationBinding.Kind.POSE_ANIMATION
+	binding_pose_only.target_path = NodePath("Buster/AnimationPlayer")
+	binding_pose_only.animation_name = &"sleep"
+	binding_pose_only.animation_time = 7.5
 	var binding_door := StageRestorationBinding.new()
 	binding_door.key = &"garage_door_transform"
 	binding_door.kind = StageRestorationBinding.Kind.TRANSFORM
 	binding_door.target_path = NodePath("GarageDoor")
-	definition.restoration_bindings.assign([binding_window, binding_skateboard_window, binding_pose, binding_door])
+	definition.restoration_bindings.assign([binding_window, binding_skateboard_window, binding_pose, binding_pose_only, binding_door])
 
 	var template := Stage.new()
 	template.name = "Stage"
@@ -1627,6 +1633,15 @@ func _test_managed_stages_and_restoration() -> bool:
 		binding_errors.any(func(problem: String) -> bool: return "must be Boolean" in problem)
 		and binding_errors.any(func(problem: String) -> bool: return "Marker3D" in problem)
 		and binding_errors.any(func(problem: String) -> bool: return "AnimationPlayer" in problem)) and ok
+	var invalid_pose_only := StageRestorationBinding.new()
+	invalid_pose_only.key = &"gifts_delivered"
+	invalid_pose_only.kind = StageRestorationBinding.Kind.POSE_ANIMATION
+	invalid_pose_only.target_path = NodePath("Buster/AnimationPlayer")
+	invalid_pose_only.animation_name = &"missing_pose"
+	var pose_errors := invalid_pose_only.validate(stage)
+	ok = _check("standalone animation pose binding validates Boolean keys and animation names",
+		pose_errors.any(func(problem: String) -> bool: return "must be Boolean" in problem)
+		and pose_errors.any(func(problem: String) -> bool: return "animation 'missing_pose'" in problem)) and ok
 	var actor := Node3D.new()
 	root.add_child(actor)
 	var gift_target := stage.get_node("RobotGiftTarget") as TriggerArea
@@ -1732,7 +1747,9 @@ func _test_managed_stages_and_restoration() -> bool:
 	var completed_skateboard_window := all_gifts_restored.get_node("BedroomWindowSkateboard") as Node3D
 	ok = _check("each gift restores its own visual and the saved counter after the next reload",
 		completed_robot_window.visible and completed_skateboard_window.visible
-		and all_gifts_restored.get_var(&"gifts_delivered") == 2) and ok
+		and all_gifts_restored.get_var(&"gifts_delivered") == 2
+		and is_equal_approx((all_gifts_restored.get_node("Buster/Visual") as Node3D).position.y, 0.1875)
+		and not (all_gifts_restored.get_node("Buster/AnimationPlayer") as AnimationPlayer).is_playing()) and ok
 	store.unload_stage(all_gifts_restored)
 	await process_frame
 	return ok
