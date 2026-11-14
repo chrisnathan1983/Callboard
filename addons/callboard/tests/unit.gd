@@ -184,14 +184,35 @@ func _initialize() -> void:
 	relay_stage.build()
 	relay_stage.define_local(&"wrong_latch_type", 0)
 	relay_stage.define_saved(&"sensor_latched", false)
+	relay_stage.define_shared(&"rejected_shared_latch", false)
 	relay_stage.register_external_writer(&"sensor_latched", &"yard_sensor", "bool")
 	var relay_emitted: Array[StringName] = []
 	relay_stage.rule_fired.connect(func(id: StringName, _event: StringName) -> void: relay_emitted.append(id))
 	ok = _check("a relay latch requires a Boolean Blackboard key",
 		not relay_stage.fire_relay_once(&"ready", &"wrong_latch_type", &"source", &"interact")
 		and relay_emitted.is_empty() and relay_stage.get_var(&"wrong_latch_type") == 0) and ok
-	ok = _check("external relay latch writes retain their gameplay source",
-		relay_stage.fire_relay_once(&"ready", &"sensor_latched", &"yard_sensor", &"sensor_changed")
+	relay_stage.bb.shared_write_guard = func(_key: StringName, _value: Variant, _board: Blackboard) -> bool: return false
+	var rejected_shared_relay := relay_stage.fire_relay_once(&"ready", &"rejected_shared_latch", &"source", &"interact")
+	ok = _check("a rejected shared latch write does not emit or fire a relay",
+		not rejected_shared_relay and relay_emitted.is_empty()
+		and not relay_stage.is_set(&"rejected_shared_latch")) and ok
+	relay_stage.bb.shared_write_guard = Callable()
+	var relay_rule_runs := [0]
+	var ready_listener := Rule.new(&"ready_listener", &"relay:ready")
+	ready_listener.steps.append(Step.new(func(_payload: Dictionary) -> void: relay_rule_runs[0] += 1))
+	relay_stage.engine.rules.append(ready_listener)
+	var reentry_results: Array[bool] = []
+	var latch_reentry := func(key: StringName, value: Variant) -> void:
+		if key == &"sensor_latched" and value == true:
+			reentry_results.append(relay_stage.fire_relay_once(&"ready", &"sensor_latched", &"yard_sensor", &"sensor_changed"))
+	relay_stage.bb.changed.connect(latch_reentry)
+	var relay_success := relay_stage.fire_relay_once(&"ready", &"sensor_latched", &"yard_sensor", &"sensor_changed")
+	relay_stage.bb.changed.disconnect(latch_reentry)
+	var source_emit_count := relay_emitted.count(&"yard_sensor")
+	var repeated_relay := relay_stage.fire_relay_once(&"ready", &"sensor_latched", &"yard_sensor", &"sensor_changed")
+	ok = _check("one-shot relay follows a committed latch and resists listener re-entry",
+		relay_success and not repeated_relay and reentry_results == [false]
+		and source_emit_count == 1 and relay_rule_runs[0] == 1
 		and relay_stage.bb.last_writers.get(&"sensor_latched") == &"yard_sensor") and ok
 	relay_stage.free()
 
@@ -268,6 +289,35 @@ func _initialize() -> void:
 	ok = _check("router honors cancel_if while a rule is alive", router.alive(guarded, 0)) and ok
 	route_bb.write(&"cancelled", true)
 	ok = _check("router cancels a rule after cancel_if is set", not router.alive(guarded, 0)) and ok
+	var initial_cancel_engine := RuleEngine.new(Blackboard.new(), {}, Callable())
+	var initial_cancel_rule := Rule.new(&"payload_once", &"try_payload")
+	initial_cancel_rule.one_shot = true
+	initial_cancel_rule.cancel_if = [&"payload.cancelled == true"]
+	var initial_cancel_steps := [0]
+	var initial_cancel_starts := [0]
+	var initial_cancel_fires := [0]
+	initial_cancel_rule.steps.append(Step.new(func(_context: Dictionary) -> void:
+		initial_cancel_steps[0] += 1))
+	initial_cancel_engine.rules.append(initial_cancel_rule)
+	initial_cancel_engine.trace_event.connect(func(data: Dictionary) -> void:
+		if data.get("kind") == "rule_started":
+			initial_cancel_starts[0] += 1)
+	initial_cancel_engine.rule_fired.connect(func(_id: StringName, _event: StringName) -> void:
+		initial_cancel_fires[0] += 1)
+	initial_cancel_engine.fire(&"try_payload", {"cancelled": true})
+	var rejected_before_latch: bool = (not initial_cancel_engine.fired.has(initial_cancel_rule.latch_key())
+		and initial_cancel_starts[0] == 0 and initial_cancel_fires[0] == 0
+		and initial_cancel_steps[0] == 0)
+	initial_cancel_engine.fire(&"try_payload", {"cancelled": false})
+	await process_frame
+	var accepted_after_reject: bool = (initial_cancel_engine.fired.has(initial_cancel_rule.latch_key())
+		and initial_cancel_starts[0] == 1 and initial_cancel_fires[0] == 1
+		and initial_cancel_steps[0] == 1)
+	initial_cancel_engine.cancel_all()
+	ok = _check("incoming Cancel If rejects a one-shot before its latch, start trace, and signals",
+		rejected_before_latch) and ok
+	ok = _check("a one-shot can run when a later payload clears initial Cancel If",
+		accepted_after_reject) and ok
 
 	var payload_schema := {&"route": {&"action": TYPE_STRING, &"count": TYPE_INT, &"accepted": TYPE_BOOL}}
 	var schema_definition := StageDefinition.new()
@@ -293,17 +343,37 @@ func _initialize() -> void:
 		GuardExpression.evaluate(route_bb, &"payload.action == \"confirm\"", confirm_payload, &"route", payload_schema)
 		and GuardExpression.evaluate(route_bb, &"payload.accepted != false", confirm_payload, &"route", payload_schema)
 		and GuardExpression.evaluate(route_bb, &"payload.count >= 3", confirm_payload, &"route", payload_schema)) and ok
+	var integer_guards := Blackboard.new()
+	integer_guards.define(&"large_count", &"local", 1000001)
+	integer_guards.define(&"float_value", &"local", 1.0)
+	var exact_ints := (not GuardExpression.evaluate(integer_guards, &"large_count == 1000000")
+		and GuardExpression.evaluate(integer_guards, &"large_count != 1000000")
+		and GuardExpression.evaluate(integer_guards, &"payload.count == 1000001", {"count": 1000001}, &"route", payload_schema)
+		and not GuardExpression.evaluate(integer_guards, &"payload.count == 1000000", {"count": 1000001}, &"route", payload_schema))
+	var float_semantics := (GuardExpression.evaluate(integer_guards, &"float_value == 1.0000001")
+		and GuardExpression.evaluate(integer_guards, &"float_value == 1")
+		and GuardExpression.evaluate(integer_guards, &"float_value < 2"))
+	ok = _check("integer payload and Blackboard comparisons preserve exact integer values", exact_ints) and ok
+	ok = _check("float equality remains approximate and mixed numeric guards compare numerically", float_semantics) and ok
 	ok = _check("missing and incompatible payload values fail both equality and inequality",
 		not GuardExpression.evaluate(route_bb, &"payload.action != \"confirm\"", {}, &"route", payload_schema)
 		and not GuardExpression.evaluate(route_bb, &"payload.count != 3", {"count": "3"}, &"route", payload_schema)
 		and not GuardExpression.evaluate(route_bb, &"payload.accepted == true", {"accepted": 1}, &"route", payload_schema)) and ok
 	ok = _check("payload presence checks explicitly distinguish present and missing fields",
 		GuardExpression.evaluate(route_bb, &"has(payload.action)", confirm_payload, &"route", payload_schema)
-		and GuardExpression.evaluate(route_bb, &"missing(payload.absent)", confirm_payload, &"route", payload_schema)
-		and not GuardExpression.evaluate(route_bb, &"has(payload.absent)", confirm_payload, &"route", payload_schema)) and ok
+		and GuardExpression.evaluate(route_bb, &"missing(payload.action)", {}, &"route", payload_schema)
+		and not GuardExpression.evaluate(route_bb, &"has(payload.action)", {}, &"route", payload_schema)) and ok
+	ok = _check("runtime payload guards reject undeclared fields on a partially declared event",
+		not GuardExpression.evaluate(route_bb, &"payload.extra == true", {"extra": true}, &"route", payload_schema)
+		and not GuardExpression.evaluate(route_bb, &"missing(payload.extra)", {}, &"route", payload_schema)) and ok
 	var payload_guard_rule := Rule.new(&"payload_guard", &"route")
 	payload_guard_rule.requires = [&"payload.action == \"confirm\""]
 	payload_guard_rule.steps.append(Step.new(func(_context: Dictionary) -> void: pass))
+	var dynamic_payload_rule := Rule.new(&"dynamic_payload_guard", &"dynamic_route")
+	dynamic_payload_rule.requires = [&"payload.action == \"confirm\""]
+	dynamic_payload_rule.steps.append(Step.new(func(_context: Dictionary) -> void: pass))
+	ok = _check("validator leaves undeclared payload schemas dynamic for runtime type checking",
+		RuleValidator.check([dynamic_payload_rule], route_bb, [&"dynamic_route"], []).is_empty()) and ok
 	var payload_guard_diagnostics := RuleValidator.check([payload_guard_rule], route_bb, [&"route"], [], payload_schema)
 	ok = _check("validator treats payload references separately and checks declared field types",
 		not payload_guard_diagnostics.any(func(problem: String) -> bool: return "Blackboard" in problem)
@@ -312,6 +382,26 @@ func _initialize() -> void:
 	payload_guard_diagnostics = RuleValidator.check([payload_guard_rule], route_bb, [&"route"], [], payload_schema)
 	ok = _check("validator reports payload field and operand type mismatches",
 		payload_guard_diagnostics.any(func(problem: String) -> bool: return "incompatible literal or operator" in problem)) and ok
+	var typed_write_bb := Blackboard.new()
+	typed_write_bb.define(&"flag", &"local", false)
+	typed_write_bb.define(&"amount", &"local", 0.0)
+	var wrong_set := Rule.new(&"wrong_set", &"write")
+	var wrong_set_step := Step.new(func(_context: Dictionary) -> void: pass)
+	wrong_set_step.verb = &"set_var"
+	wrong_set_step.args = [&"flag", "yes"]
+	wrong_set_step.sets = [&"flag"]
+	wrong_set.steps.append(wrong_set_step)
+	var widened_set := Rule.new(&"widened_set", &"write")
+	var widened_set_step := Step.new(func(_context: Dictionary) -> void: pass)
+	widened_set_step.verb = &"set_var"
+	widened_set_step.args = [&"amount", 3]
+	widened_set_step.sets = [&"amount"]
+	widened_set.steps.append(widened_set_step)
+	var wrong_set_problems := RuleValidator.check([wrong_set], typed_write_bb, [&"write"], [])
+	ok = _check("validator catches statically incompatible set_var values",
+		wrong_set_problems.any(func(problem: String) -> bool: return "set_var value of type String is incompatible" in problem)) and ok
+	ok = _check("validator permits the runtime's integer-to-float set_var widening",
+		RuleValidator.check([widened_set], typed_write_bb, [&"write"], []).is_empty()) and ok
 
 	var payload_engine := RuleEngine.new(Blackboard.new(), {}, Callable())
 	payload_engine.payload_schema = payload_schema
@@ -435,6 +525,11 @@ func _initialize() -> void:
 	ok = await _test_restart() and ok
 	ok = _test_queue() and ok
 	ok = _test_signal_callbacks_accept_arguments() and ok
+	ok = await _test_playback_wait_exits() and ok
+	ok = await _test_cancel_if_interrupts_a_wait() and ok
+	ok = _test_shared_write_order() and ok
+	ok = await _test_dispatch_limits_and_ancestry() and ok
+	ok = _test_stage_dispatch_policy() and ok
 	ok = _test_retriggered_light() and ok
 	ok = await _test_light_from_restarted_run() and ok
 	ok = await _test_managed_stages_and_restoration() and ok
@@ -491,6 +586,281 @@ func _test_signal_callbacks_accept_arguments() -> bool:
 		cancelled_engine._awaited_signals.is_empty() and cancelled_engine.pending_snapshot().is_empty()
 		and two_argument_tick.get_connections().is_empty()) and ok
 	return ok
+
+func _test_playback_wait_exits() -> bool:
+	var factory := StagingVerbs.new(StepContext.new(Blackboard.new(), null, root, Callable()))
+	var stopped_target := Node.new()
+	root.add_child(stopped_target)
+	var stopped_ticket := StagingVerbs.PlaybackTicket.new()
+	var stopped_reason: Array[StringName] = []
+	stopped_ticket.interrupted.connect(func(reason: StringName) -> void: stopped_reason.append(reason))
+	var playing := [true]
+	factory._start_playback_monitor(stopped_target, stopped_ticket,
+		func() -> bool: return playing[0], 0.0)
+	playing[0] = false
+	await process_frame
+	var stop_releases := stopped_reason == [&"stopped"]
+	stopped_target.queue_free()
+	await process_frame
+
+	var removed_target := Node.new()
+	root.add_child(removed_target)
+	var removed_ticket := StagingVerbs.PlaybackTicket.new()
+	var removed_reason: Array[StringName] = []
+	removed_ticket.interrupted.connect(func(reason: StringName) -> void: removed_reason.append(reason))
+	factory._start_playback_monitor(removed_target, removed_ticket,
+		func() -> bool: return true, 0.0)
+	await process_frame
+	root.remove_child(removed_target)
+	await process_frame
+	var removal_releases := removed_reason == [&"target_removed"]
+	removed_target.free()
+
+	var looping_target := Node.new()
+	root.add_child(looping_target)
+	var looping_ticket := StagingVerbs.PlaybackTicket.new()
+	var timeout_reason: Array[StringName] = []
+	looping_ticket.interrupted.connect(func(reason: StringName) -> void: timeout_reason.append(reason))
+	factory._start_playback_monitor(looping_target, looping_ticket,
+		func() -> bool: return true, 0.02)
+	await create_timer(0.06).timeout
+	var timeout_releases := timeout_reason == [&"timeout"]
+	looping_target.queue_free()
+	await process_frame
+	return (_check("stopping playback cancels its wait", stop_releases)
+		and _check("removing a playback target cancels its wait", removal_releases)
+		and _check("a looping playback wait is released by its optional timeout", timeout_releases))
+
+func _test_cancel_if_interrupts_a_wait() -> bool:
+	var bb := Blackboard.new()
+	bb.define(&"stop_playback", &"local", false)
+	var engine := RuleEngine.new(bb, {}, func(_seconds: float) -> Signal: return clock_tick)
+	var engine_ref := weakref(engine)
+	var rule := Rule.new(&"cancel_playback", &"play")
+	rule.cancel_if = [&"stop_playback"]
+	var later_step_ran := [false]
+	rule.steps.append(Step.new(func(payload: Dictionary) -> Signal:
+		var run: Dictionary = payload["_callboard"]["run"]
+		var cancellation: RuleEngine.AwaitedSignal = run["cancel_signal"]
+		var active_engine := engine_ref.get_ref() as RuleEngine
+		return active_engine.interruptible(clock_tick, Callable(), [cancellation.cancelled], run)))
+	rule.steps.append(Step.new(func(_payload: Dictionary) -> void: later_step_ran[0] = true))
+	engine.rules.append(rule)
+	engine.fire(&"play")
+	bb.write(&"stop_playback", true)
+	await process_frame
+	var cancelled: bool = later_step_ran[0] == false and engine._cancel_if_callbacks.is_empty()
+	clock_tick.emit()
+	await process_frame
+	engine.cancel_all()
+	return _check("Cancel If releases a playback wait and skips remaining steps", cancelled)
+
+func _test_shared_write_order() -> bool:
+	var store := StageStateStore.new()
+	store.shared_values = {}
+	var source := Blackboard.new({}, store.shared_values)
+	var receiver := Blackboard.new({}, store.shared_values)
+	source.define(&"ready", &"shared", false, &"town_ready")
+	receiver.define(&"ready", &"shared", false, &"town_ready")
+	store.register_blackboard(source)
+	store.register_blackboard(receiver)
+	var notifications: Array[String] = []
+	var source_nested := [false]
+	var receiver_nested := [false]
+	var source_callback := func(key: StringName, value: Variant) -> void:
+		if key != &"ready":
+			return
+		notifications.append("source:%s" % str(value))
+		if value == true and not source_nested[0]:
+			source_nested[0] = true
+			receiver.write(&"ready", false, &"source_listener")
+	var receiver_callback := func(key: StringName, value: Variant) -> void:
+		if key != &"ready":
+			return
+		notifications.append("receiver:%s" % str(value))
+		if value == true and not receiver_nested[0]:
+			receiver_nested[0] = true
+			source.write(&"ready", true, &"receiver_listener")
+	source.changed.connect(source_callback)
+	receiver.changed.connect(receiver_callback)
+	source.write(&"ready", true, &"initial_writer")
+	var expected := ["source:true", "receiver:true", "receiver:false", "source:false",
+		"source:true", "receiver:true"]
+	var in_order := notifications == expected
+	var one_final_value: bool = (store.shared_values[&"town_ready"] == true
+		and source.get_var(&"ready") == true and receiver.get_var(&"ready") == true
+		and source.last_writers[&"ready"] == &"receiver_listener"
+		and receiver.last_writers[&"ready"] == &"receiver_listener")
+	var notification_count := notifications.size()
+	source.write(&"ready", true, &"no_op_writer")
+	var unchanged_is_quiet: bool = notifications.size() == notification_count
+	source.write(&"ready", "wrong type", &"rejected_writer")
+	var rejected_is_quiet: bool = notifications.size() == notification_count
+	var final_writer_survived: bool = source.last_writers[&"ready"] == &"receiver_listener"
+	source.changed.disconnect(source_callback)
+	receiver.changed.disconnect(receiver_callback)
+	store.unregister_blackboard(source)
+	store.unregister_blackboard(receiver)
+	return (_check("nested shared writes deliver each commit to all Stages in order (notifications=%s)" % [notifications], in_order)
+		and _check("shared values and writer attribution match the final committed write", one_final_value)
+		and _check("unchanged shared writes do not notify or replace the writer", unchanged_is_quiet and final_writer_survived)
+		and _check("rejected shared writes do not notify", rejected_is_quiet))
+
+func _test_dispatch_limits_and_ancestry() -> bool:
+	var depth_engine := RuleEngine.new(Blackboard.new(), {}, Callable())
+	var started := [0]
+	var limit_chains: Array[PackedStringArray] = []
+	var next_events: Dictionary = {}
+	var depth_engine_ref := weakref(depth_engine)
+	depth_engine.dispatch_limit_reached.connect(func(_limit: String, chain: PackedStringArray,
+			_rule_id: StringName) -> void: limit_chains.append(chain))
+	depth_engine.rule_fired.connect(func(rule_id: StringName, _event: StringName) -> void:
+		started[0] += 1
+		if next_events.has(rule_id):
+			var engine := depth_engine_ref.get_ref() as RuleEngine
+			engine.fire(next_events[rule_id]))
+	for event_index in RuleEngine.MAX_FIRE_DEPTH:
+		var event_name := StringName("chain_%d" % event_index)
+		var next_event := StringName("chain_%d" % (event_index + 1))
+		var rule := Rule.new(StringName("chain_rule_%d" % event_index), event_name)
+		next_events[rule.id] = next_event
+		depth_engine.rules.append(rule)
+	depth_engine.fire(&"chain_0")
+	var depth_stopped: bool = started[0] == RuleEngine.MAX_FIRE_DEPTH and limit_chains.size() == 1 \
+		and limit_chains[0].size() == RuleEngine.MAX_FIRE_DEPTH + 1
+	depth_engine.cancel_all()
+	depth_engine.rules.clear()
+
+	var cycle_engine := RuleEngine.new(Blackboard.new(), {}, func(_seconds: float) -> Signal: return clock_tick)
+	var cycle_engine_ref := weakref(cycle_engine)
+	var cycle_limit_chains: Array[PackedStringArray] = []
+	cycle_engine.dispatch_limit_reached.connect(func(limit: String, chain: PackedStringArray,
+			_rule_id: StringName) -> void:
+		if limit == "event depth":
+			cycle_limit_chains.append(chain))
+	var cycle_a := Rule.new(&"cycle_a", &"cycle_a")
+	cycle_a.reentry = Rule.ReentryPolicy.QUEUE
+	cycle_a.steps.append(Step.new(func(payload: Dictionary) -> Signal:
+		var run: Dictionary = payload["_callboard"]["run"]
+		var cancellation: RuleEngine.AwaitedSignal = run["cancel_signal"]
+		var engine := cycle_engine_ref.get_ref() as RuleEngine
+		return engine.interruptible(clock_tick, Callable(), [cancellation.cancelled], run)))
+	cycle_a.steps.append(Step.new(func(payload: Dictionary) -> void:
+		var context: Dictionary = payload["_callboard"]["run"]["context"]
+		var engine := cycle_engine_ref.get_ref() as RuleEngine
+		engine.fire_from_context(&"cycle_b", {}, context)))
+	var cycle_b := Rule.new(&"cycle_b", &"cycle_b")
+	cycle_b.steps.append(Step.new(func(payload: Dictionary) -> void:
+		var context: Dictionary = payload["_callboard"]["run"]["context"]
+		var engine := cycle_engine_ref.get_ref() as RuleEngine
+		engine.fire_from_context(&"cycle_a", {}, context)))
+	cycle_engine.rules.append_array([cycle_a, cycle_b])
+	cycle_engine.fire(&"cycle_a")
+	for _i in RuleEngine.MAX_FIRE_DEPTH + 2:
+		clock_tick.emit()
+		await process_frame
+	var yielding_cycle_stopped := cycle_limit_chains.size() == 1 \
+		and cycle_limit_chains[0].size() == RuleEngine.MAX_FIRE_DEPTH + 1
+	cycle_engine.cancel_all()
+	clock_tick.emit()
+	cycle_engine.rules.clear()
+
+	var queue_engine := RuleEngine.new(Blackboard.new(), {}, func(_seconds: float) -> Signal: return clock_tick)
+	var queue_rule := Rule.new(&"bounded_queue", &"queue_limit")
+	queue_rule.reentry = Rule.ReentryPolicy.QUEUE
+	queue_rule.steps.append(Step.new(func(_payload: Dictionary) -> void: pass).after(1.0))
+	queue_engine.rules.append(queue_rule)
+	var queue_limit_count := [0]
+	queue_engine.dispatch_limit_reached.connect(func(limit: String, _chain: PackedStringArray,
+			_rule_id: StringName) -> void:
+		if limit == "pending queue":
+			queue_limit_count[0] += 1)
+	queue_engine.fire(&"queue_limit")
+	for _i in RuleEngine.MAX_PENDING_PER_RULE + 1:
+		queue_engine.fire(&"queue_limit")
+	var queue_bounded: bool = queue_engine.active_snapshot()[0]["queued"] == RuleEngine.MAX_PENDING_PER_RULE \
+		and queue_limit_count[0] == 1
+	queue_engine.cancel_all()
+	clock_tick.emit()
+
+	var frame_engine := RuleEngine.new(Blackboard.new(), {}, Callable())
+	var frame_starts := [0]
+	for _i in RuleEngine.MAX_DISPATCHES_PER_FRAME + 1:
+		var rule := Rule.new(StringName("budget_%d" % _i), &"frame_budget")
+		rule.steps.append(Step.new(func(_payload: Dictionary) -> void: frame_starts[0] += 1))
+		frame_engine.rules.append(rule)
+	var frame_limits := [0]
+	frame_engine.dispatch_limit_reached.connect(func(limit: String, _chain: PackedStringArray,
+			_rule_id: StringName) -> void:
+		if limit == "per-frame dispatch budget":
+			frame_limits[0] += 1)
+	frame_engine.fire(&"frame_budget")
+	var frame_bounded: bool = frame_starts[0] == RuleEngine.MAX_DISPATCHES_PER_FRAME \
+		and frame_limits[0] == 1
+	frame_engine.cancel_all()
+	await process_frame
+	return (_check("nested public fires retain ancestry and stop at the depth limit", depth_stopped)
+		and _check("a yielding host-callback cycle keeps ancestry and hits the depth limit", yielding_cycle_stopped)
+		and _check("queued re-entry preserves accepted order within the pending limit", queue_bounded)
+		and _check("dispatch work is capped per frame with one diagnostic", frame_bounded))
+
+func _test_stage_dispatch_policy() -> bool:
+	var unbuilt := Stage.new()
+	var unbuilt_events := [0]
+	var unbuilt_blocked := [false]
+	unbuilt.gameplay_event.connect(func(_id: StringName, _args: Dictionary) -> void: unbuilt_events[0] += 1)
+	unbuilt.dispatch_blocked.connect(func(action: String, reason: String) -> void:
+		if "has not been built" in reason and action.begins_with("Call"):
+			unbuilt_blocked[0] = true)
+	unbuilt.fire(&"before_build")
+	unbuilt.publish_gameplay_event(&"before_build")
+	var unbuilt_relay := unbuilt.fire_relay_once(&"ready", &"missing", &"source", &"call")
+	var unbuilt_ok: bool = not unbuilt_relay and unbuilt_events[0] == 0 and unbuilt_blocked[0]
+	unbuilt.free()
+
+	var partial := Stage.new()
+	var definition := StageDefinition.new()
+	var variable := VariableData.new()
+	variable.key = &"valid_called"
+	definition.variables = [variable]
+	var partial_rule := RuleData.new()
+	partial_rule.id = &"partially_compiled"
+	partial_rule.trigger = &"partial_call"
+	var valid_step := StepData.new()
+	valid_step.verb = &"set_var"
+	valid_step.args = PackedStringArray(['&"valid_called"', "true"])
+	var invalid_step := StepData.new()
+	invalid_step.verb = &"missing_verb"
+	partial_rule.steps = [valid_step, invalid_step]
+	definition.rules = [partial_rule]
+	partial.definition = definition
+	partial.build()
+	var partial_diagnostic := [false]
+	partial.dispatch_blocked.connect(func(action: String, reason: String) -> void:
+		if action == "Call 'partial_call'" and "missing_verb" in reason:
+			partial_diagnostic[0] = true)
+	var placeholder_preserved: bool = (partial.engine.rules.size() == 1
+		and partial.engine.rules[0].steps.size() == 2
+		and partial.graph_errors.size() == 1)
+	partial.fire(&"partial_call")
+	partial.activate()
+	var partial_blocked: bool = (placeholder_preserved and not partial.get_var(&"valid_called")
+		and partial_diagnostic[0])
+	partial.free()
+
+	var unmanaged := Stage.new()
+	unmanaged.build()
+	unmanaged.define_local(&"direct_called", false)
+	var direct_rule := Rule.new(&"direct_rule", &"direct_call")
+	direct_rule.steps.append(CoreVerbs.new(StepContext.new(unmanaged.bb, unmanaged.engine,
+		unmanaged, Callable())).set_var(&"direct_called", true))
+	unmanaged.engine.rules.append(direct_rule)
+	unmanaged.fire(&"direct_call")
+	var unmanaged_direct_call: bool = unmanaged.is_set(&"direct_called")
+	unmanaged.free()
+	return (_check("unbuilt Stages reject Calls, relays, and gameplay events with diagnostics", unbuilt_ok)
+		and _check("an invalid partial graph blocks even its valid compiled steps", partial_blocked)
+		and _check("a valid unmanaged Stage accepts Calls after build without activate()", unmanaged_direct_call))
 
 func _test_managed_stages_and_restoration() -> bool:
 	var definition := StageDefinition.new()
@@ -645,12 +1015,17 @@ func _test_managed_stages_and_restoration() -> bool:
 	root.add_child(actor)
 	var gift_target := stage.get_node("RobotGiftTarget") as TriggerArea
 	gift_target.set_eligibility_hook(func(_actor: Node) -> bool: return not stage.get_var(&"delivered_robot"))
+	var dormant_call_reported := [false]
+	stage.dispatch_blocked.connect(func(action: String, reason: String) -> void:
+		if action == "Call 'give:robot'" and "dormant" in reason:
+			dormant_call_reported[0] = true)
 	stage.fire(&"give:robot")
 	var duplicate_id_refused := store.load_stage(scene, &"house_01_left", root) == null
 	var dormant_prompt_filtered := not gift_target.can_interact(actor)
 	ok = _check("managed Stage ignores Calls and interactions while dormant, and rejects duplicate instance IDs",
 		duplicate_id_refused and dormant_prompt_filtered
-		and not stage.get_var(&"delivered_robot") and stage.engine.active_snapshot().is_empty())
+		and not stage.get_var(&"delivered_robot") and stage.engine.active_snapshot().is_empty()
+		and dormant_call_reported[0])
 	stage.activate()
 	ok = _check("managed Stage activates once and fires its arrival rule",
 		stage.is_active and stage.has_fired(&"arrival_once") and stage.get_var(&"arrival_count") == 1) and ok

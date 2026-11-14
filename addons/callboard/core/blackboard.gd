@@ -9,6 +9,7 @@ var local := {}
 var saved: Dictionary          # injected by the manager
 var shared_values: Dictionary = {}
 var shared_write_guard: Callable
+var shared_write_commit: Callable
 var _saved_names := {}        # saved storage key -> current Blackboard name
 var _aliases: Dictionary = {} # original Blackboard name -> current name
 var last_writers: Dictionary = {} # current Blackboard name -> most recent writer label
@@ -44,41 +45,47 @@ func get_var(key: StringName) -> Variant:
 		&"shared": return shared_values.get(entry["state_key"])
 		_: return local.get(key)
 
-func write(key: StringName, value: Variant, writer: StringName = &"") -> void:
+func write(key: StringName, value: Variant, writer: StringName = &"") -> bool:
 	key = resolve_key(key)
 	if not schema.has(key):
 		push_error("Undeclared Blackboard key '%s'" % key)
-		return
+		return false
 	var entry: Dictionary = schema.get(key, {})
 	if entry["type"] == TYPE_FLOAT and typeof(value) == TYPE_INT:
 		value = float(value)
 	if typeof(value) != entry["type"]:
 		push_warning("Blackboard write to '%s' rejected: expected type %d, got %d." % [key, entry["type"], typeof(value)])
-		return
+		return false
 	var scope: StringName = entry["scope"]
 	var is_persistent: bool = scope in [&"saved", &"shared"]
 	var storage_key: StringName = entry["state_key"] if is_persistent else key
 	if scope == &"shared" and shared_write_guard.is_valid() \
 			and not bool(shared_write_guard.call(storage_key, value, self)):
-		return
-	if not writer.is_empty():
-		last_writers[key] = writer
+		return false
+	if scope == &"shared" and shared_write_commit.is_valid():
+		return bool(shared_write_commit.call(storage_key, key, value, writer, self))
 	var values: Dictionary = shared_values if scope == &"shared" else (saved if scope == &"saved" else local)
 	var previous: Variant = values.get(storage_key)
 	if values.has(storage_key) and typeof(previous) == typeof(value) and previous == value:
-		return
+		return false
+	if not writer.is_empty():
+		last_writers[key] = writer
 	values[storage_key] = value
 	changed.emit(key, value)
 	if scope == &"shared":
 		shared_changed.emit(storage_key, value, writer, self)
+	return true
 
-func receive_shared_change(storage_key: StringName, value: Variant, writer: StringName) -> void:
+func receive_shared_change(storage_key: StringName, value: Variant, writer: StringName,
+		notify_shared := false) -> void:
 	for key: StringName in schema:
 		var entry: Dictionary = schema[key]
 		if entry.get("scope") == &"shared" and entry.get("state_key") == storage_key:
 			if not writer.is_empty():
 				last_writers[key] = writer
 			changed.emit(key, value)
+	if notify_shared:
+		shared_changed.emit(storage_key, value, writer, self)
 
 ## Let gameplay code using an original saved name continue to access a renamed key.
 func resolve_key(key: StringName) -> StringName:

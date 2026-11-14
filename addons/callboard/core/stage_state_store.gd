@@ -7,6 +7,8 @@ class_name StageStateStore extends Resource
 
 var _shared_boards: Array[WeakRef] = []
 var _loaded_ids: Dictionary = {}
+var _shared_write_queue: Array[Dictionary] = []
+var _dispatching_shared_writes := false
 
 func state_for(instance_id: StringName) -> Dictionary:
 	if instance_id.is_empty():
@@ -66,29 +68,60 @@ func register_blackboard(board: Blackboard) -> void:
 		return
 	board.shared_values = shared_values
 	board.shared_write_guard = Callable(self, "validate_shared_write")
+	board.shared_write_commit = Callable(self, "commit_shared_write")
 	_shared_boards = _valid_board_refs()
 	_shared_boards.append(weakref(board))
-	if not board.shared_changed.is_connected(_on_shared_changed):
-		board.shared_changed.connect(_on_shared_changed)
+
+func is_dispatching_shared_writes() -> bool:
+	return _dispatching_shared_writes
 
 func unregister_blackboard(board: Blackboard) -> void:
 	if board == null:
 		return
-	if board.shared_changed.is_connected(_on_shared_changed):
-		board.shared_changed.disconnect(_on_shared_changed)
 	board.shared_write_guard = Callable()
+	board.shared_write_commit = Callable()
 	var remaining: Array[WeakRef] = []
 	for ref: WeakRef in _valid_board_refs():
 		if ref.get_ref() != board:
 			remaining.append(ref)
 	_shared_boards = remaining
 
-func _on_shared_changed(storage_key: StringName, value: Variant, writer: StringName, source: Blackboard) -> void:
-	shared_values[storage_key] = value
-	for ref: WeakRef in _valid_board_refs():
-		var board := ref.get_ref() as Blackboard
-		if board != null and board != source:
-			board.receive_shared_change(storage_key, value, writer)
+func commit_shared_write(storage_key: StringName, key: StringName, value: Variant,
+		writer: StringName, source: Blackboard) -> bool:
+	if source == null or not validate_shared_write(storage_key, value, source):
+		return false
+	_shared_write_queue.append({
+		"storage_key": storage_key,
+		"key": key,
+		"value": value,
+		"writer": writer,
+		"source": source,
+	})
+	if _dispatching_shared_writes:
+		return true
+	_dispatching_shared_writes = true
+	var committed := false
+	while not _shared_write_queue.is_empty():
+		var request: Dictionary = _shared_write_queue.pop_front()
+		var request_key: StringName = request["storage_key"]
+		var request_value: Variant = request["value"]
+		var request_source: Blackboard = request["source"]
+		if not validate_shared_write(request_key, request_value, request_source):
+			continue
+		if shared_values.has(request_key) and shared_values[request_key] == request_value \
+				and typeof(shared_values[request_key]) == typeof(request_value):
+			continue
+		shared_values[request_key] = request_value
+		committed = true
+		var request_writer: StringName = request["writer"]
+		if is_instance_valid(request_source):
+			request_source.receive_shared_change(request_key, request_value, request_writer, true)
+		for ref: WeakRef in _valid_board_refs():
+			var board := ref.get_ref() as Blackboard
+			if board != null and board != request_source:
+				board.receive_shared_change(request_key, request_value, request_writer)
+	_dispatching_shared_writes = false
+	return committed
 
 func validate_shared_write(storage_key: StringName, value: Variant, _source: Blackboard) -> bool:
 	for ref: WeakRef in _valid_board_refs():

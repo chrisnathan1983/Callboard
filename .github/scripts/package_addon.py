@@ -23,20 +23,29 @@ def parse_timestamp(value: str) -> datetime:
     return timestamp.astimezone(timezone.utc)
 
 
+def positive_increment(value: str) -> int:
+    try:
+        increment = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("The increment must be a positive integer") from exc
+    if increment < 1:
+        raise argparse.ArgumentTypeError("The increment must be a positive integer")
+    return increment
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output", type=Path)
     parser.add_argument("created_at", type=parse_timestamp, help="Workflow creation timestamp")
-    parser.add_argument("--pr", type=int)
+    parser.add_argument("--increment", required=True, type=positive_increment,
+                        help="Stable GitHub Actions workflow run number")
     args = parser.parse_args()
 
     config = Path(PLUGIN_CONFIG).read_text(encoding="utf-8")
     if VERSION_LINE.search(config) is None:
         parser.error(f"Missing version field in {PLUGIN_CONFIG}")
     timestamp = args.created_at
-    version = f"0.{timestamp.month}.{timestamp.day}.{timestamp:%H%M%S}"
-    if args.pr is not None:
-        version += f"-pr.{args.pr}"
+    version = f"0.{timestamp:%y%m}.{timestamp:%d}.{args.increment}"
 
     tracked = subprocess.check_output(["git", "ls-files", "-z", "--", ADDON, "LICENSE"])
     files = [name for name in tracked.decode("utf-8").split("\0")

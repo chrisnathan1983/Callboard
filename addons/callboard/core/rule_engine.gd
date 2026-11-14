@@ -6,6 +6,7 @@ signal trace_event(entry: Dictionary)
 signal pending_changed(entries: Array)
 signal run_cancelled(rule_id: StringName)
 signal all_cancelled
+signal dispatch_limit_reached(limit: String, event_chain: PackedStringArray, rule_id: StringName)
 
 class AwaitedSignal extends RefCounted:
 	signal completed
@@ -22,8 +23,14 @@ var _pending_waits: Dictionary = {}
 var _pending_callbacks: Dictionary = {}
 var _awaited_signals: Dictionary = {}
 var _tracked_wait_ids: Dictionary = {}
+var _cancel_if_callbacks: Dictionary = {}
+var _event_context_stack: Array[Dictionary] = []
 var _next_wait_id := 1
 const MAX_FIRE_DEPTH := 64
+const MAX_PENDING_PER_RULE := 128
+const MAX_DISPATCHES_PER_FRAME := 256
+var _dispatch_frame := -1
+var _dispatches_this_frame := 0
 
 func _init(p_bb: Blackboard, p_fired: Dictionary, p_wait: Callable) -> void:
 	bb = p_bb
@@ -50,6 +57,12 @@ func cancel_all() -> void:
 		if is_instance_valid(tracked_object) and tracked_signal.is_connected(callback):
 			tracked_signal.disconnect(callback)
 	_pending_callbacks.clear()
+	for watcher in _cancel_if_callbacks.values():
+		var watched_signal: Signal = watcher["signal"]
+		var watch_callback: Callable = watcher["callback"]
+		if watched_signal.is_connected(watch_callback):
+			watched_signal.disconnect(watch_callback)
+	_cancel_if_callbacks.clear()
 	_tracked_wait_ids.clear()
 	pending_changed.emit(pending_snapshot())
 	var cancelled := _awaited_signals.values()
@@ -59,22 +72,37 @@ func cancel_all() -> void:
 		entry["completion"].completed.emit()
 
 func fire(event: StringName, payload := {}) -> void:
-	_fire(event, payload, 0)
+	var context := {"path": []}
+	if not _event_context_stack.is_empty():
+		context = _event_context_stack.back()
+	_fire(event, payload, context)
 
-func _fire(event: StringName, payload: Dictionary, prior_depth: int) -> void:
-	var depth := prior_depth + 1
+## Carry an existing ancestry into public gameplay or host callbacks after a yield.
+func fire_from_context(event: StringName, payload: Dictionary, context: Dictionary) -> void:
+	_fire(event, payload, context)
+
+func _fire(event: StringName, payload: Dictionary, parent_context: Dictionary) -> void:
+	var path: Array = parent_context.get("path", []).duplicate()
+	path.append(String(event))
+	var depth := path.size()
 	if depth > MAX_FIRE_DEPTH:
-		push_error("Callboard stopped relay recursion at depth %d while firing '%s'." % [MAX_FIRE_DEPTH, event])
+		_report_dispatch_limit("event depth", path)
 		return
+	var context := {"path": path}
+	_event_context_stack.append(context)
 	_emit_trace("event_fired", &"", event)
+	_event_context_stack.pop_back()
 	var gen := _gen
 	for r in rules:
 		if gen != _gen:
 			return
 		if r.trigger == event and passes(r, payload, event):
-			_dispatch(r, event, payload.duplicate(true), gen, depth)
+			if not _consume_dispatch_budget(context):
+				return
+			_dispatch(r, event, payload.duplicate(true), gen, depth, context)
 
-func _dispatch(r: Rule, event: StringName, payload: Dictionary, gen: int, depth: int) -> void:
+func _dispatch(r: Rule, event: StringName, payload: Dictionary, gen: int, depth: int,
+		context: Dictionary) -> void:
 	if _active.has(r):
 		var active: Dictionary = _active[r]
 		match r.reentry:
@@ -84,7 +112,7 @@ func _dispatch(r: Rule, event: StringName, payload: Dictionary, gen: int, depth:
 				current_run["cancelled"] = true
 				var pending: Array = active["pending"]
 				pending.clear()
-				pending.append({"payload": payload.duplicate(true), "depth": depth})
+				pending.append({"payload": payload.duplicate(true), "depth": depth, "context": context})
 				active["pending"] = pending
 				_active[r] = active
 				# The suspended dispatch can resume synchronously when cancelled is
@@ -95,14 +123,17 @@ func _dispatch(r: Rule, event: StringName, payload: Dictionary, gen: int, depth:
 					cancelled_signal.cancelled.emit()
 			Rule.ReentryPolicy.QUEUE:
 				var pending: Array = active["pending"]
-				pending.append({"payload": payload.duplicate(true), "depth": depth})
+				if pending.size() >= MAX_PENDING_PER_RULE:
+					_report_dispatch_limit("pending queue", context.get("path", []), r.id)
+					return
+				pending.append({"payload": payload.duplicate(true), "depth": depth, "context": context})
 				active["pending"] = pending
 				_active[r] = active
 		return
 
 	var active := {"pending": [], "restart": false}
 	_active[r] = active
-	await _run(r, event, payload, gen, depth)
+	await _run(r, event, payload, gen, depth, context)
 	while gen == _gen and _active.has(r) and not _active[r]["pending"].is_empty():
 		var current_active: Dictionary = _active[r]
 		var next: Dictionary = current_active["pending"].pop_front()
@@ -110,11 +141,15 @@ func _dispatch(r: Rule, event: StringName, payload: Dictionary, gen: int, depth:
 		current_active.erase("run")
 		var next_payload: Dictionary = next["payload"]
 		if passes(r, next_payload, event) and alive(r, gen, next_payload):
-			await _run(r, event, next_payload, gen, int(next["depth"]))
+			await _run(r, event, next_payload, gen, int(next["depth"]), next["context"])
 	if gen == _gen:
 		_active.erase(r)
 
-func _run(rule: Rule, event: StringName, payload: Dictionary, generation: int, depth: int) -> void:
+func _run(rule: Rule, event: StringName, payload: Dictionary, generation: int, depth: int,
+		context: Dictionary) -> void:
+	if generation != _gen or rule.cancel_if.any(func(guard: StringName) -> bool:
+		return GuardExpression.evaluate(bb, guard, payload, event, _payload_schema())):
+		return
 	# Non-blocking steps can outlive a successful run, so keep cancellation
 	# on the run itself even after the rule leaves the active table.
 	var run := {
@@ -123,12 +158,16 @@ func _run(rule: Rule, event: StringName, payload: Dictionary, generation: int, d
 		"payload": payload.duplicate(true),
 		"event": event,
 		"depth": depth,
+		"context": context,
 	}
 	_active[rule]["run"] = run
+	_watch_cancel_if(rule, run, generation, payload, event)
 	if rule.one_shot:
 		fired[rule.latch_key()] = true
+	_event_context_stack.append(context)
 	_emit_trace("rule_started", rule.id, event)
 	rule_fired.emit(rule.id, event)
+	_event_context_stack.pop_back()
 	if not alive(rule, generation):
 		_cancel_run(run, rule.id, event)
 		return
@@ -151,12 +190,14 @@ func _run(rule: Rule, event: StringName, payload: Dictionary, generation: int, d
 			return
 		_emit_trace("step_completed", rule.id, event, step_index, step)
 	if not rule.emits.is_empty():
-		_fire("relay:" + rule.emits, payload, depth)
+		_fire("relay:" + rule.emits, payload, context)
 	_emit_trace("rule_completed", rule.id, event)
+	_release_cancel_if(run)
 
 func _cancel_run(run: Dictionary, rule_id: StringName, event: StringName,
 		step_index := -1, step: Step = null) -> void:
 	run["cancelled"] = true
+	_release_cancel_if(run)
 	var cancelled_signal: AwaitedSignal = run.get("cancel_signal") as AwaitedSignal
 	if cancelled_signal != null:
 		cancelled_signal.cancelled.emit()
@@ -168,6 +209,37 @@ func _signal_run_cancelled(run: Dictionary, rule_id: StringName) -> void:
 		return
 	run["cancel_notified"] = true
 	run_cancelled.emit(rule_id)
+
+func _watch_cancel_if(rule: Rule, run: Dictionary, generation: int,
+		payload: Dictionary, event: StringName) -> void:
+	if rule.cancel_if.is_empty():
+		return
+	var watch_id := _next_wait_id
+	_next_wait_id += 1
+	var callback := func(_key: StringName, _value: Variant) -> void:
+		if run.get("cancelled", false) or generation != _gen:
+			return
+		if rule.cancel_if.any(func(guard: StringName) -> bool:
+			return GuardExpression.evaluate(bb, guard, payload, event, _payload_schema())):
+			run["cancelled"] = true
+			_signal_run_cancelled(run, rule.id)
+			var cancelled_signal: AwaitedSignal = run.get("cancel_signal") as AwaitedSignal
+			if cancelled_signal != null:
+				cancelled_signal.cancelled.emit()
+	run["cancel_if_watch_id"] = watch_id
+	_cancel_if_callbacks[watch_id] = {"signal": bb.changed, "callback": callback}
+	bb.changed.connect(callback)
+
+func _release_cancel_if(run: Dictionary) -> void:
+	var watch_id := int(run.get("cancel_if_watch_id", -1))
+	var watcher: Dictionary = _cancel_if_callbacks.get(watch_id, {})
+	if not watcher.is_empty():
+		var watched_signal: Signal = watcher["signal"]
+		var callback: Callable = watcher["callback"]
+		if watched_signal.is_connected(callback):
+			watched_signal.disconnect(callback)
+		_cancel_if_callbacks.erase(watch_id)
+	run.erase("cancel_if_watch_id")
 
 ## Returns the engine's configured wait signal and publishes it to live diagnostics.
 func wait_tracked(seconds: float, rule_id: StringName, label: String) -> Signal:
@@ -309,10 +381,30 @@ func _emit_trace(kind: String, rule_id: StringName, event: StringName,
 		"detail": detail,
 	})
 
+func _consume_dispatch_budget(context: Dictionary) -> bool:
+	var frame := Engine.get_process_frames()
+	if frame != _dispatch_frame:
+		_dispatch_frame = frame
+		_dispatches_this_frame = 0
+	if _dispatches_this_frame >= MAX_DISPATCHES_PER_FRAME:
+		_report_dispatch_limit("per-frame dispatch budget", context.get("path", []))
+		return false
+	_dispatches_this_frame += 1
+	return true
+
+func _report_dispatch_limit(limit: String, path: Array, rule_id: StringName = &"") -> void:
+	var chain := PackedStringArray()
+	for event in path:
+		chain.append(String(event))
+	dispatch_limit_reached.emit(limit, chain, rule_id)
+	var suffix := " while dispatching rule '%s'" % rule_id if not rule_id.is_empty() else ""
+	push_error("Callboard stopped %s%s. Event chain: %s" % [limit, suffix, " -> ".join(chain)])
+
 func passes(r: Rule, payload: Dictionary = {}, event: StringName = &"") -> bool:
 	if r.one_shot and fired.has(r.latch_key()): return false
 	return (r.requires.all(func(guard: StringName) -> bool: return GuardExpression.evaluate(bb, guard, payload, event, _payload_schema()))
-		and not r.forbids.any(func(guard: StringName) -> bool: return GuardExpression.evaluate(bb, guard, payload, event, _payload_schema())))
+		and not r.forbids.any(func(guard: StringName) -> bool: return GuardExpression.evaluate(bb, guard, payload, event, _payload_schema()))
+		and not r.cancel_if.any(func(guard: StringName) -> bool: return GuardExpression.evaluate(bb, guard, payload, event, _payload_schema())))
 
 func alive(r: Rule, gen: int, payload: Dictionary = {}) -> bool:
 	var active_run: Dictionary = _active.get(r, {}).get("run", {})

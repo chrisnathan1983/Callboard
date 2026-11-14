@@ -39,19 +39,21 @@ When `SceneTree.paused` is true, rule delays, repeat ticks, and timed lights sto
 
 | Method | Contract |
 | --- | --- |
-| `activate() -> void` | Fires `arrive` after setup. Graph compilation errors block activation. Managed Stages activate once per entry; unmanaged Stages retain the existing repeatable behavior. |
+| `activate() -> void` | Fires `arrive` after setup. Build the Stage before activating it. Graph compilation errors block activation. Managed Stages activate once per entry; unmanaged Stages retain the existing repeatable behavior. |
 | `deactivate() -> void` | Cancels current runs and queued triggers, releases waits registered with `RuleEngine.interruptible()`, and clears pending diagnostics. For managed Stages this also makes the Stage dormant. Stage exit also cancels runs. |
-| `accepts_calls() -> bool` | Returns false while a managed Stage is dormant. `fire()` ignores Calls in that state. |
+| `accepts_calls() -> bool` | Returns false before build, when the graph has compile errors, or while a managed Stage is dormant. |
 | `attach_state_store(store, instance_id, saved, fired, shared) -> void` | Injects dictionaries before initialization. Usually called by `StageStateStore.attach()` or `load_stage()`. |
 | `define_shared(key, default_val = false, state_key = &"")` | Defines a shared Blackboard key backed by the StageStateStore's shared dictionary. |
-| `fire(event: StringName, payload := {}) -> void` | Dispatches a Call ID such as `deliver` or a relay event ID such as `relay:calm_guard`. The optional dictionary is the event payload available to guards and steps. The engine runs any asynchronous work. Managed dormant Stages ignore Calls. |
+| `fire(event: StringName, payload := {}) -> void` | Dispatches a Call ID such as `deliver` or a relay event ID such as `relay:calm_guard`. The optional dictionary is the event payload available to guards and steps. Build first. Valid unmanaged Stages can fire without `activate()`; invalid graphs and dormant managed Stages block Calls. |
+| `publish_gameplay_event(event_id, arguments = {}) -> void` | Emits a typed host request only when the Stage is built, its graph is valid, and a managed Stage is active. The host owns the request's meaning. |
+| `fire_relay_once(relay, latch, source_id, source_event) -> bool` | Applies the same lifecycle and graph checks as `fire()`. It reports success only after synchronously committing an unset Boolean latch and emitting the relay. |
 | `get_var(key: StringName) -> Variant` | Reads the resolved Blackboard value. An unknown key returns `null`. |
-| `write_var(key: StringName, value: Variant, writer: StringName = &"") -> void` | Writes a declared key using its Variant type. Integer inputs to float keys are converted to floats. An optional writer label appears in the live Blackboard view. |
+| `write_var(key: StringName, value: Variant, writer: StringName = &"") -> bool` | Writes a declared key using its Variant type. Integer inputs to float keys are converted to floats. Returns true when a changed value is accepted; false for rejected or unchanged writes. An optional writer label appears in the live Blackboard view. |
 | `is_set(key: StringName) -> bool` | Returns the value's truthiness. |
 | `define_local(key, default_val = false, state_key = &"")` | Defines a key on the runtime Blackboard. Its initial value is rebuilt on each Stage load. |
 | `define_saved(key, default_val = false, state_key = &"")` | Defines a key backed by `saved_vars`. The optional stable key selects the entry in the save dictionary. |
 | `has_fired(rule_id: StringName) -> bool` | Checks whether a rule has a one-shot latch. Pass the current rule ID after a rename. |
-| `fire_relay_once(relay, latch, source_id, source_event) -> bool` | Uses a declared Boolean Blackboard key as a latch. If it is false, writes true, emits `rule_fired(source_id, source_event)`, then dispatches `relay:<relay>`. Returns false for an empty relay, an invalid latch key, or an already set latch. Pass the bare relay name. |
+| `fire_relay_once(relay, latch, source_id, source_event) -> bool` | Uses a declared Boolean Blackboard key as a latch. If it is false, it commits true before emitting `rule_fired(source_id, source_event)` and dispatching `relay:<relay>`. Returns false when the latch write is rejected, unchanged, already set, or cannot commit synchronously. Pass the bare relay name. |
 | `register_external_writer(key, source = &"gameplay", value_type = "Variant") -> void` | Declares a gameplay producer before validation. Supported explicit types are `bool`, `int`, `float`, `String`, and `StringName`; `Variant` leaves type compatibility to runtime writes. |
 | `check() -> Array[String]` | Runs the rule validator on the built Stage. |
 
@@ -63,7 +65,7 @@ Declare optional payload schemas with `PayloadFieldData` entries in the StageDef
 stage.fire(&"interact", {"action": "confirm", "item": "key"})
 ```
 
-Use `payload.action == "confirm"`, `payload.accepted == true`, or `payload.count >= 2` in Requires, Forbids, and Cancel If. Use `has(payload.item)` and `missing(payload.item)` for explicit presence checks. Missing and incompatible values fail a comparison, including `!=`. String and Boolean fields support equality and inequality; numeric fields support the six comparison operators. A bare name such as `door_open` still addresses the Blackboard.
+Use `payload.action == "confirm"`, `payload.accepted == true`, or `payload.count >= 2` in Requires, Forbids, and Cancel If. Use `has(payload.item)` and `missing(payload.item)` for explicit presence checks. Missing and incompatible values fail a comparison, including `!=`. String and Boolean fields support equality and inequality; numeric fields support the six comparison operators. Integer-to-integer comparisons are exact. Comparisons involving a float use approximate equality for `==` and `!=`, and numeric ordering. Without a schema for an event, payload values are checked against the comparison at runtime. Once any fields are declared for an event, referenced fields must be declared and match their runtime Variant type. A bare name such as `door_open` still addresses the Blackboard.
 
 The inspector lists the selected trigger's declared fields and guard payload references separately. When a trigger schema exists, Callboard validates field names, literal types, and operators against it. Without a schema, runtime comparison still checks the actual Variant type. Relays emitted by rules and `repeat_emit` forward the original authored payload.
 
@@ -75,6 +77,7 @@ Step callables receive authored fields at the top level for compatibility and al
 | `var_changed(key: StringName, value: Variant)` | An accepted write that changes the stored Blackboard value. The key uses its current name. |
 | `scored(points: int)` | A scoring step emits a score delta. The game owns the total. |
 | `gameplay_event(event_id: StringName, arguments: Dictionary)` | A `gameplay_event` step asks host code to apply a project-specific action. |
+| `dispatch_blocked(action: String, reason: String)` | A Call, relay, or gameplay event was blocked because the Stage is unbuilt, its graph is invalid, or it is dormant. The action identifies the rejected entry point; the reason gives the applicable lifecycle or graph error. |
 
 Connect to `stage.gameplay_event` after loading the Stage. The addon emits the authored ID and a deep copy of the arguments; it does not interpret them. `Stage.scored` and the `score(points)` verb remain available for score deltas.
 
@@ -117,7 +120,7 @@ Step arguments and delays are evaluated at graph compilation using Godot's [Expr
 | Method | Behavior |
 | --- | --- |
 | `define(key, scope, default, state_key = &"")` | Uses the default value's Variant type as the schema. Scope is `&"local"`, `&"saved"`, or `&"shared"`. |
-| `get_var(key)`, `write(key, value)` | Read or write a declared value. Writes to undeclared keys produce an error. Integer writes to float keys are converted. Other type mismatches warn and discard the write. Saved values with an outdated type revert to the declared default during setup. |
+| `get_var(key)`, `write(key, value, writer = &"") -> bool` | Read or write a declared value. A write returns true when a changed value is accepted; false when it is unchanged or rejected. Writes to undeclared keys produce an error. Integer writes to float keys are converted. Other type mismatches warn and discard the write. Saved values with an outdated type revert to the declared default during setup. |
 | `has(key)`, `is_set(key)` | Test whether a key is declared or whether its value is truthy. |
 | `alias(old_key, new_key)`, `resolve_key(key)` | Support renamed keys. Callboard records aliases when it renames authored variables. |
 
@@ -193,9 +196,9 @@ The default factory is [`StagingVerbs`](../core/staging_verbs.gd), which inherit
 | Staging | `pop(n)`, `bounce(n)` | Play a scale animation. |
 | Staging | `say(n, text, seconds = 1.0)` | Show temporary text at a node. |
 | Staging | `move_to(n, dest, offset = Vector3.ZERO, duration = 0.7)` | Tween a node to a target with an offset. |
-| Staging | `play_audio(player, wait_for_completion = false)` | Play an `AudioStreamPlayer`, `AudioStreamPlayer2D`, or `AudioStreamPlayer3D`. Waiting holds the rule for the playback instance started by this step. |
+| Staging | `play_audio(player, wait_for_completion = false, timeout = 0.0)` | Play an `AudioStreamPlayer`, `AudioStreamPlayer2D`, or `AudioStreamPlayer3D`. Waiting holds the rule for this playback instance. A positive timeout releases the wait and cancels the run. |
 | Staging | `rotate_to(n, target_rotation, duration = 0.25, wait_for_completion = true)` | Rotate a `Node3D` to Euler angles in radians. Set duration to zero for an immediate change or disable waiting to let the tween continue in the background. |
-| Staging | `play_animation(player, animation, wait_for_completion = true)` | Play a named `AnimationPlayer` clip. Waiting checks the completed clip name and the Callboard playback token. |
+| Staging | `play_animation(player, animation, wait_for_completion = true, timeout = 0.0)` | Play a named `AnimationPlayer` clip. Waiting checks the completed clip name and the Callboard playback token. A positive timeout releases the wait and cancels the run. |
 | Staging | `pose_animation(player, animation, time = 0.0)` | Seek to a time in a named clip and pause there. |
 | Staging | `gameplay_event(event_id, arguments = {})` | Emit `Stage.gameplay_event` for host-owned behavior such as doors, quests, or inventory. |
 | Staging | `flash(m)`, `jump(m)` | Tint compatible `BaseMaterial3D` overrides or mesh surfaces. Materials are duplicated for the target instance; `jump` still performs its hop when no tintable material exists. |
@@ -204,7 +207,7 @@ When `move_to` and `jump` overlap on the same node, the latest step controls its
 
 `light` writes the supplied key only when it is non-empty. A timed turn-on writes `true`, then writes `false` when it turns off. A newer activation owns the node, so an older timeout cannot turn off a newer light state. The editor reports missing targets, missing/non-Boolean light keys, absent audio streams, and missing animation clips before Stage activation.
 
-The wait options on `play_audio`, `rotate_to`, and `play_animation` are explicit. Audio and animation waits check completion against the playback started by the step, so a different clip or replacement audio instance cannot satisfy the wait. A later built-in playback on the same node supersedes the earlier wait and cancels that run. Use a non-looping clip or stream when waiting for playback completion. Stage deactivation or Restart releases a run-owned wait. Non-waiting tween/audio/animation actions continue according to their Godot node's lifetime and process mode.
+The wait options on `play_audio`, `rotate_to`, and `play_animation` are explicit. Audio and animation waits check completion against the playback started by the step, so a different clip or replacement audio instance cannot satisfy the wait. A later built-in playback on the same node supersedes the earlier wait and cancels that run. Stopping playback, removing its target from the SceneTree, or setting **Cancel If** also cancels the waiting run. A looping clip or stream waits until it is stopped or superseded; set a positive timeout to bound the wait. A timeout of `0.0` disables the timeout. Stage deactivation or Restart releases a run-owned wait. Non-waiting tween/audio/animation actions continue according to their Godot node's lifetime and process mode.
 
 ### Built-in cancellation behavior
 
@@ -213,10 +216,10 @@ The engine checks **Cancel If** before the first step and after each step or del
 | Verb | Effect after cancellation |
 | --- | --- |
 | `set_var`, `add_var`, `score`, `show_node` | Completed writes, score changes, and visibility changes stay applied. |
-| `repeat_emit` | Checks before each tick and stops emitting when cancelled. Deactivation releases its timer wait immediately. |
-| `pop`, `bounce`, `move_to`, waiting `rotate_to` | The tween finishes while the Stage remains in the tree. Restart or deactivation immediately releases the rule's wait; the tween continues. |
-| `flash`, `jump` | The tint restores the target instance's base colors and the hop returns to its base height. Restart or deactivation immediately releases the rule's wait; the visual effect continues. |
-| Waiting `play_audio`, `play_animation` | The rule waits for its playback instance to finish. Restart, replacement by a later built-in playback, or Stage deactivation immediately releases the wait. |
+| `repeat_emit` | Checks before each tick and stops emitting when cancelled. Restart releases the timer wait on the next process frame; deactivation releases it immediately. |
+| `pop`, `bounce`, `move_to`, waiting `rotate_to` | The tween finishes while the Stage remains in the tree. Restart releases the rule's wait on the next process frame; deactivation releases it immediately. The tween continues. |
+| `flash`, `jump` | The tint restores the target instance's base colors and the hop returns to its base height. Restart releases the rule's wait on the next process frame; deactivation releases it immediately. The visual effect continues. |
+| Waiting `play_audio`, `play_animation` | The rule waits for its playback instance to finish. Stop, target removal, timeout, **Cancel If**, Restart, replacement by a later built-in playback, or Stage deactivation cancels the wait and skips remaining steps. Run cancellation releases the wait on the next process frame; deactivation releases it immediately. |
 | `say` | The label expires on its own timer. A later `say` on the same node replaces it and starts a new timer. |
 | `light` | A timed activation turns off on timeout, cancellation of its run, or Stage deactivation. A newer activation owns the light. Untimed visibility and Blackboard changes stay applied. |
 
@@ -267,12 +270,16 @@ Declare a Boolean Blackboard key `door_open` and assign a typed `Node3D` propert
 | API | Purpose |
 | --- | --- |
 | `token()`, `alive(rule, token)` | Check whether a run can continue after asynchronous work. |
+| `fire_from_context(event, payload, context)` | Fire from a saved `_callboard.run.context` to preserve the event chain when a host callback resumes after a yield. Synchronous public `fire()` calls made during event and rule-start callbacks inherit the active chain. |
 | `interruptible(source, completion_if = Callable(), cancel_on = [], run = {}, defer_cancel = false)` | Return a signal that completes when the source passes the optional predicate, any supplied cancellation signal emits, or the engine deactivates. `defer_cancel` coalesces same-frame Restart triggers before the replacement run begins. The caller checks cancellation before continuing its work. |
 | `wait_tracked(seconds, rule_id, label)` | Use the configured clock and surface the wait in the live debugger. Returns the wait signal. |
 | `track_signal(signal_to_track, rule_id, label, seconds = -1.0)` | Show a pending operation until its signal fires. A negative duration means the remaining time is unknown. |
 | `active_snapshot()`, `pending_snapshot()` | Read active rules and queued counts, or pending waits and their remaining times. |
 | `trace_event(entry)` | Observe lifecycle events. Entries include `time_ms`, `kind`, `rule`, `event`, `step`, `verb`, and `detail`. |
 | `pending_changed(entries)`, `run_cancelled(rule_id)`, `all_cancelled` | Observe wait changes and cancellation. |
+| `dispatch_limit_reached(limit, event_chain, rule_id)` | Observe recursion, per-frame work, or pending-queue limits. The engine also reports the limit with the event chain. |
+
+The engine stops event ancestry deeper than 64, caps pending work per rule at 128, and allows 256 rule dispatches per engine per process frame. Excess queue entries are dropped; later triggers may still be accepted after the queue drains. The limit signal and error include the event chain to help locate cycles.
 
 The rule engine dispatches matching rules in authored order. A rule's steps run in order and await their completion when applicable. A rule's own relay fires after its final step completes. Different rules can overlap. The re-entry policy governs repeated triggers of the same rule.
 

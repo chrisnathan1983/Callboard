@@ -203,7 +203,7 @@ godot --headless --path . --script res://demo/tests/smoke.gd
 
 After all tests pass, a default-branch run publishes the addon ZIP to [GitHub Releases](https://github.com/chrisnathan1983/director_blackboard_demo_4/releases). To try a pull request, open its **Checks** tab, then follow **Package Callboard** to the workflow run and download the ZIP from the run summary or **Artifacts**.
 
-Packages and releases use `0.month.day.HHMMSS` in UTC. For example, a run created on November 13 at 18:42:07 UTC produces `callboard-0.11.13.184207.zip` and, on the default branch, the tag `v0.11.13.184207`. PR builds append `-pr.<number>`. Reruns reuse the original creation time. The packaged `plugin.cfg` carries the same version as the ZIP.
+Packages and releases use `0.YYMM.DD.increment`, with the date taken from the workflow creation time in UTC and `increment` taken from the GitHub Actions workflow run number. For example, run 42 created on November 14, 2026 produces `callboard-0.2611.14.42.zip` and, on the default branch, the tag `v0.2611.14.42`. Pull request packages use the same numeric format. Rerunning a workflow keeps its run number and version; a new run gets a higher increment. The packaged `plugin.cfg` carries the same version as the ZIP.
 
 The version resets at the start of each year. If a release tag already points to a different commit, publishing fails and preserves the existing release.
 

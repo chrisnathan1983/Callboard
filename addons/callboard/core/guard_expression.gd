@@ -55,9 +55,13 @@ static func evaluate(blackboard: Blackboard, expression: StringName,
 		return false
 	var key: StringName = parsed["key"]
 	if parsed.get("presence", "") != "":
+		if schema.has(event_id) and not schema[event_id].has(key):
+			return false
 		var present := payload.has(key)
 		return present if parsed["presence"] == "has" else not present
 	if parsed["payload"]:
+		if schema.has(event_id) and not schema[event_id].has(key):
+			return false
 		if not parsed["comparison"] or not payload.has(key):
 			return false
 		var actual: Variant = payload[key]
@@ -69,7 +73,7 @@ static func evaluate(blackboard: Blackboard, expression: StringName,
 			return false
 		if expected_type in [TYPE_INT, TYPE_FLOAT]:
 			if actual_type not in [TYPE_INT, TYPE_FLOAT]: return false
-			return _compare_numbers(float(actual), float(expected), parsed["operator"])
+			return _compare_numeric_variants(actual, expected, parsed["operator"])
 		if actual_type != expected_type or parsed["operator"] not in ["==", "!="]:
 			return false
 		return actual == expected if parsed["operator"] == "==" else actual != expected
@@ -80,7 +84,24 @@ static func evaluate(blackboard: Blackboard, expression: StringName,
 	var entry: Dictionary = blackboard.schema.get(blackboard.resolve_key(key), {})
 	if entry.get("type") not in [TYPE_INT, TYPE_FLOAT] or parsed["value_type"] not in [TYPE_INT, TYPE_FLOAT]:
 		return false
-	return _compare_numbers(float(blackboard.get_var(key)), float(parsed["value"]), parsed["operator"])
+	return _compare_numeric_variants(blackboard.get_var(key), parsed["value"], parsed["operator"])
+
+static func _compare_numeric_variants(actual: Variant, expected: Variant, operator: String) -> bool:
+	if typeof(actual) == TYPE_INT and typeof(expected) == TYPE_INT:
+		return _compare_integers(actual, expected, operator)
+	# Float/float and mixed int/float comparisons use Godot's approximate equality
+	# for == and !=, and numeric ordering after conversion to double precision.
+	return _compare_numbers(float(actual), float(expected), operator)
+
+static func _compare_integers(actual: int, expected: int, operator: String) -> bool:
+	match operator:
+		">": return actual > expected
+		">=": return actual >= expected
+		"<": return actual < expected
+		"<=": return actual <= expected
+		"==": return actual == expected
+		"!=": return actual != expected
+	return false
 
 static func _compare_numbers(actual: float, expected: float, operator: String) -> bool:
 	match operator:

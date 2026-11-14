@@ -6,6 +6,7 @@ signal rule_fired(rule_id: StringName, event: StringName)
 signal scored(points: int)
 signal gameplay_event(event_id: StringName, arguments: Dictionary)
 signal var_changed(key: StringName, value: Variant)
+signal dispatch_blocked(action: String, reason: String)
 
 @export var definition: StageDefinition
 var saved_vars := {}    # injected by the manager; survives unloads
@@ -15,6 +16,7 @@ var state_store: StageStateStore
 var stage_instance_id: StringName
 var managed_lifecycle := false
 var is_active := false
+var is_built := false
 var bb: Blackboard
 var engine: RuleEngine
 var verbs: CoreVerbs
@@ -39,6 +41,12 @@ func _ready() -> void:
 
 ## Also used on an unparented instance by the Callboard.
 func build() -> void:
+	is_built = false
+	if engine != null:
+		engine.cancel_all()
+	if state_store != null and bb != null:
+		state_store.unregister_blackboard(bb)
+	graph_errors.clear()
 	_create_runtime_services()
 	_build_props()
 	if definition:
@@ -49,6 +57,7 @@ func build() -> void:
 	_build_blackboard()
 	if definition:
 		graph_errors = definition.apply_graph(self)
+	is_built = true
 
 ## Override only when `_build_props()` is independent of authored graph and Blackboard
 ## data, and the props remain valid across repeated analysis passes.
@@ -66,7 +75,25 @@ func attach_state_store(store: StageStateStore, instance_id: StringName,
 	shared_vars = p_shared_vars
 
 func accepts_calls() -> bool:
-	return not managed_lifecycle or is_active
+	return _dispatch_block_reason().is_empty()
+
+func _dispatch_block_reason() -> String:
+	if not is_built or engine == null or bb == null:
+		return "Stage has not been built"
+	if not graph_errors.is_empty():
+		return "Stage graph is invalid: %s" % graph_errors[0]
+	if managed_lifecycle and not is_active:
+		return "managed Stage is dormant"
+	return ""
+
+func _can_dispatch(action: String) -> bool:
+	var reason := _dispatch_block_reason()
+	if reason.is_empty():
+		return true
+	dispatch_blocked.emit(action, reason)
+	if OS.is_debug_build():
+		push_warning("Stage '%s' cannot %s: %s." % [name, action, reason])
+	return false
 
 func _apply_restoration_bindings() -> void:
 	if definition == null:
@@ -82,6 +109,8 @@ func rebuild_for_analysis(draft: StageDefinition) -> bool:
 		return false
 	if engine:
 		engine.cancel_all()
+	if state_store != null and bb != null:
+		state_store.unregister_blackboard(bb)
 	saved_vars.clear()
 	fired.clear()
 	definition = draft
@@ -92,6 +121,7 @@ func rebuild_for_analysis(draft: StageDefinition) -> bool:
 	_declare_external_writers()
 	_build_blackboard()
 	graph_errors = definition.apply_graph(self)
+	is_built = true
 	return true
 
 func _create_runtime_services() -> void:
@@ -144,6 +174,10 @@ func _restore_state() -> void: pass
 func activate() -> void:
 	if managed_lifecycle and is_active:
 		return
+	if not is_built:
+		if OS.is_debug_build():
+			push_error("[%s] Cannot activate before build()." % name)
+		return
 	if not graph_errors.is_empty():
 		for problem in graph_errors:
 			push_error("[%s] %s" % [name, problem])
@@ -184,13 +218,13 @@ func define_local(key: StringName, default_val: Variant = false, state_key: Stri
 func get_var(key: StringName) -> Variant:
 	return bb.get_var(key)
 
-func write_var(key: StringName, value: Variant, writer: StringName = &"") -> void:
+func write_var(key: StringName, value: Variant, writer: StringName = &"") -> bool:
 	if writer.is_empty():
 		for declaration: BlackboardWriterData in external_writers:
 			if declaration.key == bb.resolve_key(key):
 				writer = declaration.source
 				break
-	bb.write(key, value, writer)
+	return bb.write(key, value, writer)
 
 func is_set(key: StringName) -> bool:
 	return bb.is_set(key)
@@ -202,7 +236,7 @@ func has_fired(rule_id: StringName) -> bool:
 	return fired.has(rule_id)
 
 func fire(event: StringName, payload := {}) -> void:
-	if not accepts_calls():
+	if not _can_dispatch("Call '%s'" % event):
 		return
 	if OS.is_debug_build() and not _event_is_known(event):
 		push_warning("Stage '%s' fired unknown event '%s'. Declare gameplay events in external_calls." % [name, event])
@@ -210,7 +244,7 @@ func fire(event: StringName, payload := {}) -> void:
 
 ## Publish a typed request for host gameplay code. The Stage does not interpret event IDs.
 func publish_gameplay_event(event_id: StringName, arguments: Dictionary = {}) -> void:
-	if not accepts_calls():
+	if not _can_dispatch("publish gameplay event '%s'" % event_id):
 		return
 	if event_id.is_empty():
 		if OS.is_debug_build():
@@ -220,7 +254,7 @@ func publish_gameplay_event(event_id: StringName, arguments: Dictionary = {}) ->
 
 ## Use a declared Boolean Blackboard key to latch a relay fired by gameplay code.
 func fire_relay_once(relay: StringName, latch: StringName, source_id: StringName, source_event: StringName) -> bool:
-	if bb == null or relay.is_empty() or not accepts_calls():
+	if not _can_dispatch("fire relay '%s'" % relay) or relay.is_empty():
 		return false
 	if not bb.has(latch):
 		if OS.is_debug_build():
@@ -232,7 +266,12 @@ func fire_relay_once(relay: StringName, latch: StringName, source_id: StringName
 		return false
 	if is_set(latch):
 		return false
-	write_var(latch, true, source_id)
+	var latch_entry: Dictionary = bb.schema[bb.resolve_key(latch)]
+	if latch_entry.get("scope") == &"shared" and state_store != null \
+			and state_store.is_dispatching_shared_writes():
+		return false
+	if not write_var(latch, true, source_id) or not is_set(latch):
+		return false
 	rule_fired.emit(source_id, source_event)
 	fire(StringName("relay:" + relay))
 	return true

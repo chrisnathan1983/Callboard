@@ -45,6 +45,22 @@ static func check(rules: Array[Rule], bb: Blackboard,
 				settable[bb.resolve_key(k)] = true
 				if not bb.has(k):
 					problems.append("rule '%s' writes '%s' which is not declared on the Blackboard" % [r.id, k])
+			if s.verb == &"set_var":
+				if s.args.size() < 2:
+					problems.append("rule '%s' has a set_var step without a key and value" % r.id)
+				else:
+					var target: Variant = s.args[0]
+					var value: Variant = s.args[1]
+					if not target is StringName:
+						problems.append("rule '%s' set_var target must be a Blackboard key" % r.id)
+					elif not bb.has(target):
+						problems.append("rule '%s' set_var target '%s' is not declared on the Blackboard" % [r.id, target])
+					else:
+						var target_type: int = bb.schema[bb.resolve_key(target)].get("type", TYPE_NIL)
+						var value_type := typeof(value)
+						if value_type != target_type and not (target_type == TYPE_FLOAT and value_type == TYPE_INT):
+							problems.append("rule '%s' set_var value of type %s is incompatible with key '%s' declared as %s" % [
+								r.id, type_string(value_type), target, type_string(target_type)])
 			if s.verb == &"add_var":
 				if s.args.size() < 2:
 					problems.append("rule '%s' has an add_var step without a key and delta" % r.id)
@@ -85,6 +101,11 @@ static func check(rules: Array[Rule], bb: Blackboard,
 				if parsed["comparison"]:
 					if payload_names.has(r.trigger) and not trigger_schema.has(field_key):
 						problems.append("rule '%s' checks undeclared payload field '%s' for trigger '%s'" % [r.id, field_key, r.trigger])
+						continue
+					# An event without any schema is intentionally dynamic: runtime checks
+					# the actual Variant type. A declared schema is strict, including when
+					# only some of an event's fields are listed.
+					if not payload_names.has(r.trigger):
 						continue
 					var field_type: int = trigger_schema.get(field_key, TYPE_NIL)
 					var literal_type: int = parsed["value_type"]

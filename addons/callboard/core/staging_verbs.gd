@@ -15,6 +15,17 @@ const BASE_Y_META := &"_callboard_base_y"
 
 class PlaybackTicket extends RefCounted:
 	signal superseded
+	signal interrupted(reason: StringName)
+	var completed := false
+	var cancelled := false
+
+	func cancel(reason: StringName) -> void:
+		if completed or cancelled:
+			return
+		cancelled = true
+		interrupted.emit(reason)
+		if reason == &"replaced":
+			superseded.emit()
 
 func show_node(n: Node3D, should_be_visible := true) -> Step:
 	return Step.new(func(_c: Dictionary) -> void: n.visible = should_be_visible)
@@ -31,8 +42,8 @@ func gameplay_event(event_id: StringName, arguments: Dictionary = {}) -> Step:
 		if is_instance_valid(stage):
 			stage.publish_gameplay_event(event_id, arguments))
 
-## Play a stream. Set wait_for_completion to hold the rule until playback ends.
-func play_audio(player: Node, wait_for_completion := false) -> Step:
+## Play a stream. A positive timeout cancels a wait that runs too long.
+func play_audio(player: Node, wait_for_completion := false, timeout := 0.0) -> Step:
 	var f := func(payload: Dictionary) -> Variant:
 		if not _is_audio_player(player):
 			push_warning("Callboard play_audio skipped: target must be an AudioStreamPlayer, AudioStreamPlayer2D, or AudioStreamPlayer3D.")
@@ -40,9 +51,12 @@ func play_audio(player: Node, wait_for_completion := false) -> Step:
 		if player.get("stream") == null:
 			push_warning("Callboard play_audio skipped: the target has no AudioStream assigned.")
 			return null
+		if timeout < 0.0:
+			push_warning("Callboard play_audio skipped: timeout must be zero or greater.")
+			return null
 		var previous_ticket: PlaybackTicket = player.get_meta(AUDIO_PLAYBACK_META) as PlaybackTicket if player.has_meta(AUDIO_PLAYBACK_META) else null
 		if previous_ticket != null:
-			previous_ticket.superseded.emit()
+			previous_ticket.cancel(&"replaced")
 		var ticket := PlaybackTicket.new()
 		player.set_meta(AUDIO_PLAYBACK_META, ticket)
 		player.call("play")
@@ -53,10 +67,15 @@ func play_audio(player: Node, wait_for_completion := false) -> Step:
 				if playback_id == 0 or not is_instance_valid(player):
 					return false
 				var current := player.call("get_stream_playback") as AudioStreamPlayback
-				return (current != null and current.get_instance_id() == playback_id
+				var matches: bool = (current != null and current.get_instance_id() == playback_id
 					and player.get_meta(AUDIO_PLAYBACK_META, null) == ticket)
+				if matches:
+					ticket.completed = true
+				return matches
 			var finished := _audio_finished_signal(player)
-			return _animation_completion(payload, finished, playback_matches, [ticket.superseded])
+			_start_playback_monitor(player, ticket, func() -> bool:
+				return bool(player.get("playing")) and not bool(player.get("stream_paused")), timeout)
+			return _animation_completion(payload, finished, playback_matches, [ticket.interrupted])
 		return null
 	return Step.new(f)
 
@@ -76,12 +95,15 @@ func rotate_to(n: Node3D, target_rotation: Vector3, duration := 0.25,
 		return _animation_completion(payload, tween.finished) if wait_for_completion else null
 	return Step.new(f)
 
-## Play an AnimationPlayer clip. Waiting is explicit; deactivation releases the wait.
+## Play an AnimationPlayer clip. A positive timeout cancels a wait that runs too long.
 func play_animation(player: AnimationPlayer, animation: StringName,
-		wait_for_completion := true) -> Step:
+		wait_for_completion := true, timeout := 0.0) -> Step:
 	var f := func(payload: Dictionary) -> Variant:
 		if player == null or not is_instance_valid(player) or not player.has_animation(animation):
 			push_warning("Callboard play_animation skipped: animation '%s' is missing from its AnimationPlayer." % animation)
+			return null
+		if timeout < 0.0:
+			push_warning("Callboard play_animation skipped: timeout must be zero or greater.")
 			return null
 		if not wait_for_completion:
 			_supersede_animation_playback(player)
@@ -90,10 +112,14 @@ func play_animation(player: AnimationPlayer, animation: StringName,
 		var ticket := _supersede_animation_playback(player)
 		player.play(animation)
 		var playback_matches := func(finished_animation: StringName) -> bool:
-			return (finished_animation == animation and is_instance_valid(player)
+			var matches: bool = (finished_animation == animation and is_instance_valid(player)
 				and player.get_meta(ANIMATION_PLAYBACK_META, null) == ticket)
+			if matches:
+				ticket.completed = true
+			return matches
+		_start_playback_monitor(player, ticket, func() -> bool: return player.is_playing(), timeout)
 		return _animation_completion(payload, player.animation_finished, playback_matches,
-			[ticket.superseded])
+			[ticket.interrupted])
 	return Step.new(f)
 
 ## Pose an AnimationPlayer at a time without starting a playback wait.
@@ -281,14 +307,46 @@ func _animation_completion(payload: Dictionary, finished: Signal,
 			var cancellation: RuleEngine.AwaitedSignal = run.get("cancel_signal") as RuleEngine.AwaitedSignal
 			if cancellation != null:
 				cancel_on.append(cancellation.cancelled)
-				return engine.interruptible(finished, completion_if, cancel_on, run)
+				return engine.interruptible(finished, completion_if, cancel_on, run, true)
 			return engine.interruptible(finished, completion_if)
 	return finished
+
+func _start_playback_monitor(target: Node, ticket: PlaybackTicket,
+		is_playing: Callable, timeout: float) -> void:
+	var target_id := target.get_instance_id()
+	var was_inside_tree := target.is_inside_tree()
+	_monitor_playback(target_id, ticket, is_playing, timeout, was_inside_tree)
+
+func _monitor_playback(target_id: int, ticket: PlaybackTicket, is_playing: Callable,
+		timeout: float, was_inside_tree: bool) -> void:
+	var tree: SceneTree
+	var target := instance_from_id(target_id) as Node
+	if is_instance_valid(target):
+		tree = target.get_tree()
+	if tree == null and is_instance_valid(context.host) and context.host is Node:
+		tree = (context.host as Node).get_tree()
+	if tree == null:
+		return
+	var started_ms := Time.get_ticks_msec()
+	while not ticket.completed and not ticket.cancelled:
+		await tree.process_frame
+		if ticket.completed or ticket.cancelled:
+			return
+		target = instance_from_id(target_id) as Node
+		if not is_instance_valid(target) or (was_inside_tree and not target.is_inside_tree()):
+			ticket.cancel(&"target_removed")
+			return
+		if timeout > 0.0 and (Time.get_ticks_msec() - started_ms) / 1000.0 >= timeout:
+			ticket.cancel(&"timeout")
+			return
+		if not bool(is_playing.call()):
+			ticket.cancel(&"stopped")
+			return
 
 func _supersede_animation_playback(player: AnimationPlayer) -> PlaybackTicket:
 	var previous: PlaybackTicket = player.get_meta(ANIMATION_PLAYBACK_META) as PlaybackTicket if player.has_meta(ANIMATION_PLAYBACK_META) else null
 	if previous != null:
-		previous.superseded.emit()
+		previous.cancel(&"replaced")
 	var ticket := PlaybackTicket.new()
 	player.set_meta(ANIMATION_PLAYBACK_META, ticket)
 	return ticket
@@ -400,6 +458,8 @@ func validate_step(rule_id: StringName, step: Step, bb: Blackboard) -> Array[Str
 			problems.append("rule '%s' play_audio target must be an AudioStreamPlayer, AudioStreamPlayer2D, or AudioStreamPlayer3D" % rule_id)
 		elif target.get("stream") == null:
 			problems.append("rule '%s' play_audio target has no AudioStream assigned" % rule_id)
+		if step.args.size() > 2 and float(step.args[2]) < 0.0:
+			problems.append("rule '%s' play_audio timeout must be zero or greater" % rule_id)
 	if step.verb == &"rotate_to":
 		if not target is Node3D or not is_instance_valid(target):
 			problems.append("rule '%s' rotate_to target must be a valid Node3D" % rule_id)
@@ -410,6 +470,8 @@ func validate_step(rule_id: StringName, step: Step, bb: Blackboard) -> Array[Str
 			problems.append("rule '%s' '%s' target must be a valid AnimationPlayer" % [rule_id, step.verb])
 		elif step.args.size() > 1 and (not step.args[1] is StringName or not target.has_animation(step.args[1])):
 			problems.append("rule '%s' '%s' names an animation not found on its AnimationPlayer" % [rule_id, step.verb])
+		if step.verb == &"play_animation" and step.args.size() > 3 and float(step.args[3]) < 0.0:
+			problems.append("rule '%s' play_animation timeout must be zero or greater" % rule_id)
 	if step.verb == &"flash" or step.verb == &"jump":
 		if not target is MeshInstance3D or not is_instance_valid(target):
 			problems.append("rule '%s' '%s' target must be a valid MeshInstance3D" % [rule_id, step.verb])

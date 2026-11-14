@@ -16,48 +16,48 @@
 
 The first five items retain the high priority assigned in `TODO.md`.
 
-- [ ] **Give playback and waits per-run ownership.** See [StagingVerbs](addons/callboard/core/staging_verbs.gd), [RuleEngine](addons/callboard/core/rule_engine.gd), and [CoreVerbs](addons/callboard/core/core_verbs.gd).
-  - [x] Stage deactivation releases registered interruptible waits. Delays and `repeat_emit` use the engine's injected clock. Restart cancels the active run and starts only the latest same-frame replacement; unit tests cover replacement and repeat behavior.
+- [x] **Give playback and waits per-run ownership.** See [StagingVerbs](addons/callboard/core/staging_verbs.gd), [RuleEngine](addons/callboard/core/rule_engine.gd), and [CoreVerbs](addons/callboard/core/core_verbs.gd).
+  - [x] Stage deactivation releases registered interruptible waits. Delays and `repeat_emit` use the engine's injected clock. Restart cancels the active run and starts only the latest same-frame replacement after the cancellation wakeup; unit tests cover replacement and repeat behavior.
   - [x] Match completion to the requested playback instance. `play_animation` checks the emitted animation name and a per-player playback ticket; `play_audio` captures and checks its `AudioStreamPlayback` instance. A later built-in playback supersedes the earlier wait, including replay of the same animation. Runtime unit tests pass for name filtering and replacement cancellation.
-  - [ ] Define and test all playback exit cases:
+  - [x] Define and test all playback exit cases:
     - [x] Replacement, including replay of the same clip, cancels the earlier wait; Restart and Stage deactivation release run-owned waits.
-    - [ ] Stop and target removal must release the wait with defined behavior. Add tests for both audio and animation targets.
-    - [ ] Define looping behavior and an optional timeout; add tests for a loop that never emits completion and for timeout cleanup.
-    - [ ] Verify `Cancel If` releases playback waits and prevents the cancelled run from continuing.
+    - [x] Stop and target removal cancel the waiting run and prevent its remaining steps.
+    - [x] Looping playback waits until stopped, superseded, or cancelled; an optional positive timeout cancels the wait. A zero timeout means no timeout.
+    - [x] `Cancel If` releases playback waits and prevents the cancelled run from continuing.
   - [x] Make `interruptible()` accept supported signal arities and clean up source connections and pending diagnostics on completion, cancellation, and deactivation. Regression tests cover two-argument signals and cleanup.
   - [x] Preserve non-blocking visual effects after successful rule completion, while preventing a cancelled or superseded run from resuming its remaining steps. Unit tests cover Restart, timed-light ownership, and replacement cancellation.
 
-- [ ] **Make Shared Blackboard writes atomic and ordered.** See [Blackboard](addons/callboard/core/blackboard.gd) and [StageStateStore](addons/callboard/core/stage_state_store.gd).
+- [x] **Make Shared Blackboard writes atomic and ordered.** See [Blackboard](addons/callboard/core/blackboard.gd) and [StageStateStore](addons/callboard/core/stage_state_store.gd).
   - [x] A store supplies shared state across loaded Stages, validates writes against their declared types, and exposes writer attribution and change notifications.
-  - [ ] Commit each write once in the store and deliver notifications in commit order, including listener-triggered writes. Currently `Blackboard.write()` updates the shared dictionary and emits the local change before `_on_shared_changed()` writes the value again. A prior probe committed `1`, wrote `2` from a listener, and then saw the older `1` overwrite `2`.
-  - [ ] Test nested writes from source and receiving Stages, unchanged values, rejected types, consistent notification order, and final writer attribution. Use this ordering for Blackboard-triggered rules in §2.
+  - [x] Commit each shared write once in the store and deliver notifications in commit order, including listener-triggered writes.
+  - [x] Test nested writes from source and receiving Stages, unchanged values, rejected types, consistent notification order, and final writer attribution.
 
-- [ ] **Emit a one-shot relay only after committing its latch.** See [`Stage.fire_relay_once()`](addons/callboard/core/stage.gd) and [`Blackboard.write()`](addons/callboard/core/blackboard.gd).
+- [x] **Emit a one-shot relay only after committing its latch.** See [`Stage.fire_relay_once()`](addons/callboard/core/stage.gd) and [`Blackboard.write()`](addons/callboard/core/blackboard.gd).
   - [x] The helper checks for an eligible Stage, a relay ID, a declared Boolean latch, and an unset latch value.
-  - [ ] Return an actionable write result through the Stage and Blackboard APIs. Emit the relay and `rule_fired`, and return success, only after a successful latch commit. Today `write()` returns `void`, and a rejected write can still produce both signals.
-  - [ ] Cover repeated calls following a rejected Shared write and re-entry from a listener during a successful latch commit.
+  - [x] Return an actionable write result through the Stage and Blackboard APIs. Emit the relay and `rule_fired`, and return success, only after a successful latch commit.
+  - [x] Cover repeated calls following a rejected Shared write and re-entry from a listener during a successful latch commit.
 
-- [ ] **Apply lifecycle and graph-validity checks consistently at public dispatch entry points.** See [Stage](addons/callboard/core/stage.gd), [StageDefinition](addons/callboard/core/stage_definition.gd), and the [API reference](addons/callboard/docs/api.md).
+- [x] **Apply lifecycle and graph-validity checks consistently at public dispatch entry points.** See [Stage](addons/callboard/core/stage.gd), [StageDefinition](addons/callboard/core/stage_definition.gd), and the [API reference](addons/callboard/docs/api.md).
   - [x] `activate()` blocks graph compilation errors, and managed Stages reject Calls while dormant. The compiler keeps inert placeholders for invalid steps to preserve editor metadata indices.
-  - [ ] Decide how to migrate the current direct-Call behavior on unmanaged Stages. The API lists compilation errors as an activation blocker and separately documents dormant filtering for `fire()`. Define one initialization and graph-validity policy for Calls, external relay helpers, and other public dispatch paths, including calls before `build()`.
-  - [ ] Report the blocked Call or relay and the relevant rule or compile diagnostic. Test a partially compiled graph with a valid step beside an invalid step, an unbuilt Stage, a valid unmanaged Stage, and a dormant managed Stage.
+  - [x] Define the dispatch policy: callers must build first; valid unmanaged Stages accept direct Calls without `activate()`, while invalid graphs and dormant managed Stages block all dispatch entry points.
+  - [x] Report blocked Calls and relays through `dispatch_blocked` and debug diagnostics. Test a partially compiled graph with valid and invalid steps, an unbuilt Stage, a valid unmanaged Stage, and a dormant managed Stage.
 
-- [ ] **Bound recursive dispatch and queued work.** See [RuleEngine](addons/callboard/core/rule_engine.gd) and [CoreVerbs](addons/callboard/core/core_verbs.gd).
+- [x] **Bound recursive dispatch and queued work.** See [RuleEngine](addons/callboard/core/rule_engine.gd) and [CoreVerbs](addons/callboard/core/core_verbs.gd).
   - [x] The engine limits completion-relay recursion to 64 levels and supports Ignore, Restart, and Queue re-entry.
-  - [ ] Preserve event ancestry through nested public `fire()` calls, relay steps, and queued work. Public `fire()` currently resets depth, and the prior bounded probe ran 1,000 mutually queued dispatches in a single call.
-  - [ ] Cap pending queue size and dispatch work per frame. Define overflow and deferral behavior, preserve ordering for accepted work, and show the event chain when a limit is reached.
-  - [ ] Cover cycles through host callbacks and rules, including cycles that yield, and verify ordinary queued triggers still recheck guards and retain their payloads.
+  - [x] Preserve event ancestry through synchronous nested public `fire()` calls, relay steps, and queued work. `fire_from_context()` carries ancestry into callbacks that resume after a yield.
+  - [x] Cap each rule's pending queue at 128 and dispatch work at 256 rules per engine per process frame. Excess queue entries are dropped, and diagnostics report the event chain.
+  - [x] Cover cycles through host callbacks and rules, including cycles that yield, and verify ordinary queued triggers still recheck guards and retain their payloads.
 
-- [ ] **Check initial cancellation before consuming a one-shot rule.** See [RuleEngine](addons/callboard/core/rule_engine.gd).
+- [x] **Check initial cancellation before consuming a one-shot rule.** See [RuleEngine](addons/callboard/core/rule_engine.gd).
   - [x] Existing tests cover the start-latch policy for runs cancelled after they start.
-  - [ ] Evaluate `Cancel If` against the incoming payload before setting the latch, emitting `rule_fired`, or tracing a start. `_run()` currently performs those actions before checking whether the run can continue.
-  - [ ] Consider an explicit completion-latch policy for sequences that should be retryable after interruption. If added, define successful completion, re-entry, and persistence semantics.
+  - [x] Evaluate `Cancel If` against the incoming payload before dispatch and again at `_run()` entry, so a rejected one-shot does not set its latch, emit `rule_fired`, trace a start, or run a step. A regression confirms a later payload can pass and consume the latch.
+  - [x] Keep the explicit start-latch policy: once an eligible run starts, interruption does not clear its one-shot latch. No completion-latch/retry mode is added; authors needing retry behavior should use a non-one-shot rule and explicit state guards.
 
-- [ ] **Align type rules across compilation, validation, and runtime.** See [RuleValidator](addons/callboard/core/rule_validator.gd), [GuardExpression](addons/callboard/core/guard_expression.gd), and [Blackboard](addons/callboard/core/blackboard.gd).
+- [x] **Align type rules across compilation, validation, and runtime.** See [RuleValidator](addons/callboard/core/rule_validator.gd), [GuardExpression](addons/callboard/core/guard_expression.gd), and [Blackboard](addons/callboard/core/blackboard.gd).
   - [x] Typed payload fields, payload presence checks, typed Blackboard writes with integer-to-float widening, and numeric `add_var` validation already exist.
-  - [ ] Catch incompatible `set_var` writes during validation. The existing write checks know which keys are declared. A String write to a Boolean key can pass authoring checks and be dropped at runtime.
-  - [ ] Align declared, undeclared, and partially declared payload schema behavior. An undeclared schema currently produces an incompatible-literal/operator warning for comparisons that runtime can evaluate.
-  - [ ] Compare integer operands exactly without converting them to floats. Both payload and Blackboard numeric comparisons currently share the approximate float path; the prior review found `1000001 == 1000000` could pass. Define and test float and mixed-number comparison semantics as well.
+  - [x] Validate static `set_var` target and value types. Match runtime writes, including the permitted integer-to-float widening; mismatched literal writes are reported before dispatch.
+  - [x] Align payload schema behavior: a missing event schema permits dynamic values checked at runtime, while a declared event schema rejects undeclared fields and enforces declared types.
+  - [x] Compare integer/integer operands exactly for payload and Blackboard guards. Preserve approximate equality for float/float and mixed int/float comparisons, and test numeric ordering and equality behavior.
 
 - [ ] **Make editor validation safe to run while editing.** See [RuleGraphReader](addons/callboard/model/rule_graph_reader.gd), [Stage](addons/callboard/core/stage.gd), and [StageDefinition](addons/callboard/core/stage_definition.gd).
   - [x] Analysis has opt-in preview-prop reuse via `can_reuse_analysis_props()` and can resolve scene-assigned props.
