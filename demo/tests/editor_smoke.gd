@@ -27,7 +27,7 @@ func _test_authored_resource_graph() -> bool:
 	var definition := load(DEFINITION_PATH) as StageDefinition
 	var data := RuleGraphReader.inspect_definition(DEFINITION_PATH)
 	ok = _check("resource stores events, variables, rules and groups",
-		definition.external_calls.has("file:permit") and definition.variables.size() == 4
+		definition.external_calls.has("file:permit") and definition.variables.size() == 8
 		and not definition.rules.is_empty() and definition.rules.size() == data.rules.size()
 		and definition.groups.size() == 4 and definition.variables[0] is VariableData
 		and definition.rules[0] is RuleData and definition.rules[0].steps[0] is StepData
@@ -51,7 +51,7 @@ func _test_authored_resource_graph() -> bool:
 	ok = _check("graph: rule nodes and wires built",
 		gv._rule_nodes.size() == data.rules.size() and not gv.get_connection_list().is_empty()) and ok
 	ok = _check("authored Calls keep their saved position by the delivery branch",
-		gv._event_nodes["give:duck"].position_offset == definition.call_positions["give:duck"]) and ok
+		gv._event_nodes["give:refused"].position_offset == definition.call_positions["give:refused"]) and ok
 	var fresh_data := _copy_draft(data)
 	fresh_data.call_positions = {}
 	for rule in fresh_data.rules:
@@ -65,7 +65,7 @@ func _test_authored_resource_graph() -> bool:
 	fresh_graph.queue_free()
 	var kept_rule_node: GraphNode = gv._rule_nodes["z1_caught"]
 	var updated_rule_node: GraphNode = gv._rule_nodes["z1_bark"]
-	var kept_event_node: GraphNode = gv._event_nodes["give:duck"]
+	var kept_event_node: GraphNode = gv._event_nodes["give:refused"]
 	var graph_edit := _copy_draft(data)
 	var edited_rule := graph_edit.find_rule("z1_bark")
 	edited_rule.one_shot = true
@@ -74,13 +74,13 @@ func _test_authored_resource_graph() -> bool:
 	gv.update_data(graph_edit)
 	ok = _check("incremental graph refresh replaces only the changed rule card",
 		gv._rule_nodes["z1_bark"] != updated_rule_node and gv._rule_nodes["z1_caught"] == kept_rule_node
-		and gv._event_nodes["give:duck"] == kept_event_node and not gv.get_connection_list().is_empty()) and ok
+		and gv._event_nodes["give:refused"] == kept_event_node and not gv.get_connection_list().is_empty()) and ok
 	ok = _check("incremental refresh does not auto-arrange nodes when position data exists",
 		gv._rule_nodes["z1_bark"].position_offset == Vector2(555, 77)) and ok
 	gv.set_minimized(true)
 	var compact_rule: GraphNode = gv._rule_nodes["z1_bark"]
 	var compact_treat: GraphNode = gv._rule_nodes["z1_treat"]
-	var compact_call: GraphNode = gv._event_nodes["give:duck"]
+	var compact_call: GraphNode = gv._event_nodes["give:refused"]
 	var compact_treat_row := compact_treat.get_child(0) as HBoxContainer
 	var compact_relay_label := compact_treat_row.get_child(compact_treat_row.get_child_count() - 1) as Label
 	ok = _check("compact cards keep the title, collapse details and retain connections",
@@ -91,7 +91,7 @@ func _test_authored_resource_graph() -> bool:
 	ok = _check("compact mode keeps external Call nodes at their normal size and layout",
 		compact_call.title == "Call" and compact_call.custom_minimum_size.x == 174.0
 		and compact_call.get_child_count() == 1
-		and (compact_call.get_child(0) as Label).text == "give:duck") and ok
+		and (compact_call.get_child(0) as Label).text == "give:refused") and ok
 	gv.set_minimized(false)
 	gv._rule_nodes["z1_bark"].position_offset = Vector2(999, 777)
 	gv.auto_arrange()
@@ -177,7 +177,7 @@ func _test_board_editing() -> bool:
 	board.blackboard._on_add(0)
 	ok = _check("add variable (bool, local)", d.variables.size() == definition.variables.size() + 1
 		and d.variables.back().key == "new_var" and d.variables.back().scope == "local") and ok
-	ok = _check("added variable is generated", RuleGraphReader.make_definition(d).variables[3].default_value == false) and ok
+	ok = _check("added variable is generated", RuleGraphReader.make_definition(d).variables.back().default_value == false) and ok
 	AuthoredData.rename_key(d, "lamp_on", "alarm_on")
 	board._changed("")
 	ok = _check("rename key updates guards", _rule(d, "z1_caught").requires == PackedStringArray(["alarm_on"])) and ok
@@ -204,7 +204,7 @@ func _test_save_and_history() -> bool:
 	var ok := true
 	var src := FileAccess.get_file_as_string(STAGE_PATH)
 	var definition := load(DEFINITION_PATH) as StageDefinition
-	definition.call_positions = {"give:duck": Vector2(-600, 150)}
+	definition.call_positions = {"give:refused": Vector2(-600, 150)}
 	# --- E. Save: refuses broken output, writes good output ----------------------------
 	ok = _check("temporary resource saved", ResourceSaver.save(definition, TMP_PATH) == OK) and ok
 	var original := FileAccess.get_file_as_string(TMP_PATH)
@@ -293,7 +293,7 @@ func _test_save_and_history() -> bool:
 	var saved_rule_pos := Vector2(712, 286)
 	var saved_call_pos := Vector2(-580, 174)
 	b2.view._rule_nodes["z1_bark"].position_offset = saved_rule_pos
-	b2.view._event_nodes["give:duck"].position_offset = saved_call_pos
+	b2.view._event_nodes["give:refused"].position_offset = saved_call_pos
 	b2.view.end_node_move.emit()
 	b2.save()
 	var re := RuleGraphReader.inspect_definition(TMP_PATH)
@@ -308,7 +308,7 @@ func _test_save_and_history() -> bool:
 	ok = _check("save: moved rule position is preserved",
 		_rule(re, "z1_bark").has_pos and _rule(re, "z1_bark").pos == saved_rule_pos) and ok
 	ok = _check("save: moved Call position is preserved",
-		re.call_positions.get("give:duck") == saved_call_pos) and ok
+		re.call_positions.get("give:refused") == saved_call_pos) and ok
 	ok = _check("save: reloaded stage builds with no problems", re.errors.is_empty() and re.warnings.is_empty()) and ok
 	ok = _check("new event and wire persist",
 		re.external_calls.has("doorbell") and _rule(re, "z1_decoy").trigger == "doorbell") and ok
@@ -320,7 +320,7 @@ func _test_save_and_history() -> bool:
 	ok = _check("reopening resource restores moved rule position",
 		b2.view.get_positions()["z1_bark"] == saved_rule_pos) and ok
 	ok = _check("reopening resource restores moved Call position",
-		b2.view.get_call_positions()["give:duck"] == saved_call_pos) and ok
+		b2.view.get_call_positions()["give:refused"] == saved_call_pos) and ok
 	ok = _check("reopening resource starts a fresh history", b2._undo_button.disabled and b2._redo_button.disabled) and ok
 	b2.queue_free()
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(TMP_PATH))
@@ -484,7 +484,7 @@ func _test_event_and_relay_edits() -> bool:
 		and call_payload_field.event_id == &"offer:parcel"
 		and board.view.get_call_positions()["offer:parcel"] == renamed_call_pos) and ok
 	ok = _check("event name collision leaves connections alone",
-		not board.rename_connection("offer:parcel", "give:duck").is_empty()
+		not board.rename_connection("offer:parcel", "give:refused").is_empty()
 		and _rule(board._data, "z1_decoy").trigger == "offer:parcel") and ok
 	card = board._connection_cards["offer:parcel"]
 	var delete := card.find_child("DeleteConnection", true, false) as Button
@@ -523,8 +523,10 @@ func _test_event_and_relay_edits() -> bool:
 		reloaded.errors.is_empty() and reloaded.relay_for(tick) == "guard_tick"
 		and reloaded.step_metadata[tick].relay_argument == 1
 		and saved.rules[0] is RuleData and saved.rules[0].steps[0] is StepData
-		and saved.payload_fields.size() == 1 and saved.payload_fields[0].event_id == &"offer:parcel"
-		and saved.payload_fields[0].key == &"action" and saved.payload_fields[0].type_name == "String") and ok
+		and saved.payload_fields.size() == definition.payload_fields.size() + 1
+		and saved.payload_fields.back().event_id == &"offer:parcel"
+		and saved.payload_fields.back().key == &"action" and saved.payload_fields.back().type_name == "String"
+		and saved.restoration_bindings.size() == definition.restoration_bindings.size()) and ok
 
 	var affected := RuleConnections.impact(board._data, "relay:guard_tick")
 	ok = _check("relay deletion lists its emitting step and receiving trigger",
@@ -695,13 +697,13 @@ func _test_live_debug() -> bool:
 	board._debug_button.button_pressed = false
 	var active_row := panel._active_rows.get_child(0)
 	var trace_count := panel._trace_rows.get_child_count()
-	stage.fire(&"give:duck")
+	stage.fire(&"give:refused")
 	var hidden_rows_unchanged := panel._active_rows.get_child(0) == active_row \
 		and panel._trace_rows.get_child_count() == trace_count
 	board._debug_button.button_pressed = true
 	var buffered_trace_rendered := panel._trace_rows.get_child_count() == trace_count + 1
 	for i in CallboardLiveDebugPanel.MAX_TRACE_ROWS + 1:
-		stage.fire(&"give:duck")
+		stage.fire(&"give:refused")
 	var trace_is_bounded := panel._trace_rows.get_child_count() == CallboardLiveDebugPanel.MAX_TRACE_ROWS
 	board.free()
 	stage.free()

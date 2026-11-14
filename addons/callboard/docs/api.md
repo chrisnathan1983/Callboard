@@ -6,7 +6,7 @@
 
 ## Stage
 
-[`Stage`](../addons/callboard/core/stage.gd) extends `Node3D`. Your game owns scene loading. The Stage builds its props, Blackboard, and rules during runtime `_ready()`, then calls `_restore_state()` and its declarative restoration bindings. Call `activate()` once the Stage is ready and your listeners are connected. A managed Stage stays dormant until activation.
+[`Stage`](../core/stage.gd) extends `Node3D`. Your game owns scene loading. The Stage builds its props, Blackboard, and rules during runtime `_ready()`, then calls `_restore_state()` and its declarative restoration bindings. Call `activate()` once the Stage is ready and your listeners are connected. A managed Stage stays dormant until activation.
 
 ```gdscript
 extends Node3D
@@ -31,11 +31,11 @@ func unload_stage() -> void:
     stage = null
 ```
 
-Call `load_stage()` from a parent already in the scene tree. Keep a pair of dictionaries per Stage if your game loads several Stages. Both dictionaries are shared by reference. Serialize and restore them in your save system if they should survive a game restart. See the [demo manager](../demo/scripts/game_manager.gd) for signal wiring and reload behavior.
+Call `load_stage()` from a parent already in the scene tree. Keep a pair of dictionaries per Stage if your game loads several Stages. Both dictionaries are shared by reference. Serialize and restore them in your save system if they should survive a game restart.
 
 Preserve Variant types when saving these dictionaries. For example, use `var_to_str()` and `str_to_var()`. JSON reads numbers as floats, so a JSON save layer needs to restore declared integer values to `int` before assigning `saved_vars`.
 
-When `SceneTree.paused` is true, rule delays, repeat ticks, timed lights, and the demo player's stun timer stop counting down. They resume with their remaining time when the tree unpauses. Staging tweens follow the host node's pause behavior. A direct `fire()` call still dispatches rules while paused.
+When `SceneTree.paused` is true, rule delays, repeat ticks, and timed lights stop counting down. They resume with their remaining time when the tree unpauses. Staging tweens follow the host node's pause behavior. A direct `fire()` call still dispatches rules while paused.
 
 | Method | Contract |
 | --- | --- |
@@ -85,14 +85,14 @@ Connect to `stage.gameplay_event` after loading the Stage. The addon emits the a
 | `_build_props() -> void` | Create or bind props before rule steps are compiled. |
 | `_build_blackboard() -> void` | Define or initialize script-owned keys after authored defaults are applied. |
 | `_declare_external_writers() -> void` | Call `register_external_writer()` for outputs provided by Stage gameplay code. Runs after authored keys are applied and before graph validation. |
-| `_restore_state() -> void` | Restore scene presentation after the graph is built. The demo uses this to restore the guard's position and reward visibility. |
+| `_restore_state() -> void` | Restore custom scene state after the graph is built and before declarative restoration bindings run. |
 | `_make_verbs(context: StepContext) -> CoreVerbs` | Return the verb factory. The default is `StagingVerbs.new(context)`. Put game-specific effects and Blackboard key defaults in a Stage-specific subclass. |
 
 Use `@tool` on the Stage script and custom verb factory so Callboard can analyze them in the editor. Initialize typed prop references in the scene or in `_build_props()` before the editor or runtime compiles steps.
 
 ## StageDefinition
 
-[`StageDefinition`](../addons/callboard/core/stage_definition.gd) is the resource assigned to `Stage.definition`. The editor saves variables, rules, steps, and groups as typed subresources. Older dictionary-based definitions migrate to the current format and retain their persisted state keys.
+[`StageDefinition`](../core/stage_definition.gd) is the resource assigned to `Stage.definition`. The editor saves variables, rules, steps, and groups as typed subresources. Older dictionary-based definitions migrate to the current format and retain their persisted state keys.
 
 | Field | Purpose |
 | --- | --- |
@@ -106,13 +106,13 @@ Use `@tool` on the Stage script and custom verb factory so Callboard can analyze
 | `external_writers` | `BlackboardWriterData` resources describing key, source label, and output type for typed gameplay producers. These declarations satisfy guard producer checks and are checked against the Blackboard schema. |
 | `variables`, `rules`, `groups` | Authored subresources. Rule steps are stored with the rule. |
 
-Use the generated `.tscn` when loading a Stage that relies on scene-assigned nodes. `StageDefinition.instantiate()` creates a Stage from its script and assigns the definition. Find working examples in [Stage 01](../demo/stages/stage_01/) and the [scene-assigned prop fixture](../addons/callboard/tests/fixtures/assigned_prop_stage.tscn).
+Use the generated `.tscn` when loading a Stage that relies on scene-assigned nodes. `StageDefinition.instantiate()` creates a Stage from its script and assigns the definition.
 
 Step arguments and delays are evaluated at graph compilation using Godot's [Expression](https://docs.godotengine.org/en/stable/classes/class_expression.html). Use project-authored data. The expressions can call methods and reference typed props and script constants. The event payload is available to the step callable when the rule runs.
 
 ## Blackboard
 
-[`Blackboard`](../addons/callboard/core/blackboard.gd) is accessible as `stage.bb`. Gameplay can use the Stage wrappers above. Verb factories receive the same Blackboard through `StepContext.bb`.
+[`Blackboard`](../core/blackboard.gd) is accessible as `stage.bb`. Gameplay can use the Stage wrappers above. Verb factories receive the same Blackboard through `StepContext.bb`.
 
 | Method | Behavior |
 | --- | --- |
@@ -125,7 +125,7 @@ The `changed(key, value)` signal is forwarded as `Stage.var_changed`. Use the wr
 
 ## StageStateStore
 
-[`StageStateStore`](../addons/callboard/core/stage_state_store.gd) is a Resource that owns per-instance `saved` and `fired` dictionaries plus a shared Blackboard dictionary. Use a distinct, stable ID for each loaded plot, even when two plots use the same scene.
+[`StageStateStore`](../core/stage_state_store.gd) is a Resource that owns per-instance `saved` and `fired` dictionaries plus a shared Blackboard dictionary. Use a distinct, stable ID for each loaded plot, even when two plots use the same scene.
 
 ```gdscript
 var store := StageStateStore.new()
@@ -147,12 +147,12 @@ Add `StageRestorationBinding` resources to a StageDefinition. `VISIBILITY` maps 
 
 ## TriggerArea
 
-[`TriggerArea`](../addons/callboard/core/trigger_area.gd) extends `Area3D`. Place it under a Stage, add a `CollisionShape3D`, and set `event` and optional `ctx`. It locates the closest Stage ancestor.
+[`TriggerArea`](../core/trigger_area.gd) extends `Area3D`. Place it under a Stage, add a `CollisionShape3D`, and set `event` and optional `ctx`. It locates the closest Stage ancestor.
 
 - **ENTER** dispatches when a body in the `Player` or `Companion` group enters. Its mask uses physics layers 2 and 4, respectively.
-- **INTERACT** is selected by an [`InteractionResolver`](../addons/callboard/core/interaction_resolver.gd) from the actor's overlapping trigger areas. The demo [player](../demo/scripts/actors/player.gd) creates a reach area and resolver; any input action or UI can call `player.interact(context)`.
+- **INTERACT** is selected by an [`InteractionResolver`](../core/interaction_resolver.gd) from the actor's overlapping trigger areas. Configure the resolver with the actor and its reach area, then call `resolver.interact(context)` from the input handler or UI.
 
-`TriggerArea` assigns its collision layer and mask on startup. Use [`StageCollisionLayers`](../addons/callboard/core/collision_layers.gd) for the bit masks, or call `stage.fire()` directly from your own interaction system.
+`TriggerArea` assigns its collision layer and mask on startup. Use [`StageCollisionLayers`](../core/collision_layers.gd) for the bit masks, or call `stage.fire()` directly from your own interaction system.
 
 Interactable triggers expose `prompt_text`, optional `prompt_icon`, and `interaction_priority`. The resolver chooses the eligible trigger with the highest priority, then the shortest distance from the actor, then the lexicographically first node path. It polls while the actor remains in range, so host state can enable or disable an interaction without an area exit/re-entry.
 
@@ -180,7 +180,7 @@ The interaction context begins as a deep copy of the trigger's `ctx`, then calle
 
 ## Built-in verbs
 
-The default factory is [`StagingVerbs`](../addons/callboard/core/staging_verbs.gd), which inherits [`CoreVerbs`](../addons/callboard/core/core_verbs.gd). Each method returns a `Step`. Optional arguments are shown with their defaults.
+The default factory is [`StagingVerbs`](../core/staging_verbs.gd), which inherits [`CoreVerbs`](../core/core_verbs.gd). Each method returns a `Step`. Optional arguments are shown with their defaults.
 
 | Factory | Verb | Effect |
 | --- | --- | --- |
@@ -220,11 +220,11 @@ The engine checks **Cancel If** before the first step and after each step or del
 | `say` | The label expires on its own timer. A later `say` on the same node replaces it and starts a new timer. |
 | `light` | A timed activation turns off on timeout, cancellation of its run, or Stage deactivation. A newer activation owns the light. Untimed visibility and Blackboard changes stay applied. |
 
-The demo's [`Stage01Verbs`](../demo/stages/stage_01/stage_01_verbs.gd) adds only the game-specific `stun_player(seconds)` action. Its Stage now uses the reusable `StagingVerbs.light()` and supplies `&"lamp_on"` where graph rules need the Blackboard state.
+Connect the gameplay event listener before activation so it also receives requests from arrival rules. Use the optional Blackboard key on the light step when guards need to check the current light state.
 
 ## Custom verbs
 
-Create a factory with public, typed methods returning [`Step`](../addons/callboard/core/step.gd). Factories run during editor analysis and runtime setup. Put gameplay effects inside the returned callable so they happen only during a rule run.
+Create a factory with public, typed methods returning [`Step`](../core/step.gd). Factories run during editor analysis and runtime setup. Put gameplay effects inside the returned callable so they happen only during a rule run.
 
 Save as `door_verbs.gd` beside your Stage script.
 
@@ -256,13 +256,13 @@ Declare a Boolean Blackboard key `door_open` and assign a typed `Node3D` propert
 - `Step.reads` and `Step.sets` list Blackboard keys read and written by the step. `Step.emits` names a relay the callable sends. These fields describe the step for validation and graph display.
 - A step sends a relay by dispatching `relay:<name>` through the engine. Set `Step.emit_arg` to the zero-based argument index when that argument supplies the name so Callboard can rewrite it during a relay rename.
 - A step callable accepts a context dictionary and can await work or return a signal. Read event fields from `context["payload"]` (or from their top-level compatibility aliases). `Step.after(seconds)` adds a delay before execution.
-- For a custom step that awaits internally, capture `engine.token()` on entry and check `engine.alive(context["_callboard"]["rule"], token)` after each await before applying more effects. Wrap a signal with `engine.interruptible(signal)` to resume the wait on deactivation, then perform the same cancellation check. Resolve the engine through `context.engine_ref` and release the strong reference before awaiting. See [`repeat_emit`](../addons/callboard/core/core_verbs.gd) for the pattern.
+- For a custom step that awaits internally, capture `engine.token()` on entry and check `engine.alive(context["_callboard"]["rule"], token)` after each await before applying more effects. Wrap a signal with `engine.interruptible(signal)` to resume the wait on deactivation, then perform the same cancellation check. Resolve the engine through `context.engine_ref` and release the strong reference before awaiting. See [`repeat_emit`](../core/core_verbs.gd) for the pattern.
 
-[`StepContext`](../addons/callboard/core/step_context.gd) supplies `bb`, the Stage `host`, a weak `engine_ref`, and the `score` callable. Engine run metadata is isolated under the step context's `_callboard` key.
+[`StepContext`](../core/step_context.gd) supplies `bb`, the Stage `host`, a weak `engine_ref`, and the `score` callable. Engine run metadata is isolated under the step context's `_callboard` key.
 
 ## RuleEngine
 
-[`RuleEngine`](../addons/callboard/core/rule_engine.gd) is exposed as `stage.engine` after setup. Use it for custom asynchronous verbs, diagnostics, or tests with a deterministic clock. The constructor accepts a Blackboard, a latch dictionary, and a wait callable of the form `func(seconds: float) -> Signal`.
+[`RuleEngine`](../core/rule_engine.gd) is exposed as `stage.engine` after setup. Use it for custom asynchronous verbs, diagnostics, or tests with a deterministic clock. The constructor accepts a Blackboard, a latch dictionary, and a wait callable of the form `func(seconds: float) -> Signal`.
 
 | API | Purpose |
 | --- | --- |
@@ -278,7 +278,7 @@ The rule engine dispatches matching rules in authored order. A rule's steps run 
 
 Graph compilation errors block editor saves and runtime `activate()`. `Stage.check()` reports advisory findings such as relay cycles and shared-trigger overlap. In a debug build, `activate()` logs those findings as warnings and still dispatches `arrive` if compilation succeeded. A direct call to `fire()` dispatches without running `activate()`.
 
-The [unit suite](../addons/callboard/tests/unit.gd) exercises guards, re-entry, cancellation, and migration. The [demo runtime smoke test](../demo/tests/smoke.gd) shows how to drive a Stage through the same calls the game uses.
+The [unit suite in the source repository](https://github.com/chrisnathan1983/director_blackboard_demo_4/blob/main/addons/callboard/tests/unit.gd) exercises guards, re-entry, cancellation, and migration.
 
 ## Embedding the live debugger
 

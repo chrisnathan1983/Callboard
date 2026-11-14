@@ -60,6 +60,7 @@ func _ready() -> void:
 	toolbar.add_child(_actions)
 	_actions.add_child(_button("Reload · R", func() -> void: manager.clear_stage(false)))
 	_actions.add_child(_button("Start fresh · X", func() -> void: manager.clear_stage(true)))
+	_actions.add_child(_button("Switch office", func() -> void: manager.switch_office()))
 
 	var objective_card := PanelContainer.new()
 	objective_card.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -212,16 +213,20 @@ func _process(_delta: float) -> void:
 	if manager == null or not is_instance_valid(manager.stage):
 		return
 	_score.text = "Score: %d" % manager.score
-	_objective_text.text = _objective(manager.stage)
+	var stage := manager.stage
+	_objective_text.text = "%s  ·  Gifts %d/2  ·  Citywide %d\n%s" % [
+		manager.office_name(), stage.get_var(&"gifts_delivered"),
+		stage.get_var(&"citywide_deliveries"), _objective(stage)]
 
 func _objective(stage: Stage) -> String:
-	if stage.has_fired(&"z1_delivered"):
-		return "Delivered. Deputy Duck takes office."
+	if stage.get_var(&"gifts_delivered") >= 2:
+		return "Both gifts delivered. Try reloading or switching offices."
 	if not stage.is_set(&"guard_calmed"):
 		return "Distract Inspector Biscuit with the decoy or the biscuit pad."
 	if not stage.is_set(&"permit_stamped"):
 		return "Get a squeak permit at the yellow desk."
-	return "Deliver the licensed duck at City Hall."
+	return "Deliver the deputy's desk bell." if stage.is_set(&"delivered_duck") \
+		else "Deliver the licensed duck at the door."
 
 func _label(text: String, font_size: int, color: Color) -> Label:
 	var label := Label.new()

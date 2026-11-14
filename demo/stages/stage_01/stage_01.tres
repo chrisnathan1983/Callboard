@@ -6,6 +6,8 @@
 [ext_resource type="Script" uid="uid://cg3jo0ndog6y6" path="res://addons/callboard/core/rule_data.gd" id="2_sw6iv"]
 [ext_resource type="Script" uid="uid://b3attkrwnqxyr" path="res://addons/callboard/core/step_data.gd" id="3_udjpu"]
 [ext_resource type="Script" uid="uid://cw0l152k1awrg" path="res://addons/callboard/core/variable_data.gd" id="6_orrc7"]
+[ext_resource type="Script" path="res://addons/callboard/core/payload_field_data.gd" id="4_payload"]
+[ext_resource type="Script" path="res://addons/callboard/core/stage_restoration_binding.gd" id="5_binding"]
 
 [sub_resource type="Resource" id="Resource_t3w14"]
 script = ExtResource("1_1e1bh")
@@ -20,12 +22,12 @@ rect = Rect2(40, 480, 680, 530)
 [sub_resource type="Resource" id="Resource_xb2ll"]
 script = ExtResource("1_1e1bh")
 name = "Delivery"
-rect = Rect2(1000, 20, 690, 1052)
+rect = Rect2(1000, 20, 1160, 1480)
 
 [sub_resource type="Resource" id="Resource_doyit"]
 script = ExtResource("1_1e1bh")
 name = "Permits"
-rect = Rect2(40, 1060, 692, 359)
+rect = Rect2(40, 1060, 692, 415)
 
 [sub_resource type="Resource" id="Resource_puwxj"]
 script = ExtResource("3_udjpu")
@@ -84,7 +86,7 @@ args = PackedStringArray("treat")
 script = ExtResource("2_sw6iv")
 id = &"z1_treat"
 trigger = &"relay:treat_out"
-requires = PackedStringArray()
+requires = PackedStringArray("treat_out")
 forbids = PackedStringArray()
 cancel_if = PackedStringArray()
 emit = &"calm_guard"
@@ -137,7 +139,12 @@ args = PackedStringArray("guard", "\"I am on official break.\"", "2.5")
 [sub_resource type="Resource" id="Resource_d4yuu"]
 script = ExtResource("3_udjpu")
 verb = &"move_to"
-args = PackedStringArray("guard", "shelter", "GUARD_REST_OFFSET")
+args = PackedStringArray("guard", "guard_rest", "Vector3(0, 0, 0)", "0.35")
+
+[sub_resource type="Resource" id="Nap"]
+script = ExtResource("3_udjpu")
+verb = &"play_animation"
+args = PackedStringArray("guard_animation", "&\"nap\"", "true")
 
 [sub_resource type="Resource" id="Resource_gycwq"]
 script = ExtResource("2_sw6iv")
@@ -148,7 +155,7 @@ forbids = PackedStringArray("guard_calmed")
 cancel_if = PackedStringArray()
 one_shot = true
 state_key = &"z1_calm"
-steps = Array[ExtResource("3_udjpu")]([SubResource("Resource_vg5d6"), SubResource("Resource_iw76l"), SubResource("Resource_yr8dx"), SubResource("Resource_d4yuu")])
+steps = Array[ExtResource("3_udjpu")]([SubResource("Resource_vg5d6"), SubResource("Resource_iw76l"), SubResource("Resource_yr8dx"), SubResource("Resource_d4yuu"), SubResource("Nap")])
 group = "Calming Paths"
 pos = Vector2(420, 540)
 has_pos = true
@@ -160,8 +167,8 @@ args = PackedStringArray("window", "\"Unauthorized squeak!\"", "2.0")
 
 [sub_resource type="Resource" id="Resource_1ggsx"]
 script = ExtResource("3_udjpu")
-verb = &"stun_player"
-args = PackedStringArray("1.5")
+verb = &"gameplay_event"
+args = PackedStringArray("&\"stun_courier\"", "{\"seconds\": 1.5}")
 
 [sub_resource type="Resource" id="Resource_utkfl"]
 script = ExtResource("3_udjpu")
@@ -171,7 +178,7 @@ args = PackedStringArray("window")
 [sub_resource type="Resource" id="Resource_dw20m"]
 script = ExtResource("2_sw6iv")
 id = &"z1_caught"
-trigger = &"give:duck"
+trigger = &"give:refused"
 requires = PackedStringArray("lamp_on")
 forbids = PackedStringArray()
 cancel_if = PackedStringArray()
@@ -196,17 +203,27 @@ script = ExtResource("3_udjpu")
 verb = &"pop"
 args = PackedStringArray("reward")
 
+[sub_resource type="Resource" id="CountGift"]
+script = ExtResource("3_udjpu")
+verb = &"add_var"
+args = PackedStringArray("&\"gifts_delivered\"", "1.0")
+
+[sub_resource type="Resource" id="CountShared"]
+script = ExtResource("3_udjpu")
+verb = &"add_var"
+args = PackedStringArray("&\"citywide_deliveries\"", "1.0")
+
 [sub_resource type="Resource" id="Resource_w4bi3"]
 script = ExtResource("2_sw6iv")
 id = &"z1_delivered"
-trigger = &"give:duck"
-requires = PackedStringArray("guard_calmed", "permit_stamped")
-forbids = PackedStringArray("lamp_on")
+trigger = &"give:gift"
+requires = PackedStringArray("delivered_duck", "payload.gift_id == \"duck\"")
+allow_overlap = true
 cancel_if = PackedStringArray()
 one_shot = true
-emit = &"duck_delivered"
+emit = &"gift_delivered"
 state_key = &"z1_delivered"
-steps = Array[ExtResource("3_udjpu")]([SubResource("Resource_823l5"), SubResource("Resource_s2ads"), SubResource("Resource_towk3")])
+steps = Array[ExtResource("3_udjpu")]([SubResource("Resource_823l5"), SubResource("CountGift"), SubResource("CountShared"), SubResource("Resource_s2ads")])
 group = "Delivery"
 pos = Vector2(1040, 740)
 has_pos = true
@@ -215,6 +232,11 @@ has_pos = true
 script = ExtResource("3_udjpu")
 verb = &"say"
 args = PackedStringArray("guard", "\"Halt! State your squeak.\"", "3.0")
+
+[sub_resource type="Resource" id="Awake"]
+script = ExtResource("3_udjpu")
+verb = &"pose_animation"
+args = PackedStringArray("guard_animation", "&\"nap\"", "0.0")
 
 [sub_resource type="Resource" id="Resource_j5n3i"]
 script = ExtResource("2_sw6iv")
@@ -225,7 +247,7 @@ forbids = PackedStringArray("guard_calmed")
 cancel_if = PackedStringArray()
 allow_overlap = true
 state_key = &"z1_briefing"
-steps = Array[ExtResource("3_udjpu")]([SubResource("Resource_psac7")])
+steps = Array[ExtResource("3_udjpu")]([SubResource("Resource_psac7"), SubResource("Awake")])
 group = "Guard Standoff"
 pos = Vector2(80, 260)
 has_pos = true
@@ -235,6 +257,17 @@ script = ExtResource("3_udjpu")
 verb = &"say"
 args = PackedStringArray("permit_desk", "\"That duck is already\\nlicensed to squeak.\"", "3.0")
 
+[sub_resource type="Resource" id="StampAudio"]
+script = ExtResource("3_udjpu")
+verb = &"play_audio"
+args = PackedStringArray("stamp_sound", "true")
+
+[sub_resource type="Resource" id="QueuedStampAudio"]
+script = ExtResource("3_udjpu")
+verb = &"play_audio"
+args = PackedStringArray("stamp_sound", "false")
+delay = "0.25"
+
 [sub_resource type="Resource" id="Resource_og1qp"]
 script = ExtResource("2_sw6iv")
 id = &"z1_permit_repeat"
@@ -242,8 +275,9 @@ trigger = &"file:permit"
 requires = PackedStringArray("permit_stamped")
 forbids = PackedStringArray()
 cancel_if = PackedStringArray()
+reentry = 2
 state_key = &"z1_permit_repeat"
-steps = Array[ExtResource("3_udjpu")]([SubResource("Resource_4q4o3")])
+steps = Array[ExtResource("3_udjpu")]([SubResource("Resource_4q4o3"), SubResource("QueuedStampAudio")])
 group = "Permits"
 pos = Vector2(420, 1120)
 has_pos = true
@@ -271,7 +305,7 @@ requires = PackedStringArray()
 forbids = PackedStringArray("permit_stamped")
 cancel_if = PackedStringArray()
 state_key = &"z1_stamp_permit"
-steps = Array[ExtResource("3_udjpu")]([SubResource("Resource_sb8j4"), SubResource("Resource_2r8y4"), SubResource("Resource_g6lst")])
+steps = Array[ExtResource("3_udjpu")]([SubResource("Resource_sb8j4"), SubResource("Resource_2r8y4"), SubResource("Resource_g6lst"), SubResource("StampAudio")])
 group = "Permits"
 pos = Vector2(80, 1120)
 has_pos = true
@@ -284,7 +318,7 @@ args = PackedStringArray("window", "\"Inspector Biscuit\\nis still on duty.\"", 
 [sub_resource type="Resource" id="Resource_cbhw2"]
 script = ExtResource("2_sw6iv")
 id = &"z1_on_duty"
-trigger = &"give:duck"
+trigger = &"give:refused"
 requires = PackedStringArray()
 forbids = PackedStringArray("lamp_on", "guard_calmed")
 cancel_if = PackedStringArray()
@@ -302,7 +336,7 @@ args = PackedStringArray("window", "\"Does that duck\\nhave a permit?\"", "2.5")
 [sub_resource type="Resource" id="Resource_42g1q"]
 script = ExtResource("2_sw6iv")
 id = &"z1_permit_needed"
-trigger = &"give:duck"
+trigger = &"give:refused"
 requires = PackedStringArray("guard_calmed")
 forbids = PackedStringArray("permit_stamped", "lamp_on")
 cancel_if = PackedStringArray()
@@ -325,13 +359,13 @@ args = PackedStringArray("window")
 [sub_resource type="Resource" id="Resource_yo4ln"]
 script = ExtResource("2_sw6iv")
 id = &"z1_receipt"
-trigger = &"relay:duck_delivered"
-requires = PackedStringArray()
+trigger = &"relay:gift_delivered"
+requires = PackedStringArray("payload.gift_id == \"duck\"")
 forbids = PackedStringArray()
 cancel_if = PackedStringArray()
 allow_overlap = true
 state_key = &"z1_receipt"
-steps = Array[ExtResource("3_udjpu")]([SubResource("Resource_oxhfs"), SubResource("Resource_l8puw")])
+steps = Array[ExtResource("3_udjpu")]([SubResource("Resource_oxhfs"), SubResource("Resource_towk3"), SubResource("Resource_l8puw")])
 group = "Delivery"
 pos = Vector2(1370, 620)
 has_pos = true
@@ -344,8 +378,8 @@ args = PackedStringArray("guard", "\"Great. My boss\\nis a squeaky toy.\"", "4.0
 [sub_resource type="Resource" id="Resource_nqr6r"]
 script = ExtResource("2_sw6iv")
 id = &"z1_audit"
-trigger = &"relay:duck_delivered"
-requires = PackedStringArray()
+trigger = &"relay:gift_delivered"
+requires = PackedStringArray("payload.gift_id == \"duck\"")
 forbids = PackedStringArray()
 cancel_if = PackedStringArray()
 allow_overlap = true
@@ -381,21 +415,175 @@ scope = "saved"
 note = "The permit desk has approved the duck."
 state_key = &"permit_stamped"
 
+[sub_resource type="Resource" id="ShowBell"]
+script = ExtResource("3_udjpu")
+verb = &"show_node"
+args = PackedStringArray("bell")
+
+[sub_resource type="Resource" id="TurnBell"]
+script = ExtResource("3_udjpu")
+verb = &"rotate_to"
+args = PackedStringArray("bell", "Vector3(0, 0, 0)", "0.35", "true")
+
+[sub_resource type="Resource" id="z1_bell_delivered"]
+script = ExtResource("2_sw6iv")
+id = &"z1_bell_delivered"
+trigger = &"give:gift"
+requires = PackedStringArray("delivered_bell", "payload.gift_id == \"bell\"")
+allow_overlap = true
+one_shot = true
+emit = &"gift_delivered"
+state_key = &"z1_bell_delivered"
+steps = Array[ExtResource("3_udjpu")]([SubResource("ShowBell"), SubResource("CountGift"), SubResource("CountShared")])
+group = "Delivery"
+pos = Vector2(1040, 1020)
+has_pos = true
+
+[sub_resource type="Resource" id="MissingGiftLine"]
+script = ExtResource("3_udjpu")
+verb = &"say"
+args = PackedStringArray("window", "\"Name the gift on the form.\"", "2.0")
+
+[sub_resource type="Resource" id="z1_missing_gift"]
+script = ExtResource("2_sw6iv")
+id = &"z1_missing_gift"
+trigger = &"give:gift"
+requires = PackedStringArray("missing(payload.gift_id)")
+allow_overlap = true
+state_key = &"z1_missing_gift"
+steps = Array[ExtResource("3_udjpu")]([SubResource("MissingGiftLine")])
+group = "Delivery"
+pos = Vector2(1040, 1250)
+has_pos = true
+
+[sub_resource type="Resource" id="CompletionLine"]
+script = ExtResource("3_udjpu")
+verb = &"say"
+args = PackedStringArray("permit_desk", "\"Both deliveries logged!\"", "3.0")
+
+[sub_resource type="Resource" id="z1_office_complete"]
+script = ExtResource("2_sw6iv")
+id = &"z1_office_complete"
+trigger = &"relay:gift_delivered"
+requires = PackedStringArray("gifts_delivered >= 2")
+allow_overlap = true
+one_shot = true
+state_key = &"z1_office_complete"
+steps = Array[ExtResource("3_udjpu")]([SubResource("CompletionLine")])
+group = "Delivery"
+pos = Vector2(1740, 1040)
+has_pos = true
+
+[sub_resource type="Resource" id="BellReceiptLine"]
+script = ExtResource("3_udjpu")
+verb = &"say"
+args = PackedStringArray("window", "\"The deputy has a desk bell!\"", "3.0")
+
+[sub_resource type="Resource" id="z1_bell_receipt"]
+script = ExtResource("2_sw6iv")
+id = &"z1_bell_receipt"
+trigger = &"relay:gift_delivered"
+requires = PackedStringArray("payload.gift_id == \"bell\"")
+allow_overlap = true
+state_key = &"z1_bell_receipt"
+steps = Array[ExtResource("3_udjpu")]([SubResource("BellReceiptLine"), SubResource("TurnBell")])
+group = "Delivery"
+pos = Vector2(1370, 1040)
+has_pos = true
+
+[sub_resource type="Resource" id="delivered_duck"]
+script = ExtResource("6_orrc7")
+key = &"delivered_duck"
+scope = "saved"
+default_value = false
+note = "GiftTarget writes this flag. Restores the duck and hides its prompt."
+state_key = &"delivered_duck"
+
+[sub_resource type="Resource" id="delivered_bell"]
+script = ExtResource("6_orrc7")
+key = &"delivered_bell"
+scope = "saved"
+default_value = false
+note = "GiftTarget writes this flag. Restores the desk bell and hides its prompt."
+state_key = &"delivered_bell"
+
+[sub_resource type="Resource" id="gifts_delivered"]
+script = ExtResource("6_orrc7")
+key = &"gifts_delivered"
+scope = "saved"
+default_value = 0
+note = "Per-office integer counter. Completion checks for two deliveries."
+state_key = &"gifts_delivered"
+
+[sub_resource type="Resource" id="citywide_deliveries"]
+script = ExtResource("6_orrc7")
+key = &"citywide_deliveries"
+scope = "shared"
+default_value = 0
+note = "Shared with the other office, including while it is dormant."
+state_key = &"citywide_deliveries"
+
+[sub_resource type="Resource" id="GiftPayload"]
+script = ExtResource("4_payload")
+event_id = &"give:gift"
+key = &"gift_id"
+type_name = "String"
+
+[sub_resource type="Resource" id="ReceiptPayload"]
+script = ExtResource("4_payload")
+event_id = &"relay:gift_delivered"
+key = &"gift_id"
+type_name = "String"
+
+[sub_resource type="Resource" id="PermitBinding"]
+script = ExtResource("5_binding")
+key = &"permit_stamped"
+target_path = NodePath("PermitDesk/Permit")
+
+[sub_resource type="Resource" id="DuckBinding"]
+script = ExtResource("5_binding")
+key = &"delivered_duck"
+target_path = NodePath("Reward")
+
+[sub_resource type="Resource" id="BellBinding"]
+script = ExtResource("5_binding")
+key = &"delivered_bell"
+target_path = NodePath("Bell")
+
+[sub_resource type="Resource" id="GuardBinding"]
+script = ExtResource("5_binding")
+key = &"guard_calmed"
+target_path = NodePath("Guard")
+kind = 2
+marker_path = NodePath("GuardRest")
+animation_player_path = NodePath("Guard/AnimationPlayer")
+animation_name = &"nap"
+animation_time = 0.35
+
+[sub_resource type="Resource" id="BellPoseBinding"]
+script = ExtResource("5_binding")
+key = &"delivered_bell"
+target_path = NodePath("Bell")
+kind = 2
+marker_path = NodePath("BellRest")
+
 [resource]
 script = ExtResource("1_6haco")
 stage_script = ExtResource("2_nih50")
 preview_scene_path = "res://demo/stages/stage_01/stage_01.tscn"
-external_calls = PackedStringArray("arrive", "give:duck", "give:decoy", "relay:treat_out", "file:permit")
+external_calls = PackedStringArray("arrive", "give:refused", "give:gift", "give:decoy", "relay:treat_out", "file:permit")
+payload_fields = Array[ExtResource("4_payload")]([SubResource("GiftPayload"), SubResource("ReceiptPayload")])
 managed_lifecycle = true
+restoration_bindings = Array[ExtResource("5_binding")]([SubResource("PermitBinding"), SubResource("DuckBinding"), SubResource("BellBinding"), SubResource("GuardBinding"), SubResource("BellPoseBinding")])
 call_positions = {
 "arrive": Vector2(-150, 110),
-"give:duck": Vector2(810, 345),
+"give:refused": Vector2(810, 345),
+"give:gift": Vector2(810, 920),
 "file:permit": Vector2(-140, 1140),
 "give:decoy": Vector2(-150, 755),
 "relay:treat_out": Vector2(-150, 530)
 }
-external_vars = PackedStringArray("treat_out")
-variables = [SubResource("Resource_pm6rk"), SubResource("Resource_crvuy"), SubResource("Resource_f6ula"), SubResource("Resource_cvxcv")]
-rules = [SubResource("Resource_4c63h"), SubResource("Resource_3q13q"), SubResource("Resource_8fm3u"), SubResource("Resource_v3yqw"), SubResource("Resource_gycwq"), SubResource("Resource_dw20m"), SubResource("Resource_w4bi3"), SubResource("Resource_j5n3i"), SubResource("Resource_og1qp"), SubResource("Resource_j8ley"), SubResource("Resource_cbhw2"), SubResource("Resource_42g1q"), SubResource("Resource_yo4ln"), SubResource("Resource_nqr6r")]
+variables = [SubResource("Resource_pm6rk"), SubResource("Resource_crvuy"), SubResource("Resource_f6ula"), SubResource("Resource_cvxcv"), SubResource("delivered_duck"), SubResource("delivered_bell"), SubResource("gifts_delivered"), SubResource("citywide_deliveries")]
+rules = [SubResource("Resource_4c63h"), SubResource("Resource_3q13q"), SubResource("Resource_8fm3u"), SubResource("Resource_v3yqw"), SubResource("Resource_gycwq"), SubResource("Resource_dw20m"), SubResource("Resource_w4bi3"), SubResource("Resource_j5n3i"), SubResource("Resource_og1qp"), SubResource("Resource_j8ley"), SubResource("Resource_cbhw2"), SubResource("Resource_42g1q"), SubResource("Resource_yo4ln"), SubResource("Resource_nqr6r"), SubResource("z1_bell_delivered"), SubResource("z1_missing_gift"), SubResource("z1_office_complete"), SubResource("z1_bell_receipt")]
 groups = [SubResource("Resource_t3w14"), SubResource("Resource_6adl1"), SubResource("Resource_xb2ll"), SubResource("Resource_doyit")]
 format_version = 4

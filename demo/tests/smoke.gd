@@ -12,21 +12,20 @@ func _initialize() -> void:
 		and stage.get_node("BumpPad") is BumpProp and not stage.has_node("TreatProp"))
 	root.add_child(stage)
 	await process_frame
-	# This fixture calls the Stage API directly without the demo StageManager.
-	# The managed lifecycle is exercised through GameManager later in this suite.
-	stage.managed_lifecycle = false
 
 	ok = _check("scene-placed and scripted props resolve when the stage builds",
 		stage.window == stage.get_node("Window") and stage.treat == stage.get_node("TreatProp")
 		and stage.decoy == stage.get_node("DecoyProp") and not stage.treat.visible
 		and stage.graph_errors.is_empty() and stage.check().is_empty()) and ok
+	stage.managed_lifecycle = false
 	ok = (await _test_staging_verbs(stage)) and ok
+	stage.managed_lifecycle = true
 	var fired: Array[StringName] = []
 	stage.rule_fired.connect(func(id: StringName, _event: StringName) -> void: fired.append(id))
 	stage.activate()
 	stage.activate()
 	ok = _check("activating twice starts only one standoff loop", fired.count(&"z1_standoff") == 1) and ok
-	stage.fire(&"give:duck")
+	stage.fire(&"give:refused")
 	ok = _check("a dark lamp still requires the guard to be off duty",
 		fired.has(&"z1_on_duty") and not stage.has_fired(&"z1_delivered")) and ok
 	var changes: Array = []
@@ -36,8 +35,9 @@ func _initialize() -> void:
 	ok = _check("stage forwards Blackboard writes to gameplay listeners",
 		changes == [[&"guard_calmed", true]] and stage.saved_vars[&"guard_calmed"]) and ok
 	stage.fire(&"file:permit")
-	stage.fire(&"give:duck")
-	stage.fire(&"give:duck")
+	stage.fire(&"give:gift")
+	(stage.get_node("DeliveryArea") as TriggerArea).interact()
+	stage.fire(&"give:gift", {"gift_id": "duck"})
 	await process_frame
 
 	var delivered_count := 0
@@ -45,7 +45,7 @@ func _initialize() -> void:
 		if id == &"z1_delivered":
 			delivered_count += 1
 	ok = _check("deliver fires the eligible rule once",
-		delivered_count == 1 and stage.fired.has(&"z1_delivered")) and ok
+		delivered_count == 1 and stage.fired.has(&"z1_delivered") and fired.has(&"z1_missing_gift")) and ok
 	ok = _check("deliver guard prevents the caught rule", not fired.has(&"z1_caught")) and ok
 
 	ok = (await _test_player_and_bump(stage, fired)) and ok
@@ -192,7 +192,7 @@ func _test_player_and_bump(stage: Stage, fired: Array[StringName]) -> bool:
 	pad.bump_area.body_entered.emit(player)
 	ok = _check("bumping twice latches the key and dispatches the relay once",
 		stage.is_set(&"treat_out") and fired.count(&"z1_treat") == 1
-		and fired.count(&"bump_prop") == 1) and ok
+		and fired.count(&"bump_prop") == 1 and stage.bb.last_writers.get(&"treat_out") == &"bump_prop") and ok
 	player.queue_free()
 	return ok
 
@@ -486,10 +486,15 @@ func _test_demo_paths(game: GameManager) -> bool:
 	player.global_position = delivery.global_position
 	for frame in range(3):
 		await physics_frame
-	player.interact()
-	var ok := _check("scene delivery Call uses the lamp guard and the custom stun verb",
-		stage.lamp.visible and stage.is_set(&"lamp_on") and player.stunned
-		and not stage.has_fired(&"z1_delivered"))
+	var refusal := player.interact()
+	var ok := _check("the rejected Call stuns the player through the host gameplay event",
+		refusal["event"] == &"give:refused" and refusal["payload"]["gift_id"] == "duck"
+		and stage.lamp.visible and stage.is_set(&"lamp_on") and player.stunned
+		and not stage.is_set(&"delivered_duck") and stage.get_var(&"gifts_delivered") == 0)
+	var other_window := stage.get_node("UnlitWindow") as MeshInstance3D
+	ok = _check("the front window flash leaves the second window's shared material alone",
+		stage.window.mesh == other_window.mesh
+		and stage.window.get_active_material(0) != other_window.get_active_material(0)) and ok
 	if player.stunned:
 		await player._stun_timer.timeout
 	player.global_position = shelter.global_position
@@ -509,27 +514,76 @@ func _test_demo_paths(game: GameManager) -> bool:
 	for frame in range(3):
 		await physics_frame
 	player.interact()
+	await create_timer(0.3).timeout
 	player.interact()
-	ok = _check("the placed desk stamps once and acknowledges a repeat interaction",
+	player.interact()
+	player.interact()
+	ok = _check("the placed desk grants the permit once and queues repeat requests",
 		stage.permit.visible and stage.is_set(&"permit_stamped")
 		and fired.count(&"z1_stamp_permit") == 1 and fired.count(&"z1_permit_repeat") == 1) and ok
+	await create_timer(0.8).timeout
+	ok = _check("queued permit requests play in sequence", fired.count(&"z1_permit_repeat") == 3) and ok
 	player.global_position = delivery.global_position
 	for frame in range(3):
 		await physics_frame
-	player.interact()
-	player.interact()
-	await create_timer(0.9).timeout
-	ok = _check("delivery reveals Deputy Duck, awards points once, and cues both reactions",
-		stage.reward.visible and stage.has_fired(&"z1_delivered") and game.score == 325
-		and fired.count(&"z1_receipt") == 1 and fired.count(&"z1_audit") == 1) and ok
+	var annex: Stage = game._offices[GameManager.ANNEX]
+	var shared_updates: Array[int] = []
+	annex.var_changed.connect(func(key: StringName, value: Variant) -> void:
+		if key == &"citywide_deliveries":
+			shared_updates.append(value))
+	var bell_target := stage.get_node("BellArea") as TriggerArea
+	var annex_target := annex.get_node("DeliveryArea") as TriggerArea
+	var resolver := player.interaction_resolver
+	resolver.refresh()
+	ok = _check("the duck prompt takes priority among two active targets and a dormant office",
+		bell_target.can_interact(player) and not annex_target.can_interact(player)
+		and resolver.selected_trigger == delivery) and ok
+	var result := player.interact()
+	resolver.refresh()
+	ok = _check("the accepted duck payload selects its rule and hands off the prompt to the bell",
+		result["event"] == &"give:gift" and result["payload"]["gift_id"] == "duck"
+		and stage.reward.visible and not stage.bell.visible and stage.has_fired(&"z1_delivered")
+		and not stage.has_fired(&"z1_bell_delivered") and game.score == 325
+		and stage.bb.last_writers.get(&"delivered_duck") == &"gift_target:duck"
+		and fired.count(&"z1_receipt") == 1 and fired.count(&"z1_audit") == 1
+		and resolver.selected_trigger == bell_target) and ok
+	ok = _check("the dormant annex receives shared counts but keeps separate gift state",
+		shared_updates == [1] and annex.get_var(&"citywide_deliveries") == 1
+		and annex.get_var(&"gifts_delivered") == 0 and not annex.has_fired(&"z1_delivered")) and ok
+	game.switch_office()
+	var dormant_hall: Stage = game._offices[GameManager.MAIN_OFFICE]
+	ok = _check("switching activates the annex and restores the original office while dormant",
+		game.stage == annex and annex_target.can_interact(player)
+		and not stage.is_active and not bell_target.can_interact(player)
+		and not dormant_hall.is_active and dormant_hall.is_set(&"delivered_duck")
+		and (dormant_hall as Stage01).reward.visible) and ok
+	game.switch_office()
 	game.clear_stage(false)
 	stage = game.stage as Stage01
-	(stage.get_node("DeliveryArea") as TriggerArea).interact()
-	ok = _check("stage reload restores saved props and leaves local props hidden",
-		stage.reward.visible and stage.guard.global_position.is_equal_approx(
-			stage.shelter.global_position + Stage01.GUARD_REST_OFFSET)
+	delivery = stage.get_node("DeliveryArea") as TriggerArea
+	ok = _check("reload restores the permit, duck and resolved guard pose before replaying any delivery",
+		stage.reward.visible and not stage.bell.visible and stage.has_fired(&"z1_delivered")
+		and not delivery.can_interact(player) and stage.get_var(&"gifts_delivered") == 1
+		and stage.guard.global_position.is_equal_approx(stage.guard_rest.global_position)
+		and is_equal_approx(stage.guard.rotation.z, PI / 2.0) and not stage.guard_animation.is_playing()
 		and stage.permit.visible and stage.is_set(&"permit_stamped")
 		and not stage.decoy.visible and not stage.is_set(&"lamp_on") and game.score == 325) and ok
+	for frame in range(3):
+		await physics_frame
+	var bell_delivery := player.interact()
+	var duplicate := player.interact()
+	ok = _check("the bell completes the saved counter and repeat attempts dispatch no Call",
+		bell_delivery.get("payload", {}).get("gift_id") == "bell" and duplicate["event"] == &""
+		and stage.bell.visible and stage.has_fired(&"z1_bell_delivered")
+		and stage.has_fired(&"z1_office_complete") and stage.get_var(&"gifts_delivered") == 2
+		and game._offices[GameManager.ANNEX].get_var(&"citywide_deliveries") == 2
+		and game.score == 325) and ok
+	game.clear_stage(false)
+	stage = game.stage as Stage01
+	ok = _check("both gifts and the final bell transform restore on reload",
+		stage.reward.visible and stage.bell.visible and stage.bell.rotation.is_zero_approx()
+		and stage.get_var(&"gifts_delivered") == 2 and stage.get_var(&"citywide_deliveries") == 2
+		and stage.has_fired(&"z1_office_complete")) and ok
 	game.clear_stage(true)
 	stage = game.stage as Stage01
 	var pad := stage.get_node("BumpPad") as BumpProp
@@ -538,7 +592,8 @@ func _test_demo_paths(game: GameManager) -> bool:
 	ok = _check("a fresh run can use the placed bump pad to reveal the scripted treat",
 		stage.treat.visible and stage.is_set(&"treat_out") and stage.is_set(&"guard_calmed")
 		and not stage.reward.visible and not stage.has_fired(&"z1_delivered")
-		and not stage.permit.visible and not stage.is_set(&"permit_stamped") and game.score == 0) and ok
+		and not stage.permit.visible and not stage.is_set(&"permit_stamped") and game.score == 0
+		and stage.get_var(&"gifts_delivered") == 0 and stage.get_var(&"citywide_deliveries") == 0) and ok
 	(stage.get_node("PermitArea") as TriggerArea).interact()
 	(stage.get_node("DeliveryArea") as TriggerArea).interact()
 	ok = _check("the biscuit route can also deliver the duck",

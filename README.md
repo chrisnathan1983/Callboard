@@ -2,40 +2,18 @@
 
 **Choreograph event-driven gameplay in Godot.** Callboard is a visual rule editor and GDScript runtime for 3D scenes. Define what can happen, which conditions must be true, and what runs next in a Stage graph. Your gameplay code supplies events and actions. Callboard handles the sequencing, state checks, and relays between rules.
 
-[Download](https://github.com/chrisnathan1983/director_blackboard_demo_4/releases/latest) · [Run the demo](#run-the-demo) · [Install](#install-in-your-project) · [Author a stage](#author-a-stage) · [Live debugging](#live-debugging) · [API reference](docs/api.md)
+[Download](https://github.com/chrisnathan1983/director_blackboard_demo_4/releases/latest) · [Run the demo](#run-the-demo) · [Install](#install-in-your-project) · [Author a stage](#author-a-stage) · [Live debugging](#live-debugging) · [Addon guide](addons/callboard/README.md) · [API reference](addons/callboard/docs/api.md)
 
 [![Godot tests](https://github.com/chrisnathan1983/director_blackboard_demo_4/actions/workflows/test.yml/badge.svg)](https://github.com/chrisnathan1983/director_blackboard_demo_4/actions/workflows/test.yml)
 **Godot 4.7** · **GDScript** · **[0BSD](LICENSE)**
 
-![Callboard editor showing the Stage 01 graph, including Guard Standoff, Calming Paths, and Delivery](docs/screenshots/callboard-editor.png)
+![Callboard editor showing the Stage 01 graph, including Guard Standoff, Calming Paths, and Delivery](addons/callboard/docs/screenshots/callboard-editor.png)
 
 *Stage 01 in the Callboard authoring workspace. Follow the wires from a Call through the rules and relays it can trigger.*
 
 ## Run the demo
 
-Open [project.godot](project.godot) in Godot **4.7** and press **F5**. The plugin is already enabled. Open the **Callboard** editor tab and select `stage_01/stage_01.tres` to inspect the same rules that drive the demo. The project includes `res://demo/stages` in `callboard/stage_scan_folders` so the stage picker can find it. CI uses Godot **4.7.2**.
-
-**The Duck Stops Here.** City Hall is expecting a rubber duck, Inspector Biscuit is taking his job very seriously, and the clerk requires a permit for indoor quacking.
-
-1. Offer a decoy at the red shelter or step on the blue biscuit pad to get Inspector Biscuit off duty.
-2. Get a squeak permit at the yellow desk. You can do this before or after distracting the inspector.
-3. Deliver the duck at City Hall to earn 200 points and meet the new deputy. Try the door early to see what the clerk says when the inspection lamp is on, the inspector is still on duty, or the permit is missing.
-
-| Touch or mouse | Keyboard | Action |
-| --- | --- | --- |
-| Drag anywhere in the play area | **WASD** or **arrow keys** | Move |
-| Tap the action button when it appears | **E** | Interact with a nearby prop |
-| Tap **Callboard** | **F1** | Toggle the live Callboard when available |
-| Tap **Reload** | **R** | Reload the Stage and reset local variables |
-| Tap **Start fresh** | **X** | Clear saved variables, one-shot latches, and score, then reload |
-
-The movement stick appears under your finger or mouse and follows as you drag. After your first drag, the stick hides whenever you release it. On a touchscreen, hold the stick with one finger and tap the bottom-center action button with another.
-
-Search for `deliver` in the Callboard toolbar and toggle **Isolate** to follow the four rules that share the Call. The two distractions converge on `calm_guard`, while a successful delivery emits `duck_delivered` to cue both the clerk and the inspector.
-
-Open [Stage 01's scene](demo/stages/stage_01/stage_01.tscn) to inspect the placed props and the Calls assigned to **DeliveryArea**, **DecoyArea**, and **PermitArea**. The [annotated stage script](demo/stages/stage_01/stage_01.gd) shows how to expose scene nodes to the graph and build the biscuit and decoy in code from scene markers.
-
-Press **F1** during play and open **DEBUG** to follow a Call through its rules, waits, and relays. After delivering, press **R** to see the saved permit, guard state, and one-shot delivery latch restore the scene. Press **X** to start fresh.
+**The Duck Stops Here** is a playable Callboard example about a rubber duck, a desk bell, and City Hall's strict squeak permit rules. Open [project.godot](project.godot) in Godot 4.7 and press **F5**. The [demo README](demo/README.md) covers the controls, delivery paths, and how to inspect the rules.
 
 ## Install in your project
 
@@ -74,7 +52,7 @@ func on_door_interacted(stage: Stage) -> void:
 	print(stage.get_var(&"door_open"))  # true
 ```
 
-Add a `show_node` or `move_to` step to make a scene prop respond. Step arguments can reference typed Stage props and script constants. The API reference includes [a custom verb you can add to the picker](docs/api.md#custom-verbs).
+Add a `show_node` or `move_to` step to make a scene prop respond. Step arguments can reference typed Stage props and script constants. The API reference includes [a custom verb you can add to the picker](addons/callboard/docs/api.md#custom-verbs).
 
 ### Contextual interactions
 
@@ -93,12 +71,12 @@ trigger.set_interaction_handler(func(actor: Node, context: Dictionary) -> Dictio
 )
 ```
 
-The host's eligibility hook decides whether an option is offered. Its interaction handler decides acceptance, performs any inventory policy, and supplies the Call payload. Accepted outcomes dispatch `event`; rejected outcomes can dispatch `rejected_event`. See the [TriggerArea and InteractionResolver API](docs/api.md#triggerarea) for setup and signals.
+The host's eligibility hook decides whether an option is offered. Its interaction handler decides acceptance, performs any inventory policy, and supplies the Call payload. Accepted outcomes dispatch `event`; rejected outcomes can dispatch `rejected_event`. See the [TriggerArea and InteractionResolver API](addons/callboard/docs/api.md#triggerarea) for setup and signals.
 
 <details>
 <summary>See the Blackboard and Rule settings</summary>
 
-![Blackboard variables on the left and the selected delivery rule with its trigger, guard, one-shot latch, and steps on the right](docs/screenshots/rule-settings.png)
+![Blackboard variables on the left and the selected delivery rule with its trigger, guard, one-shot latch, and steps on the right](addons/callboard/docs/screenshots/rule-settings.png)
 
 </details>
 
@@ -172,17 +150,17 @@ Blackboard variables can use **Local**, **Saved**, or **Shared** scope. Shared k
 
 Add `StageRestorationBinding` resources to a StageDefinition for resolved visuals. A Boolean binding can set a node's visibility or snap a `Node3D` to a `Marker3D`, with an optional `AnimationPlayer` pose. A saved `Transform3D` can restore a prop directly. Bindings run after the Stage's `_restore_state()` hook and before activation; paths, node types, and animation names are validated during Callboard analysis. For multiple gifts, keep a saved Boolean per gift, have each target reject an already delivered flag, and increment a saved counter with `add_var`. This restores each visual independently while keeping aggregate completion guards simple.
 
-The built-in staging verbs include timed `light`, audio playback, rotation, `AnimationPlayer` playback and posing, material-safe `flash`/`jump`, and `gameplay_event`. Waiting options are explicit for audio, rotation, and animation playback; those waits are released when a Stage deactivates. Connect to `stage.gameplay_event` to handle authored IDs and argument dictionaries in your game. Existing `stage.scored` and `score(points)` behavior remains available. See the [Staging verbs API](docs/api.md#built-in-verbs) for parameter and validation details.
+The built-in staging verbs include timed `light`, audio playback, rotation, `AnimationPlayer` playback and posing, material-safe `flash`/`jump`, and `gameplay_event`. Waiting options are explicit for audio, rotation, and animation playback; those waits are released when a Stage deactivates. Connect to `stage.gameplay_event` to handle authored IDs and argument dictionaries in your game. Existing `stage.scored` and `score(points)` behavior remains available. See the [Staging verbs API](addons/callboard/docs/api.md#built-in-verbs) for parameter and validation details.
 
 To add a Blackboard numeric guard, enter a comparison such as `score >= 10` below Requires, Forbids, or Cancel If and press **Add**. Supported operators are `>`, `>=`, `<`, `<=`, `==`, and `!=`.
 
 ## Live debugging
 
-![The running demo with the live Callboard, active guard rule, pending timer, and recent event trace](docs/screenshots/live-debugger.png)
+![The running demo with the live Callboard, active guard rule, pending timer, and recent event trace](addons/callboard/docs/screenshots/live-debugger.png)
 
 Press **F1** in the demo to inspect the running Stage. The **DEBUG** panel shows active rules, queued or restarting runs, pending waits, and recent event and step activity. Open **Blackboard** to inspect current values or **Calls & relays** to fire a declared Call while testing. The live graph uses the loaded Stage definition and highlights rules as they run.
 
-Use `CallboardDebugPanel.create()` to add the live board to your own HUD. See [Embedding the live debugger](docs/api.md#embedding-the-live-debugger).
+Use `CallboardDebugPanel.create()` to add the live board to your own HUD. See [Embedding the live debugger](addons/callboard/docs/api.md#embedding-the-live-debugger).
 
 To see a cancellation, start with a fresh Stage, wait for a guard tick, then offer the decoy. The trace shows the calming relay and the guard loop stopping at its next cancellation check.
 
@@ -199,7 +177,7 @@ flowchart TD
 	steps -->|Relays| engine
 ```
 
-The editor writes a `.tres` file that the Stage compiles into runtime rules. The export plugin excludes addon tests from exports and strips the editor and authoring model from release exports. See the [API reference](docs/api.md) for Stage lifecycle, persistence, signals, built-in verbs, and runtime diagnostics.
+The editor writes a `.tres` file that the Stage compiles into runtime rules. The export plugin excludes addon tests from exports and strips the editor and authoring model from release exports. See the [API reference](addons/callboard/docs/api.md) for Stage lifecycle, persistence, signals, built-in verbs, and runtime diagnostics.
 
 ## Develop and test
 

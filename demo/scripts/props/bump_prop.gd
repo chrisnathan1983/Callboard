@@ -4,6 +4,9 @@ class_name BumpProp extends Node3D
 
 @export var relay: StringName = &"treat_out"   # also the Blackboard key it latches
 @export var bump_area: Area3D
+# Stage discovers this declaration in both the scene preview and the running game.
+# Use the same source label on the latch write so the debugger can name its writer.
+@export var callboard_writers: Array[BlackboardWriterData] = []
 var _stage: Stage
 
 func _ready() -> void:
