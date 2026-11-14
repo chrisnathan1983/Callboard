@@ -155,9 +155,20 @@ func apply_blackboard(stage: Stage) -> void:
 func payload_schema() -> Dictionary:
 	_migrate()
 	var schema := {}
+	# Built-in change notifications have a fixed envelope. The transition values
+	# remain Variant-typed because each Blackboard key may declare a different type.
+	schema["on_change"] = {
+		&"key": TYPE_STRING,
+		&"previous": TYPE_NIL,
+		&"value": TYPE_NIL,
+		&"scope": TYPE_STRING,
+		&"writer": TYPE_STRING,
+	}
 	for field: PayloadFieldData in payload_fields:
 		if field.event_id.is_empty() or field.key.is_empty():
 			continue
+		if field.event_id == "on_change":
+			continue # This built-in event has a fixed runtime payload envelope.
 		if not schema.has(field.event_id):
 			schema[field.event_id] = {}
 		schema[field.event_id][field.key] = field.value_type()

@@ -376,7 +376,7 @@ func show_data(data: GraphDraft) -> void:
 		if rd.group != "" and _frames.has(rd.group):
 			attach_graph_element_to_frame(n.name, _frames[rd.group].name)
 
-	_make_event_nodes(data.external_calls, rules, data.call_positions)
+	_make_event_nodes(_event_ids(data.external_calls, rules), rules, data.call_positions)
 	_refresh_connection_focus()
 	_cache_rule_signatures(rules, data)
 
@@ -386,7 +386,7 @@ func update_data(data: GraphDraft) -> void:
 	_last_data = data
 	var rules: Array[RuleData] = data.rules
 	if (not _same_ids(_rule_nodes, rules.map(func(rd: RuleData) -> String: return String(rd.id)))
-		or not _same_ids(_event_nodes, data.external_calls)
+		or not _same_ids(_event_nodes, _event_ids(data.external_calls, rules))
 		or not _same_ids(_frames, data.groups.map(func(group: GroupData) -> String: return group.name))):
 		show_data(data)
 		return
@@ -416,7 +416,7 @@ func update_data(data: GraphDraft) -> void:
 				attach_graph_element_to_frame(node.name, frame.name)
 		_rule_signatures[id] = signature
 
-	var event_positions := _event_positions(data.external_calls, rules, data.call_positions)
+	var event_positions := _event_positions(_event_ids(data.external_calls, rules), rules, data.call_positions)
 	for event_id in _event_nodes:
 		(_event_nodes[event_id] as GraphNode).position_offset = event_positions[event_id]
 	_refresh_connection_focus()
@@ -428,6 +428,12 @@ func _same_ids(nodes: Dictionary, ids: Array) -> bool:
 		if not nodes.has(id):
 			return false
 	return true
+
+static func _event_ids(external_calls: Array, rules: Array[RuleData]) -> Array:
+	var events := external_calls.duplicate()
+	if rules.any(func(rule: RuleData) -> bool: return rule.trigger == &"on_change") and not events.has("on_change"):
+		events.append("on_change")
+	return events
 
 func _rule_signature(rd: RuleData, data: GraphDraft) -> Dictionary:
 	var content := rd.to_dictionary()
@@ -1031,7 +1037,7 @@ func _make_event_nodes(events: Array, rules: Array[RuleData], saved_positions: D
 		var n := GraphNode.new()
 		n.name = "ev_" + _safe(event_id)
 		n.set_meta("event", event_id)
-		n.title = "External Relay" if event_id.begins_with(RuleConnections.RELAY_PREFIX) else "Call"
+		n.title = "External Relay" if event_id.begins_with(RuleConnections.RELAY_PREFIX) else ("Blackboard Change" if event_id == "on_change" else "Call")
 		n.tooltip_text = event_id
 		n.position_offset = positions[event_id]
 		_style_card(n, CALL_WIDTH, COL_EVENT, &"Signal")

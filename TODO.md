@@ -70,9 +70,10 @@ The first five items retain the high priority assigned in `TODO.md`.
 
 ## 2. Rule language and control flow
 
-- [ ] **Trigger rules on Blackboard changes.** See [Stage](addons/callboard/core/stage.gd) and [RuleEngine](addons/callboard/core/rule_engine.gd).
+- [x] **Trigger rules on Blackboard changes.** See [Stage](addons/callboard/core/stage.gd) and [RuleEngine](addons/callboard/core/rule_engine.gd).
   - [x] `Blackboard.changed` and `Stage.var_changed` notify host code. Shared notifications can reach other loaded Stages.
-  - [ ] Add an authored change trigger such as `on_change` with a typed payload identifying the key and its committed value transition. Integrate local, saved, and shared writes, define initialization/restoration and dormant behavior, and validate writers and listeners. Route feedback loops through §1 dispatch limits.
+  - [x] Add the reserved `on_change` trigger with a typed payload envelope (`key`, `previous`, `value`, `scope`, `writer`); transition values retain their Blackboard Variant type. Local, Saved, and Shared commits notify listeners; initialization/restoration, no-op writes, rejected writes, and dormant managed Stages do not dispatch.
+  - [x] Validate filtered listeners against declared Blackboard keys and known writers. Carry rule ancestry through `set_var`, `add_var`, and shared commits so recursive change chains use the existing depth and per-frame dispatch limits. Document the payload and lifecycle policy in the API reference.
 
 - [ ] **Add immediate `emit_relay` with payload forwarding and field mapping.** See [CoreVerbs](addons/callboard/core/core_verbs.gd), [Step](addons/callboard/core/step.gd), and [RuleValidator](addons/callboard/core/rule_validator.gd).
   - [x] Completion relays and `repeat_emit` forward the incoming payload. `Step.emits` and `emit_arg` already carry step-level relay metadata.

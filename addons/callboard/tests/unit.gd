@@ -528,6 +528,7 @@ func _initialize() -> void:
 	ok = await _test_playback_wait_exits() and ok
 	ok = await _test_cancel_if_interrupts_a_wait() and ok
 	ok = _test_shared_write_order() and ok
+	ok = _test_on_change_triggers() and ok
 	ok = await _test_dispatch_limits_and_ancestry() and ok
 	ok = _test_stage_dispatch_policy() and ok
 	ok = _test_retriggered_light() and ok
@@ -705,6 +706,143 @@ func _test_shared_write_order() -> bool:
 		and _check("shared values and writer attribution match the final committed write", one_final_value)
 		and _check("unchanged shared writes do not notify or replace the writer", unchanged_is_quiet and final_writer_survived)
 		and _check("rejected shared writes do not notify", rejected_is_quiet))
+
+func _test_on_change_triggers() -> bool:
+	var definition := StageDefinition.new()
+	definition.external_calls = PackedStringArray(["arrive"])
+	definition.external_vars = PackedStringArray(["local_count", "saved_count", "shared_count"])
+	var local_value := VariableData.new()
+	local_value.key = &"local_count"
+	local_value.default_value = 0
+	var saved_value := VariableData.new()
+	saved_value.key = &"saved_count"
+	saved_value.scope = "saved"
+	saved_value.default_value = 0
+	var shared_value := VariableData.new()
+	shared_value.key = &"shared_count"
+	shared_value.scope = "shared"
+	shared_value.default_value = 0
+	shared_value.state_key = &"town_count"
+	definition.variables = [local_value, saved_value, shared_value]
+	var store := StageStateStore.new()
+	store.shared_values = {}
+	var stage := Stage.new()
+	stage.definition = definition
+	store.attach(stage, &"watch_source")
+	stage.build()
+	var changes: Array[Dictionary] = []
+	for watched_key: StringName in [&"local_count", &"saved_count", &"shared_count"]:
+		var listener := Rule.new(StringName("watch_" + String(watched_key)), &"on_change")
+		listener.requires = [StringName('payload.key == "%s"' % watched_key)]
+		listener.steps.append(Step.new(func(context: Dictionary) -> void:
+			changes.append(context["payload"].duplicate(true))))
+		stage.engine.rules.append(listener)
+	var no_initial_events := changes.is_empty()
+	var per_key_listeners_validate := not RuleValidator.check(stage.engine.rules, stage.bb,
+		stage.external_calls, stage.external_vars, stage.payload_schema).any(
+		func(problem: String) -> bool: return "share trigger 'on_change'" in problem)
+	stage.write_var(&"local_count", 1, &"local_writer")
+	stage.write_var(&"local_count", 1, &"no_op")
+	stage.write_var(&"local_count", "bad", &"rejected")
+	stage.write_var(&"saved_count", 2, &"save_writer")
+	var local_saved_commits := changes.size() == 2 \
+		and changes[0] == {"key": "local_count", "previous": 0, "value": 1, "scope": "local", "writer": "local_writer"} \
+		and changes[1] == {"key": "saved_count", "previous": 0, "value": 2, "scope": "saved", "writer": "save_writer"}
+	stage._restoring_state = true
+	stage.write_var(&"local_count", 3, &"restoration")
+	stage._restoring_state = false
+	var restoration_suppressed := changes.size() == 2
+	var nested_write_requested := [false]
+	var nested_write_listener := func(key: StringName, value: Variant) -> void:
+		if key == &"local_count" and value == 4 and not nested_write_requested[0]:
+			nested_write_requested[0] = true
+			stage.write_var(key, 5, &"nested_writer")
+	stage.var_changed.connect(nested_write_listener)
+	stage.write_var(&"local_count", 4, &"outer_writer")
+	stage.var_changed.disconnect(nested_write_listener)
+	var nested_transitions_ordered: bool = changes.size() == 4 \
+		and changes[2].get("previous") == 3 and changes[2].get("value") == 4 \
+		and changes[3].get("previous") == 4 and changes[3].get("value") == 5
+	var dynamic_transition_values_work := GuardExpression.evaluate(stage.bb, &"payload.previous == 0",
+		{"previous": 0}, &"on_change", definition.payload_schema()) \
+		and GuardExpression.evaluate(stage.bb, &"payload.value == 2",
+		{"value": 2}, &"on_change", definition.payload_schema())
+
+	var receiver_definition := definition.duplicate(true) as StageDefinition
+	receiver_definition.managed_lifecycle = true
+	var receiver := Stage.new()
+	receiver.definition = receiver_definition
+	store.attach(receiver, &"watch_receiver")
+	receiver.build()
+	var receiver_changes: Array[Dictionary] = []
+	var receiver_shared_listener := Rule.new(&"watch_shared_receiver", &"on_change")
+	receiver_shared_listener.requires = [StringName('payload.key == "shared_count"')]
+	receiver_shared_listener.steps.append(Step.new(func(context: Dictionary) -> void:
+		var payload: Dictionary = context["payload"]
+		receiver_changes.append(payload.duplicate(true))))
+	receiver.engine.rules.append(receiver_shared_listener)
+	var dormant_notifications_suppressed := true
+	stage.write_var(&"shared_count", 1, &"shared_writer")
+	var source_shared_transition := changes.any(func(payload: Dictionary) -> bool:
+		return payload.get("key") == "shared_count" and payload.get("previous") == 0 \
+			and payload.get("value") == 1 and payload.get("scope") == "shared")
+	dormant_notifications_suppressed = receiver.get_var(&"shared_count") == 1 \
+		and receiver.engine.active_snapshot().is_empty()
+	receiver.activate()
+	stage.write_var(&"shared_count", 2, &"shared_writer")
+	var shared_reaches_active_receiver: bool = receiver.get_var(&"shared_count") == 2 \
+		and receiver_changes.size() == 1 and receiver_changes[0].get("previous") == 1 \
+		and receiver_changes[0].get("value") == 2
+	store.unregister_blackboard(stage.bb)
+	store.unregister_blackboard(receiver.bb)
+	store.release_stage(stage)
+	store.release_stage(receiver)
+	stage.free()
+	receiver.free()
+
+	var loop_definition := StageDefinition.new()
+	var loop_value := VariableData.new()
+	loop_value.key = &"loop_count"
+	loop_value.default_value = 0
+	loop_definition.variables = [loop_value]
+	var loop_stage := Stage.new()
+	loop_stage.definition = loop_definition
+	loop_stage.build()
+	var loop_rule := Rule.new(&"loop_on_change", &"on_change")
+	loop_rule.requires = [StringName('payload.key == "loop_count"')]
+	loop_rule.reentry = Rule.ReentryPolicy.QUEUE
+	loop_rule.steps.append(CoreVerbs.new(StepContext.new(loop_stage.bb, loop_stage.engine,
+		loop_stage, Callable())).add_var(&"loop_count", 1.0))
+	loop_stage.engine.rules.append(loop_rule)
+	var loop_limited := [false]
+	loop_stage.engine.dispatch_limit_reached.connect(func(limit: String, _chain: PackedStringArray, _rule: StringName) -> void:
+		if limit == "event depth":
+			loop_limited[0] = true)
+	loop_stage.write_var(&"loop_count", 1)
+	var feedback_stopped: bool = loop_limited[0] and loop_stage.get_var(&"loop_count") < 100
+	loop_stage.free()
+
+	var validation_bb := Blackboard.new()
+	validation_bb.define(&"writable", &"local", 0)
+	var bad_listener := Rule.new(&"bad_change_listener", &"on_change")
+	bad_listener.requires = [StringName('payload.key == "missing"')]
+	bad_listener.steps.append(Step.new(func(_context: Dictionary) -> void: pass))
+	var bad_writer_problems := RuleValidator.check([bad_listener], validation_bb, [], [])
+	var writer_diagnostic := bad_writer_problems.any(func(problem: String) -> bool:
+		return "on_change key 'missing'" in problem and "not declared" in problem)
+	var undeclared_writer_listener := Rule.new(&"unwritten_change_listener", &"on_change")
+	undeclared_writer_listener.requires = [StringName('payload.key == "writable"')]
+	undeclared_writer_listener.steps.append(Step.new(func(_context: Dictionary) -> void: pass))
+	var missing_writer_diagnostic := RuleValidator.check([undeclared_writer_listener], validation_bb, [], []).any(
+		func(problem: String) -> bool: return "on_change key 'writable'" in problem and "no writer is declared" in problem)
+	return (_check("Blackboard change events carry typed committed transitions and ignore initialization, no-op and rejected writes",
+		no_initial_events and local_saved_commits and restoration_suppressed and nested_transitions_ordered and dynamic_transition_values_work
+		and per_key_listeners_validate) \
+		and _check("shared change listeners observe commits only while active Stages are dispatchable",
+		source_shared_transition and dormant_notifications_suppressed and shared_reaches_active_receiver) \
+		and _check("on_change feedback inherits event ancestry and stops at the RuleEngine depth limit", feedback_stopped) \
+		and _check("on_change listeners validate their Blackboard key and declared writers",
+			writer_diagnostic and missing_writer_diagnostic))
 
 func _test_dispatch_limits_and_ancestry() -> bool:
 	var depth_engine := RuleEngine.new(Blackboard.new(), {}, Callable())

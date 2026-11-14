@@ -3,6 +3,9 @@ class_name Blackboard extends RefCounted
 
 signal changed(key: StringName, value: Variant)
 signal shared_changed(storage_key: StringName, value: Variant, writer: StringName, source: Blackboard)
+## Emitted only after a value commits. `previous` and `value` retain the key's
+## declared Variant type; initialization and restoration do not emit changes.
+signal value_changed(key: StringName, previous: Variant, value: Variant, scope: StringName, writer: StringName, dispatch_context: Dictionary)
 
 var schema := {}
 var local := {}
@@ -13,6 +16,8 @@ var shared_write_commit: Callable
 var _saved_names := {}        # saved storage key -> current Blackboard name
 var _aliases: Dictionary = {} # original Blackboard name -> current name
 var last_writers: Dictionary = {} # current Blackboard name -> most recent writer label
+var _value_change_queue: Array[Dictionary] = []
+var _dispatching_value_changes := false
 
 func _init(p_saved := {}, p_shared := {}) -> void:
 	saved = p_saved
@@ -45,7 +50,7 @@ func get_var(key: StringName) -> Variant:
 		&"shared": return shared_values.get(entry["state_key"])
 		_: return local.get(key)
 
-func write(key: StringName, value: Variant, writer: StringName = &"") -> bool:
+func write(key: StringName, value: Variant, writer: StringName = &"", dispatch_context: Dictionary = {}) -> bool:
 	key = resolve_key(key)
 	if not schema.has(key):
 		push_error("Undeclared Blackboard key '%s'" % key)
@@ -63,7 +68,7 @@ func write(key: StringName, value: Variant, writer: StringName = &"") -> bool:
 			and not bool(shared_write_guard.call(storage_key, value, self)):
 		return false
 	if scope == &"shared" and shared_write_commit.is_valid():
-		return bool(shared_write_commit.call(storage_key, key, value, writer, self))
+		return bool(shared_write_commit.call(storage_key, key, value, writer, self, dispatch_context.duplicate(true)))
 	var values: Dictionary = shared_values if scope == &"shared" else (saved if scope == &"saved" else local)
 	var previous: Variant = values.get(storage_key)
 	if values.has(storage_key) and typeof(previous) == typeof(value) and previous == value:
@@ -71,21 +76,47 @@ func write(key: StringName, value: Variant, writer: StringName = &"") -> bool:
 	if not writer.is_empty():
 		last_writers[key] = writer
 	values[storage_key] = value
+	_queue_value_change(key, previous, value, scope, writer, dispatch_context)
 	changed.emit(key, value)
+	_drain_value_changes()
 	if scope == &"shared":
 		shared_changed.emit(storage_key, value, writer, self)
 	return true
 
 func receive_shared_change(storage_key: StringName, value: Variant, writer: StringName,
-		notify_shared := false) -> void:
+		dispatch_context: Dictionary = {}, notify_shared := false,
+		previous_value: Variant = null) -> void:
 	for key: StringName in schema:
 		var entry: Dictionary = schema[key]
 		if entry.get("scope") == &"shared" and entry.get("state_key") == storage_key:
 			if not writer.is_empty():
 				last_writers[key] = writer
+			_queue_value_change(key, previous_value, value, &"shared", writer, dispatch_context)
 			changed.emit(key, value)
+	_drain_value_changes()
 	if notify_shared:
 		shared_changed.emit(storage_key, value, writer, self)
+
+func _queue_value_change(key: StringName, previous: Variant, value: Variant,
+		scope: StringName, writer: StringName, dispatch_context: Dictionary) -> void:
+	_value_change_queue.append({
+		"key": key,
+		"previous": previous,
+		"value": value,
+		"scope": scope,
+		"writer": writer,
+		"dispatch_context": dispatch_context.duplicate(true),
+	})
+
+func _drain_value_changes() -> void:
+	if _dispatching_value_changes:
+		return
+	_dispatching_value_changes = true
+	while not _value_change_queue.is_empty():
+		var change: Dictionary = _value_change_queue.pop_front()
+		value_changed.emit(change["key"], change["previous"], change["value"],
+			change["scope"], change["writer"], change["dispatch_context"])
+	_dispatching_value_changes = false
 
 ## Let gameplay code using an original saved name continue to access a renamed key.
 func resolve_key(key: StringName) -> StringName:

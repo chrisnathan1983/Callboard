@@ -10,6 +10,8 @@ static func ids(data: GraphDraft) -> Array:
 	for event in data.external_calls:
 		names[event] = true
 	for rule in data.rules:
+		if rule.trigger == "on_change":
+			names["on_change"] = true
 		if rule.trigger.begins_with(RELAY_PREFIX) and rule.trigger != RELAY_PREFIX:
 			names[rule.trigger] = true
 		if rule.emit != "":
@@ -41,6 +43,8 @@ static func impact(data: GraphDraft, id: String) -> PackedStringArray:
 static func edit_error(data: GraphDraft, id: String) -> String:
 	if id == RELAY_PREFIX or not ids(data).has(id):
 		return "This Call or relay no longer exists."
+	if id == "on_change":
+		return "The built-in Blackboard change trigger cannot be renamed or removed."
 	return ""
 
 static func new_call_error(data: GraphDraft, call_id: String) -> String:
@@ -49,6 +53,8 @@ static func new_call_error(data: GraphDraft, call_id: String) -> String:
 	var error := _name_error(call_id)
 	if not error.is_empty():
 		return error
+	if call_id == "on_change":
+		return "That ID is reserved for the built-in Blackboard change trigger."
 	if data.external_calls.has(call_id):
 		return "That Call already exists."
 	return ""
@@ -71,6 +77,8 @@ static func rename(data: GraphDraft, id: String, new_name: String) -> String:
 	error = _name_error(new_name)
 	if not error.is_empty():
 		return error
+	if new_name == "on_change":
+		return "That ID is reserved for the built-in Blackboard change trigger."
 	var is_relay := id.begins_with(RELAY_PREFIX)
 	var new_id := RELAY_PREFIX + new_name if is_relay else new_name
 	if id == new_id:

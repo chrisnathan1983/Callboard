@@ -84,8 +84,22 @@ static func check(rules: Array[Rule], bb: Blackboard,
 			problems.append("rule '%s' is one-shot and must use Ignore re-entry" % r.id)
 		if r.trigger == &"":
 			problems.append("rule '%s' has no trigger" % r.id)
-		elif not emitted.has(r.trigger) and not external_calls.has(r.trigger):
+		elif r.trigger != &"on_change" and not emitted.has(r.trigger) and not external_calls.has(r.trigger):
 			problems.append("rule '%s' listens to '%s', which has no relay emitter or external declaration" % [r.id, r.trigger])
+		if r.trigger == &"on_change":
+			var listened_keys := {}
+			for guard in r.requires:
+				var change_guard := GuardExpression.parse(String(guard))
+				if not change_guard.get("payload", false) or change_guard.get("key") != &"key" or not change_guard.get("comparison", false) or change_guard.get("operator") != "==" or change_guard.get("value_type", TYPE_NIL) != TYPE_STRING:
+					continue
+				var listened_key := StringName(change_guard["value"])
+				if listened_keys.has(listened_key):
+					continue
+				listened_keys[listened_key] = true
+				if not bb.has(listened_key):
+					problems.append("rule '%s' listens for on_change key '%s', which is not declared on the Blackboard" % [r.id, listened_key])
+				elif not settable.has(bb.resolve_key(listened_key)):
+					problems.append("rule '%s' listens for on_change key '%s' but no writer is declared" % [r.id, listened_key])
 		for guard in r.requires + r.forbids + r.cancel_if:
 			var parsed := GuardExpression.parse(String(guard))
 			if not parsed["ok"]:
@@ -111,7 +125,9 @@ static func check(rules: Array[Rule], bb: Blackboard,
 					var literal_type: int = parsed["value_type"]
 					var operator: String = parsed["operator"]
 					var compatible := false
-					if field_type in [TYPE_INT, TYPE_FLOAT]:
+					if field_type == TYPE_NIL:
+						compatible = true # Dynamic Variant fields, including on_change values.
+					elif field_type in [TYPE_INT, TYPE_FLOAT]:
 						compatible = literal_type in [TYPE_INT, TYPE_FLOAT]
 					elif field_type in [TYPE_BOOL, TYPE_STRING]:
 						compatible = literal_type == field_type and operator in ["==", "!="]
@@ -162,12 +178,34 @@ static func _find_shared_trigger_conflicts(rules: Array[Rule]) -> Array[String]:
 static func _guards_are_exclusive(a: Rule, b: Rule) -> bool:
 	if _has_contradictory_guards(a) or _has_contradictory_guards(b):
 		return true
+	if _payload_equalities_are_exclusive(a, b):
+		return true
 	for key in a.requires:
 		if b.forbids.has(key):
 			return true
 	for key in b.requires:
 		if a.forbids.has(key):
 			return true
+	return false
+
+static func _payload_equalities_are_exclusive(a: Rule, b: Rule) -> bool:
+	for a_guard in a.requires:
+		var left := GuardExpression.parse(String(a_guard))
+		if not left.get("payload", false) or not left.get("comparison", false) or left.get("operator") != "==":
+			continue
+		for b_guard in b.requires:
+			var right := GuardExpression.parse(String(b_guard))
+			if not right.get("payload", false) or not right.get("comparison", false) or right.get("operator") != "==":
+				continue
+			if left.get("key") != right.get("key"):
+				continue
+			var left_type: int = left.get("value_type", TYPE_NIL)
+			var right_type: int = right.get("value_type", TYPE_NIL)
+			var same_literal: bool = left_type == right_type and left.get("value") == right.get("value")
+			if left_type in [TYPE_INT, TYPE_FLOAT] and right_type in [TYPE_INT, TYPE_FLOAT]:
+				same_literal = is_equal_approx(float(left.get("value")), float(right.get("value")))
+			if not same_literal:
+				return true
 	return false
 
 static func _has_contradictory_guards(r: Rule) -> bool:

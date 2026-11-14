@@ -769,10 +769,10 @@ func _sync_layout() -> void:
 	var call_positions: Dictionary = _data.call_positions.duplicate(true)
 	var visible_call_positions := view.get_call_positions()
 	for id in visible_call_positions:
-		if _data.external_calls.has(id):
+		if _data.external_calls.has(id) or id == "on_change":
 			call_positions[id] = visible_call_positions[id].round()
 	for id in call_positions.keys():
-		if not _data.external_calls.has(id):
+		if not _data.external_calls.has(id) and id != "on_change":
 			call_positions.erase(id)
 	_data.call_positions = call_positions
 	var rects := view.get_group_rects()

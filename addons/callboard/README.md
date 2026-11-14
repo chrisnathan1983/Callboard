@@ -91,6 +91,8 @@ To declare payload fields, select a rule and add fields under **Payload fields f
 
 Use expressions such as `payload.action == "confirm"`, `payload.accepted == true`, or `payload.count >= 3` in Requires, Forbids, and Cancel If. Use `has(payload.item)` or `missing(payload.item)` when a rule should handle an absent field. Missing or type-incompatible values fail comparisons, including `!=`. Bare names such as `door_open` continue to refer to Blackboard keys. The inspector lists trigger fields and guard payload references separately; validation checks field names and operand types against the selected trigger's schema.
 
+Select the built-in `on_change` trigger to react to Blackboard commits. Filter a rule with `payload.key == "door_open"`; its payload also includes `previous`, `value`, `scope`, and `writer`. The transition values keep the declared Blackboard type. Local, Saved, and Shared writes trigger listeners after a committed change; defaults, restored values, unchanged or rejected writes, and shared updates received while a managed Stage is dormant do not. Do not add `on_change` to **Calls & relays** or fire it manually; the Stage emits it after a write commits.
+
 Use the built-in `add_var` step to update numeric Blackboard counters. It reads the current value when it runs, so multiple Calls accumulate and later steps see the new value. Integer keys accept whole-number positive or negative deltas; float keys accept fractional deltas. Saved counters continue from the values in your Stage's injected save dictionary.
 
 ### Declare gameplay Blackboard writers

@@ -87,7 +87,7 @@ func unregister_blackboard(board: Blackboard) -> void:
 	_shared_boards = remaining
 
 func commit_shared_write(storage_key: StringName, key: StringName, value: Variant,
-		writer: StringName, source: Blackboard) -> bool:
+		writer: StringName, source: Blackboard, dispatch_context: Dictionary = {}) -> bool:
 	if source == null or not validate_shared_write(storage_key, value, source):
 		return false
 	_shared_write_queue.append({
@@ -96,6 +96,7 @@ func commit_shared_write(storage_key: StringName, key: StringName, value: Varian
 		"value": value,
 		"writer": writer,
 		"source": source,
+		"dispatch_context": dispatch_context.duplicate(true),
 	})
 	if _dispatching_shared_writes:
 		return true
@@ -111,15 +112,17 @@ func commit_shared_write(storage_key: StringName, key: StringName, value: Varian
 		if shared_values.has(request_key) and shared_values[request_key] == request_value \
 				and typeof(shared_values[request_key]) == typeof(request_value):
 			continue
+		var previous_value: Variant = shared_values.get(request_key)
 		shared_values[request_key] = request_value
 		committed = true
 		var request_writer: StringName = request["writer"]
+		var request_context: Dictionary = request.get("dispatch_context", {})
 		if is_instance_valid(request_source):
-			request_source.receive_shared_change(request_key, request_value, request_writer, true)
+			request_source.receive_shared_change(request_key, request_value, request_writer, request_context, true, previous_value)
 		for ref: WeakRef in _valid_board_refs():
 			var board := ref.get_ref() as Blackboard
 			if board != null and board != request_source:
-				board.receive_shared_change(request_key, request_value, request_writer)
+				board.receive_shared_change(request_key, request_value, request_writer, request_context, false, previous_value)
 	_dispatching_shared_writes = false
 	return committed
 

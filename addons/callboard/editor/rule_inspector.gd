@@ -280,6 +280,8 @@ func _set_trigger(t: String) -> void:
 ## Declared external events plus every relay some rule emits.
 func _trigger_options() -> Array:
 	var out := _data.external_calls.duplicate()
+	if not out.has("on_change"):
+		out.append("on_change")
 	for rd in _data.rules:
 		for relay in RuleGraphView.output_relays(rd, _data):
 			if relay != "" and not out.has("relay:" + relay):
@@ -294,7 +296,8 @@ func _payload_schema_panel() -> Control:
 		if field.event_id == StringName(_rule.trigger):
 			fields.append(field)
 	if fields.is_empty():
-		var empty := Style.label("No fields declared. Calls can still pass payload dictionaries; guards are checked at runtime.", Style.MUTED, 11)
+		var empty_text := "Built-in fields: key, previous, value, scope, writer. The transition values retain the Blackboard key's type." if _rule.trigger == &"on_change" else "No fields declared. Calls can still pass payload dictionaries; guards are checked at runtime."
+		var empty := Style.label(empty_text, Style.MUTED, 11)
 		empty.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		section.add_child(empty)
 	var referenced := {}
@@ -349,7 +352,9 @@ func _payload_schema_panel() -> Control:
 		section.add_child(row)
 	var add := Button.new()
 	add.text = "+ Payload field"
-	add.disabled = _read_only
+	add.disabled = _read_only or _rule.trigger == &"on_change"
+	if _rule.trigger == &"on_change":
+		add.tooltip_text = "The built-in Blackboard change payload has a fixed field list."
 	add.pressed.connect(func() -> void:
 		var field := PayloadFieldData.new()
 		field.event_id = StringName(_rule.trigger)

@@ -14,6 +14,7 @@ func _initialize() -> void:
 	ok = _test_factory() and ok
 	ok = _test_debug_panel() and ok
 	ok = await _test_connection_focus() and ok
+	ok = _test_on_change_authoring() and ok
 	ok = _test_project_settings() and ok
 	print("ADDON EDITOR: ", "PASS" if ok else "FAIL")
 	quit(0 if ok else 1)
@@ -354,6 +355,36 @@ func _test_connection_focus() -> bool:
 		and graph._rule_nodes["producer"].self_modulate != Color.WHITE
 		and graph.get_connection_list().size() == 2) and ok
 	board.free()
+	return ok
+
+func _test_on_change_authoring() -> bool:
+	var data := GraphDraft.new()
+	var listener := RuleData.new()
+	listener.id = &"watch_blackboard"
+	listener.trigger = &"on_change"
+	var step := StepData.new()
+	step.verb = &"score"
+	step.args = PackedStringArray(["1"])
+	listener.steps.append(step)
+	data.rules = [listener]
+	var graph := RuleGraphView.new()
+	root.add_child(graph)
+	graph.show_data(data)
+	var graph_input_visible: bool = graph._event_nodes.has("on_change") \
+		and graph._event_nodes["on_change"].title == "Blackboard Change" \
+		and graph.get_connection_list().size() == 1
+	var inspector := RuleInspector.new()
+	root.add_child(inspector)
+	inspector.show_rule(listener, data)
+	var trigger_selectable := inspector._trigger_options().has("on_change")
+	var immutable_builtin := not RuleConnections.edit_error(data, "on_change").is_empty() \
+		and not RuleConnections.new_call_error(data, "on_change").is_empty()
+	var ok := _check("on_change is selectable and shown as a built-in incoming graph event",
+		graph_input_visible and trigger_selectable)
+	ok = _check("the built-in on_change trigger cannot be renamed, removed, or redeclared as a Call",
+		immutable_builtin and RuleConnections.remove(data, "on_change") != "") and ok
+	inspector.free()
+	graph.free()
 	return ok
 
 func _test_project_settings() -> bool:

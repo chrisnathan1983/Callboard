@@ -113,7 +113,8 @@ func _make_card(data: GraphDraft, editable: bool, id: String) -> PanelContainer:
 	card.add_child(header)
 
 	var actions := HBoxContainer.new()
-	var kind := Style.label("Relay" if is_relay else "Call", Style.RELAY if is_relay else Style.EVENT, 13)
+	var kind_text := "Relay" if is_relay else ("Blackboard Change" if id == "on_change" else "Call")
+	var kind := Style.label(kind_text, Style.RELAY if is_relay else Style.EVENT, 13)
 	kind.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	actions.add_child(kind)
 	var affected := RuleConnections.impact(data, id)
@@ -146,7 +147,7 @@ func _make_card(data: GraphDraft, editable: bool, id: String) -> PanelContainer:
 		else:
 			expanded.erase(id))
 	card.add_child(details)
-	if not editable and not is_relay:
+	if not editable and not is_relay and id != "on_change":
 		var fire_row := HBoxContainer.new()
 		var fire_hint := Style.label("Trigger this Call", Style.MUTED, 12)
 		fire_hint.size_flags_horizontal = Control.SIZE_EXPAND_FILL

@@ -17,6 +17,7 @@ var stage_instance_id: StringName
 var managed_lifecycle := false
 var is_active := false
 var is_built := false
+var _restoring_state := false
 var bb: Blackboard
 var engine: RuleEngine
 var verbs: CoreVerbs
@@ -36,8 +37,10 @@ func _ready() -> void:
 	if Engine.is_editor_hint():
 		return
 	build()
+	_restoring_state = true
 	_restore_state()
 	_apply_restoration_bindings()
+	_restoring_state = false
 
 ## Also used on an unparented instance by the Callboard.
 func build() -> void:
@@ -127,6 +130,7 @@ func rebuild_for_analysis(draft: StageDefinition) -> bool:
 func _create_runtime_services() -> void:
 	bb = Blackboard.new(saved_vars, shared_vars)
 	bb.changed.connect(var_changed.emit)
+	bb.value_changed.connect(_on_blackboard_value_changed)
 	if state_store != null:
 		state_store.register_blackboard(bb)
 	engine = RuleEngine.new(bb, fired, _wait)
@@ -226,6 +230,26 @@ func write_var(key: StringName, value: Variant, writer: StringName = &"") -> boo
 				break
 	return bb.write(key, value, writer)
 
+func _on_blackboard_value_changed(key: StringName, previous: Variant, value: Variant,
+		scope: StringName, writer: StringName, dispatch_context: Dictionary) -> void:
+	# Defaults and restored state are initialized before the Stage becomes dispatchable.
+	# A dormant managed Stage observes shared state but does not replay missed changes.
+	if not is_built or _restoring_state or (managed_lifecycle and not is_active) or not graph_errors.is_empty():
+		return
+	if not engine.rules.any(func(rule: Rule) -> bool: return rule.trigger == &"on_change"):
+		return
+	var payload := {
+		"key": String(key),
+		"previous": previous,
+		"value": value,
+		"scope": String(scope),
+		"writer": String(writer),
+	}
+	if dispatch_context.is_empty():
+		engine.fire(&"on_change", payload)
+	else:
+		engine.fire_from_context(&"on_change", payload, dispatch_context)
+
 func is_set(key: StringName) -> bool:
 	return bb.is_set(key)
 
@@ -236,6 +260,10 @@ func has_fired(rule_id: StringName) -> bool:
 	return fired.has(rule_id)
 
 func fire(event: StringName, payload := {}) -> void:
+	if event == &"on_change":
+		if OS.is_debug_build():
+			push_warning("Stage '%s' dispatches 'on_change' automatically after Blackboard commits." % name)
+		return
 	if not _can_dispatch("Call '%s'" % event):
 		return
 	if OS.is_debug_build() and not _event_is_known(event):
@@ -277,6 +305,8 @@ func fire_relay_once(relay: StringName, latch: StringName, source_id: StringName
 	return true
 
 func _event_is_known(event: StringName) -> bool:
+	if event == &"on_change":
+		return true
 	if external_calls.has(event):
 		return true
 	for rule: Rule in engine.rules:
@@ -291,6 +321,8 @@ func _event_is_known(event: StringName) -> bool:
 
 func check() -> Array[String]:
 	var problems := RuleValidator.check(engine.rules, bb, external_calls, external_vars, payload_schema, external_writers)
+	if external_calls.has(&"on_change"):
+		problems.append("'on_change' is a built-in trigger and cannot be declared as an external Call")
 	if state_store != null:
 		problems.append_array(state_store.shared_schema_errors(bb))
 	if verbs is StagingVerbs:
@@ -299,6 +331,8 @@ func check() -> Array[String]:
 				problems.append_array((verbs as StagingVerbs).validate_step(rule.id, step, bb))
 	var seen_fields := {}
 	for field: PayloadFieldData in definition.payload_fields if definition != null else []:
+		if field.event_id == "on_change":
+			problems.append("payload fields for built-in trigger 'on_change' cannot be redeclared")
 		if not field.key.is_valid_identifier() or field.key in [&"payload", &"_callboard"]:
 			problems.append("payload field '%s' has an invalid name" % field.key)
 		var pair := "%s.%s" % [field.event_id, field.key]
