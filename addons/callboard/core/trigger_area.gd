@@ -15,6 +15,9 @@ const LAYER_COMPANION := StageCollisionLayers.COMPANION
 @export var event: StringName
 @export var rejected_event: StringName
 @export var mode: Mode = Mode.ENTER
+## Bodies in any listed group can activate ENTER. An empty list accepts every body.
+## The default preserves the original Player/Companion behavior.
+@export var trigger_groups: Array[StringName] = [&"Player", &"Companion"]
 @export var ctx: Dictionary = {}
 @export_multiline var prompt_text := "Interact"
 @export var prompt_icon: Texture2D
@@ -33,8 +36,16 @@ func _ready() -> void:
 		body_entered.connect(_on_body_entered)
 
 func _on_body_entered(body: Node3D) -> void:
-	if body.is_in_group(&"Player") or body.is_in_group(&"Companion"):
+	if _matches_trigger_groups(body):
 		_fire()
+
+func _matches_trigger_groups(body: Node) -> bool:
+	if trigger_groups.is_empty():
+		return true
+	for group_name: StringName in trigger_groups:
+		if body.is_in_group(group_name):
+			return true
+	return false
 
 ## Set a game-owned predicate; it receives the actor and can inspect inventory or other host state.
 func set_eligibility_hook(hook: Callable) -> void:

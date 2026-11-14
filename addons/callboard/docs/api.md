@@ -219,7 +219,7 @@ Add `StageRestorationBinding` resources to a StageDefinition. `VISIBILITY` maps 
 
 [`TriggerArea`](../core/trigger_area.gd) extends `Area3D`. Place it under a Stage, add a `CollisionShape3D`, and set `event` and optional `ctx`. It locates the closest Stage ancestor.
 
-- **ENTER** dispatches when a body in the `Player` or `Companion` group enters. Its mask uses physics layers 2 and 4, respectively.
+- **ENTER** dispatches when a body in a configured `trigger_groups` group enters. The default remains `Player` and `Companion`, preserving existing scenes. Set `trigger_groups` to an empty array to accept bodies from any group; use it for movable props, projectiles, vehicles, or other host-defined groups. Collision masks still apply independently.
 - **INTERACT** is selected by an [`InteractionResolver`](../core/interaction_resolver.gd) from the actor's overlapping trigger areas. Configure the resolver with the actor and its reach area, then call `resolver.interact(context)` from the input handler or UI.
 
 `TriggerArea` assigns its collision layer and mask on startup. Use [`StageCollisionLayers`](../core/collision_layers.gd) for the bit masks, or call `stage.fire()` directly from your own interaction system.

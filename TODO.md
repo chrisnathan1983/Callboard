@@ -149,7 +149,7 @@ The first five items retain the high priority assigned in `TODO.md`.
 
 - [ ] **Make contact triggers game-agnostic.** See [TriggerArea](addons/callboard/core/trigger_area.gd).
   - [x] `TriggerArea` supports Enter and Interact. Interactions already expose host eligibility/handling hooks, accepted and rejected Calls, and payloads.
-  - [ ] Expose `TriggerArea.trigger_groups` for optional filtering by Godot body group. Cover matching and nonmatching bodies, including movable props, projectiles, and vehicles. Define compatibility for scenes relying on the existing group defaults.
+  - [x] Expose `TriggerArea.trigger_groups` for optional filtering by Godot body group. Cover matching and nonmatching bodies, including movable props, projectiles, and vehicles. Preserve the existing `Player` and `Companion` defaults; an empty list accepts any body group.
   - [ ] Honor the scene-configured collision layer and mask and expose an optional `collision_mask_override`. Define compatibility for scenes relying on the current collision defaults.
   - [ ] Support arbitrary body/prop contacts and an Exit Call or mode. Specify which body information is available in the payload and how managed/dormant Stages handle entry and exit.
 

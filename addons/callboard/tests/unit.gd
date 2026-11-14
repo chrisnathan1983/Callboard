@@ -614,6 +614,7 @@ func _initialize() -> void:
 	ok = await _test_light_from_restarted_run() and ok
 	ok = await _test_managed_stages_and_restoration() and ok
 	ok = await _test_async_stage_loading() and ok
+	ok = _test_trigger_groups() and ok
 	print("UNIT: ", "PASS" if ok else "FAIL")
 	quit(0 if ok else 1)
 
@@ -667,6 +668,44 @@ func _test_signal_callbacks_accept_arguments() -> bool:
 		cancelled_engine._awaited_signals.is_empty() and cancelled_engine.pending_snapshot().is_empty()
 		and two_argument_tick.get_connections().is_empty()) and ok
 	return ok
+
+func _test_trigger_groups() -> bool:
+	var trigger := TriggerArea.new()
+	var player := Node3D.new()
+	player.add_to_group(&"Player")
+	var companion := Node3D.new()
+	companion.add_to_group(&"Companion")
+	var prop := Node3D.new()
+	prop.add_to_group(&"MovableProp")
+	var projectile := Node3D.new()
+	projectile.add_to_group(&"Projectile")
+	var vehicle := Node3D.new()
+	vehicle.add_to_group(&"Vehicle")
+	var unrelated := Node3D.new()
+	var default_groups_match := (
+		trigger._matches_trigger_groups(player)
+		and trigger._matches_trigger_groups(companion)
+	)
+	var defaults_preserved := trigger.trigger_groups == [&"Player", &"Companion"]
+	trigger.trigger_groups = [&"MovableProp", &"Projectile", &"Vehicle"]
+	var configured_groups_match := (
+		trigger._matches_trigger_groups(prop)
+		and trigger._matches_trigger_groups(projectile)
+		and trigger._matches_trigger_groups(vehicle)
+	)
+	var unrelated_rejected := not trigger._matches_trigger_groups(unrelated)
+	trigger.trigger_groups.clear()
+	var empty_filter_accepts_all := trigger._matches_trigger_groups(unrelated)
+	trigger.free()
+	player.free()
+	companion.free()
+	prop.free()
+	projectile.free()
+	vehicle.free()
+	unrelated.free()
+	return _check("TriggerArea ENTER filters configurable body groups, preserves Player/Companion defaults, and accepts all groups when unfiltered",
+		default_groups_match and defaults_preserved and configured_groups_match
+		and unrelated_rejected and empty_filter_accepts_all)
 
 func _test_session_scope_reset() -> bool:
 	var definition := StageDefinition.new()
