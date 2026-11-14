@@ -116,10 +116,10 @@ The first five items retain the high priority assigned in `TODO.md`.
 
 ## 3. State, restoration, and Stage lifecycle
 
-- [ ] **Expose Shared key identity and enforce early store attachment.** See [BlackboardPanel](addons/callboard/editor/blackboard_panel.gd), [StageStateStore](addons/callboard/core/stage_state_store.gd), and [Stage](addons/callboard/core/stage.gd).
+- [x] **Expose Shared key identity and enforce early store attachment.** See [BlackboardPanel](addons/callboard/editor/blackboard_panel.gd), [StageStateStore](addons/callboard/core/stage_state_store.gd), and [Stage](addons/callboard/core/stage.gd).
   - [x] Shared variables use a storage key. `load_stage()` attaches the store before adding the Stage to the scene tree.
-  - [ ] Expose a shared-key picker or project-level schema. The board generates unique keys for new variables and changes only the scope when a variable becomes Shared, so matching display names can refer to different values. Define how existing persisted keys are preserved or deliberately remapped.
-  - [ ] Reject attachment once a Stage has initialized its Blackboard and engine. The public attach method presently accepts initialized Stages even though the services were built against their original dictionaries.
+  - [x] Expose existing Shared identities in a picker and allow a custom storage key for reuse across definitions. Keep display names separate; changing scope preserves `state_key`, and existing data is remapped only after an explicit storage-key edit. Legacy variables without `state_key` continue to use their display key.
+  - [x] Reject attachment once a Stage has initialized its Blackboard or engine. `attach_state_store()` and `StageStateStore.attach()` return `false` without changing the Stage's references after initialization.
 
 - [ ] **Add a store-level cross-Stage event bus.** See [StageStateStore](addons/callboard/core/stage_state_store.gd) and [Stage](addons/callboard/core/stage.gd).
   - [x] The store maintains stable Stage instance IDs and shares values. Managed Stages can load dormant and ignore ordinary Calls until activation.

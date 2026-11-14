@@ -29,11 +29,15 @@ func state_for(instance_id: StringName) -> Dictionary:
 func attach(stage: Stage, instance_id: StringName) -> bool:
 	if stage == null or instance_id.is_empty():
 		return false
+	if stage.is_built or stage.bb != null or stage.engine != null:
+		push_warning("Cannot attach a StageStateStore after Stage runtime services have been initialized. Attach before build or adding the Stage to the tree.")
+		return false
 	if _loaded_ids.has(instance_id) and is_instance_valid(_loaded_ids[instance_id]):
 		push_warning("Stage instance ID '%s' is already loaded." % instance_id)
 		return false
 	var state := state_for(instance_id)
-	stage.attach_state_store(self, instance_id, state["saved"], state["fired"], shared_values)
+	if not stage.attach_state_store(self, instance_id, state["saved"], state["fired"], shared_values):
+		return false
 	stage.random_group_states = state["random_groups"]
 	_loaded_ids[instance_id] = stage
 	return true

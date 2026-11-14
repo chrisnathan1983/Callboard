@@ -7,6 +7,18 @@ signal animation_finished_tick(animation_name: StringName)
 
 func _initialize() -> void:
 	var ok := true
+	var attach_store := StageStateStore.new()
+	var attach_stage := Stage.new()
+	var attached_before_build := attach_store.attach(attach_stage, &"attach_before_build")
+	var store_refs_injected := attached_before_build and attach_stage.state_store == attach_store
+	attach_stage.build()
+	var rejected_after_build := not attach_store.attach(attach_stage, &"attach_after_build")
+	ok = _check("state store attaches before Stage build and rejects late attachment",
+		store_refs_injected and rejected_after_build
+		and attach_stage.stage_instance_id == &"attach_before_build"
+		and not attach_store.stage_states.has(&"attach_after_build")) and ok
+	attach_store.release_stage(attach_stage)
+	attach_stage.free()
 	var legacy_definition := load("res://addons/callboard/tests/fixtures/legacy_stage_definition.tres") as StageDefinition
 	if legacy_definition:
 		legacy_definition._migrate()

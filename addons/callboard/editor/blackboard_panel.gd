@@ -113,9 +113,58 @@ func _make_row(v: VariableData) -> Control:
 	Style.tint(scope, _scope_color(v.scope))
 	scope.item_selected.connect(func(i: int) -> void:
 		v.scope = ["local", "saved", "shared"][i]
-		Style.tint(scope, _scope_color(v.scope))
+		_rebuild()
 		changed.emit())
 	row.add_child(scope)
+	if v.scope == "shared":
+		var current_shared_key := v.state_key if not v.state_key.is_empty() else v.key
+		var shared_key_row := HBoxContainer.new()
+		card.add_child(shared_key_row)
+		shared_key_row.add_child(Style.label("Shared key", Style.MUTED, 12))
+		var shared_key_picker := OptionButton.new()
+		shared_key_picker.accessibility_name = "Existing shared storage keys"
+		shared_key_picker.tooltip_text = "Select an existing Shared storage key to intentionally link this variable."
+		var shared_keys: Array[StringName] = []
+		for other: VariableData in _data.variables:
+			if other.scope == "shared" and not other.state_key.is_empty() and not shared_keys.has(other.state_key):
+				shared_keys.append(other.state_key)
+		if not current_shared_key.is_empty() and not shared_keys.has(current_shared_key):
+			shared_keys.append(current_shared_key)
+		shared_keys.sort()
+		for storage_key: StringName in shared_keys:
+			shared_key_picker.add_item(String(storage_key))
+			shared_key_picker.set_item_tooltip(shared_key_picker.item_count - 1,
+				"Use this exact shared storage identity.")
+		var selected_key_index := shared_keys.find(current_shared_key)
+		if selected_key_index >= 0:
+			shared_key_picker.select(selected_key_index)
+		shared_key_picker.disabled = not _editable
+		shared_key_row.add_child(shared_key_picker)
+		var shared_key_edit := LineEdit.new()
+		shared_key_edit.text = String(current_shared_key)
+		shared_key_edit.accessibility_name = "Shared storage key"
+		shared_key_edit.placeholder_text = "Storage identity"
+		shared_key_edit.tooltip_text = "Persisted Shared values use this identity. Matching identities link across variables and Stage definitions."
+		shared_key_edit.editable = _editable
+		shared_key_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var commit_shared_key := func(_text := "") -> void:
+			var new_storage_key := StringName(shared_key_edit.text.strip_edges())
+			if new_storage_key.is_empty():
+				shared_key_edit.text = String(current_shared_key)
+				return
+			if new_storage_key == current_shared_key:
+				return
+			v.state_key = new_storage_key
+			_rebuild()
+			changed.emit()
+		shared_key_edit.text_submitted.connect(commit_shared_key)
+		shared_key_edit.focus_exited.connect(commit_shared_key)
+		shared_key_picker.item_selected.connect(func(i: int) -> void:
+			if i < 0 or i >= shared_keys.size():
+				return
+			shared_key_edit.text = String(shared_keys[i])
+			commit_shared_key.call())
+		shared_key_row.add_child(shared_key_edit)
 
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL

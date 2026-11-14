@@ -8,6 +8,7 @@ func _initialize() -> void:
 	await process_frame
 	var ok := _test_scene_assigned_props()
 	ok = _test_add_var_editor() and ok
+	ok = _test_shared_key_authoring() and ok
 	ok = _test_parallel_group_authoring() and ok
 	ok = _test_conditional_group_authoring() and ok
 	ok = _test_guard_expression_authoring() and ok
@@ -120,6 +121,74 @@ func _test_add_var_editor() -> bool:
 			and toggle_picker.get_item_text(0) == "enabled"
 			and reset_picker != null and reset_picker.item_count == 3)
 	inspector.free()
+	return ok
+
+func _test_shared_key_authoring() -> bool:
+	var preserved := VariableData.new()
+	preserved.key = &"local_value"
+	preserved.state_key = &"original_storage_id"
+	var linked := VariableData.new()
+	linked.key = &"shared_value"
+	linked.scope = "shared"
+	linked.state_key = &"canonical_town_value"
+	var draft := GraphDraft.new()
+	draft.variables = [preserved, linked]
+	var panel := BlackboardPanel.new()
+	panel.show_data(draft)
+	var find_card := func(display_key: String) -> VBoxContainer:
+		for control: Node in panel.find_children("*", "LineEdit", true, false):
+			var edit := control as LineEdit
+			if edit != null and edit.accessibility_name == "Variable name" and edit.text == display_key:
+				return edit.get_parent().get_parent() as VBoxContainer
+		return null
+	var preserved_card := find_card.call("local_value") as VBoxContainer
+	var scope_control: OptionButton
+	if preserved_card != null:
+		for control: Node in preserved_card.find_children("*", "OptionButton", true, false):
+			var option := control as OptionButton
+			if option != null and option.accessibility_name == "Variable scope":
+				scope_control = option
+				break
+	if scope_control == null:
+		panel.free()
+		return _check("Shared scope exposes a storage-key editor and picker", false)
+	scope_control.item_selected.emit(2)
+	var shared_key_edit: LineEdit
+	var shared_key_picker: OptionButton
+	preserved_card = find_card.call("local_value") as VBoxContainer
+	if preserved_card != null:
+		for control: Node in preserved_card.find_children("*", "LineEdit", true, false):
+			var edit := control as LineEdit
+			if edit != null and edit.accessibility_name == "Shared storage key":
+				shared_key_edit = edit
+		for control: Node in preserved_card.find_children("*", "OptionButton", true, false):
+			var option := control as OptionButton
+			if option != null and option.accessibility_name == "Existing shared storage keys":
+				shared_key_picker = option
+	if shared_key_edit == null or shared_key_picker == null:
+		panel.free()
+		return _check("Shared scope exposes a storage-key editor and picker", false)
+	var picker_has_existing_key := false
+	for i in range(shared_key_picker.item_count):
+		if shared_key_picker.get_item_text(i) == "canonical_town_value":
+			picker_has_existing_key = true
+	shared_key_edit.text = "canonical_town_value"
+	shared_key_edit.text_submitted.emit(shared_key_edit.text)
+	var identity_linked := preserved.scope == "shared" and preserved.state_key == &"canonical_town_value"
+	preserved_card = find_card.call("local_value") as VBoxContainer
+	if preserved_card != null:
+		for control: Node in preserved_card.find_children("*", "OptionButton", true, false):
+			var option := control as OptionButton
+			if option != null and option.accessibility_name == "Variable scope":
+				option.item_selected.emit(1)
+				break
+	var scope_change_preserved_identity := preserved.scope == "saved" \
+		and preserved.state_key == &"canonical_town_value"
+	var ok := _check("Shared key picker exposes existing identities and edits the explicit storage key",
+		picker_has_existing_key and identity_linked and linked.state_key == &"canonical_town_value") \
+		and _check("changing scope preserves the persisted storage identity",
+			scope_change_preserved_identity)
+	panel.free()
 	return ok
 
 func _test_parallel_group_authoring() -> bool:

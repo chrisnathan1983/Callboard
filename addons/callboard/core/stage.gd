@@ -71,12 +71,16 @@ func can_reuse_analysis_props() -> bool:
 ## Configure state before the Stage enters the tree so saved values and latches
 ## exist when its Blackboard and graph are built.
 func attach_state_store(store: StageStateStore, instance_id: StringName,
-		p_saved_vars: Dictionary, p_fired: Dictionary, p_shared_vars: Dictionary) -> void:
+		p_saved_vars: Dictionary, p_fired: Dictionary, p_shared_vars: Dictionary) -> bool:
+	if is_built or bb != null or engine != null:
+		push_warning("Cannot attach a StageStateStore after Stage runtime services have been initialized. Attach before build or adding the Stage to the tree.")
+		return false
 	state_store = store
 	stage_instance_id = instance_id
 	saved_vars = p_saved_vars
 	fired = p_fired
 	shared_vars = p_shared_vars
+	return true
 
 func accepts_calls() -> bool:
 	return _dispatch_block_reason().is_empty()
