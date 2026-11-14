@@ -2,7 +2,7 @@
 class_name StageDefinition extends Resource
 ## Authored data shared by the runtime and the Callboard.
 
-const CURRENT_FORMAT_VERSION := 5
+const CURRENT_FORMAT_VERSION := 6
 const ANALYSIS_SCENE_SOURCE_META := &"_analysis_scene_source"
 static var _string_token_pattern: RegEx
 
@@ -18,6 +18,10 @@ static var _string_token_pattern: RegEx
 @export var external_vars := PackedStringArray()
 ## Typed external Blackboard producers. `external_vars` remains supported as an anonymous declaration.
 @export var external_writers: Array[BlackboardWriterData] = []
+## When enabled, the Stage ignores Calls until activate() and only activates once per entry.
+@export var managed_lifecycle := false
+## Resolved state is applied after load and before the Stage is activated.
+@export var restoration_bindings: Array[StageRestorationBinding] = []
 @export var variables: Array = []
 @export var rules: Array = []
 @export var groups: Array = []
@@ -140,10 +144,10 @@ func apply_blackboard(stage: Stage) -> void:
 	if stage.engine != null:
 		stage.engine.payload_schema = stage.payload_schema
 	for variable: VariableData in variables:
-		if variable.scope == "saved":
-			stage.define_saved(variable.key, variable.default_value, variable.state_key)
-		else:
-			stage.define_local(variable.key, variable.default_value, variable.state_key)
+		match variable.scope:
+			"saved": stage.define_saved(variable.key, variable.default_value, variable.state_key)
+			"shared": stage.define_shared(variable.key, variable.default_value, variable.state_key)
+			_: stage.define_local(variable.key, variable.default_value, variable.state_key)
 		for alias in variable.aliases:
 			stage.bb.alias(alias, variable.key)
 	stage.collect_scene_blackboard_writers()

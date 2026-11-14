@@ -8,6 +8,9 @@ static func read(stage: Stage) -> GraphDraft:
 		return GraphDraft.load_error("This stage has no StageDefinition assigned.")
 	var data := GraphDraft.new()
 	data.definition = definition
+	data.managed_lifecycle = definition.managed_lifecycle
+	for binding: StageRestorationBinding in definition.restoration_bindings:
+		data.restoration_bindings.append(binding.duplicate())
 	for rule: RuleData in definition.rules:
 		data.rules.append(rule.duplicate_deep(Resource.DEEP_DUPLICATE_ALL))
 	for variable: VariableData in definition.variables:
@@ -68,6 +71,9 @@ static func make_definition(data: GraphDraft) -> StageDefinition:
 	var draft := StageDefinition.new()
 	draft.stage_script = original.stage_script
 	draft.preview_scene_path = original.preview_scene_path
+	draft.managed_lifecycle = data.managed_lifecycle
+	for binding: StageRestorationBinding in data.restoration_bindings:
+		draft.restoration_bindings.append(binding.duplicate())
 	draft.set_meta(StageDefinition.ANALYSIS_SCENE_SOURCE_META, original.analysis_source_path())
 	draft.external_calls = PackedStringArray(data.external_calls)
 	draft.external_vars = PackedStringArray(data.external_vars)

@@ -42,6 +42,9 @@ static func rename_key(data: GraphDraft, old: String, new_key: String) -> void:
 	for writer: BlackboardWriterData in data.external_writers:
 		if writer.key == old:
 			writer.key = StringName(new_key)
+	for binding: StageRestorationBinding in data.restoration_bindings:
+		if binding.key == old:
+			binding.key = StringName(new_key)
 	for rule in data.rules:
 		for field in GUARDS:
 			var guards: PackedStringArray = rule.get(field)

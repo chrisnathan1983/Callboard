@@ -434,8 +434,263 @@ func _initialize() -> void:
 	ok = _test_queue() and ok
 	ok = _test_retriggered_light() and ok
 	ok = _test_light_from_restarted_run() and ok
+	ok = await _test_managed_stages_and_restoration() and ok
 	print("UNIT: ", "PASS" if ok else "FAIL")
 	quit(0 if ok else 1)
+
+func _test_managed_stages_and_restoration() -> bool:
+	var definition := StageDefinition.new()
+	definition.managed_lifecycle = true
+	definition.external_calls = PackedStringArray(["arrive", "give:robot", "give:skateboard"])
+	for variable_spec in [
+		[&"delivered_robot", "saved", false],
+		[&"delivered_skateboard", "saved", false],
+		[&"gifts_delivered", "saved", 0],
+		[&"arrival_count", "saved", 0],
+		[&"town_bell", "shared", false],
+		[&"garage_door_transform", "saved", Transform3D.IDENTITY],
+	]:
+		var variable := VariableData.new()
+		variable.key = variable_spec[0]
+		variable.scope = variable_spec[1]
+		variable.default_value = variable_spec[2]
+		definition.variables.append(variable)
+	var arrival_rule := RuleData.new()
+	arrival_rule.id = &"arrival_once"
+	arrival_rule.trigger = &"arrive"
+	arrival_rule.one_shot = true
+	var arrival_step := StepData.new()
+	arrival_step.verb = &"add_var"
+	arrival_step.args = PackedStringArray(['&"arrival_count"', "1.0"])
+	arrival_rule.steps.append(arrival_step)
+	var gift_rule := RuleData.new()
+	gift_rule.id = &"deliver_robot"
+	gift_rule.trigger = &"give:robot"
+	gift_rule.forbids = PackedStringArray(["delivered_robot"])
+	var set_delivered := StepData.new()
+	set_delivered.verb = &"set_var"
+	set_delivered.args = PackedStringArray(['&"delivered_robot"', "true"])
+	var count_delivery := StepData.new()
+	count_delivery.verb = &"add_var"
+	count_delivery.args = PackedStringArray(['&"gifts_delivered"', "1.0"])
+	gift_rule.steps.assign([set_delivered, count_delivery])
+	var skateboard_rule := RuleData.new()
+	skateboard_rule.id = &"deliver_skateboard"
+	skateboard_rule.trigger = &"give:skateboard"
+	skateboard_rule.forbids = PackedStringArray(["delivered_skateboard"])
+	var set_skateboard := StepData.new()
+	set_skateboard.verb = &"set_var"
+	set_skateboard.args = PackedStringArray(['&"delivered_skateboard"', "true"])
+	var count_skateboard := StepData.new()
+	count_skateboard.verb = &"add_var"
+	count_skateboard.args = PackedStringArray(['&"gifts_delivered"', "1.0"])
+	skateboard_rule.steps.assign([set_skateboard, count_skateboard])
+	definition.rules.assign([arrival_rule, gift_rule, skateboard_rule])
+
+	var binding_window := StageRestorationBinding.new()
+	binding_window.key = &"delivered_robot"
+	binding_window.kind = StageRestorationBinding.Kind.VISIBILITY
+	binding_window.target_path = NodePath("BedroomWindowRobot")
+	var binding_skateboard_window := StageRestorationBinding.new()
+	binding_skateboard_window.key = &"delivered_skateboard"
+	binding_skateboard_window.kind = StageRestorationBinding.Kind.VISIBILITY
+	binding_skateboard_window.target_path = NodePath("BedroomWindowSkateboard")
+	var binding_pose := StageRestorationBinding.new()
+	binding_pose.key = &"delivered_robot"
+	binding_pose.kind = StageRestorationBinding.Kind.SNAP_TO_MARKER
+	binding_pose.target_path = NodePath("Buster")
+	binding_pose.marker_path = NodePath("RedDoghouse")
+	binding_pose.animation_player_path = NodePath("Buster/AnimationPlayer")
+	binding_pose.animation_name = &"sleep"
+	binding_pose.animation_time = 5.0
+	var binding_door := StageRestorationBinding.new()
+	binding_door.key = &"garage_door_transform"
+	binding_door.kind = StageRestorationBinding.Kind.TRANSFORM
+	binding_door.target_path = NodePath("GarageDoor")
+	definition.restoration_bindings.assign([binding_window, binding_skateboard_window, binding_pose, binding_door])
+
+	var template := Stage.new()
+	template.name = "Stage"
+	template.definition = definition
+	var window := Node3D.new()
+	window.name = "BedroomWindowRobot"
+	template.add_child(window)
+	window.owner = template
+	var skateboard_window := Node3D.new()
+	skateboard_window.name = "BedroomWindowSkateboard"
+	template.add_child(skateboard_window)
+	skateboard_window.owner = template
+	var garage_door := Node3D.new()
+	garage_door.name = "GarageDoor"
+	template.add_child(garage_door)
+	garage_door.owner = template
+	var doghouse := Marker3D.new()
+	doghouse.name = "RedDoghouse"
+	doghouse.position = Vector3(3, 0, 2)
+	template.add_child(doghouse)
+	doghouse.owner = template
+	var buster := Node3D.new()
+	buster.name = "Buster"
+	template.add_child(buster)
+	buster.owner = template
+	var visual := Node3D.new()
+	visual.name = "Visual"
+	buster.add_child(visual)
+	visual.owner = template
+	var animation_player := AnimationPlayer.new()
+	animation_player.name = "AnimationPlayer"
+	buster.add_child(animation_player)
+	animation_player.owner = template
+	var library := AnimationLibrary.new()
+	var sleep_animation := Animation.new()
+	sleep_animation.length = 10.0
+	var sleep_track := sleep_animation.add_track(Animation.TYPE_VALUE)
+	sleep_animation.track_set_path(sleep_track, NodePath("Visual:position"))
+	sleep_animation.track_insert_key(sleep_track, 0.0, Vector3.ZERO)
+	sleep_animation.track_insert_key(sleep_track, 10.0, Vector3(0, 0.25, 0))
+	library.add_animation(&"sleep", sleep_animation)
+	animation_player.add_animation_library(&"", library)
+	var gift := TriggerArea.new()
+	gift.name = "RobotGiftTarget"
+	gift.mode = TriggerArea.Mode.INTERACT
+	gift.event = &"give:robot"
+	template.add_child(gift)
+	gift.owner = template
+	var skateboard_gift := TriggerArea.new()
+	skateboard_gift.name = "SkateboardGiftTarget"
+	skateboard_gift.mode = TriggerArea.Mode.INTERACT
+	skateboard_gift.event = &"give:skateboard"
+	template.add_child(skateboard_gift)
+	skateboard_gift.owner = template
+	var scene := PackedScene.new()
+	var packed_ok := scene.pack(template) == OK
+	template.free()
+	if not _check("managed stage fixture packs with saved gift restoration bindings", packed_ok):
+		return false
+
+	var store := StageStateStore.new()
+	var stage := store.load_stage(scene, &"house_01_left", root)
+	await process_frame
+	if stage == null:
+		return _check("state store loads a managed Stage", false)
+	var ok := _check("restoration bindings validate against authored keys and scene nodes",
+		stage.check().is_empty())
+	var invalid_binding := StageRestorationBinding.new()
+	invalid_binding.key = &"gifts_delivered"
+	invalid_binding.kind = StageRestorationBinding.Kind.SNAP_TO_MARKER
+	invalid_binding.target_path = NodePath("Buster")
+	invalid_binding.marker_path = NodePath("MissingMarker")
+	invalid_binding.animation_player_path = NodePath("MissingPlayer")
+	invalid_binding.animation_name = &"missing_pose"
+	var binding_errors := invalid_binding.validate(stage)
+	ok = _check("restoration validation reports bad types and missing marker or animation references",
+		binding_errors.any(func(problem: String) -> bool: return "must be Boolean" in problem)
+		and binding_errors.any(func(problem: String) -> bool: return "Marker3D" in problem)
+		and binding_errors.any(func(problem: String) -> bool: return "AnimationPlayer" in problem)) and ok
+	var actor := Node3D.new()
+	root.add_child(actor)
+	var gift_target := stage.get_node("RobotGiftTarget") as TriggerArea
+	gift_target.set_eligibility_hook(func(_actor: Node) -> bool: return not stage.get_var(&"delivered_robot"))
+	stage.fire(&"give:robot")
+	var duplicate_id_refused := store.load_stage(scene, &"house_01_left", root) == null
+	var dormant_prompt_filtered := not gift_target.can_interact(actor)
+	ok = _check("managed Stage ignores Calls and interactions while dormant, and rejects duplicate instance IDs",
+		duplicate_id_refused and dormant_prompt_filtered
+		and not stage.get_var(&"delivered_robot") and stage.engine.active_snapshot().is_empty())
+	stage.activate()
+	ok = _check("managed Stage activates once and fires its arrival rule",
+		stage.is_active and stage.has_fired(&"arrival_once") and stage.get_var(&"arrival_count") == 1) and ok
+	var outcome := gift_target.interact(actor)
+	await process_frame
+	ok = _check("per-gift saved flag and add_var counter update on an accepted delivery",
+		outcome.get("accepted", false) and stage.get_var(&"delivered_robot")
+		and stage.get_var(&"gifts_delivered") == 1) and ok
+	ok = _check("saved gift flag rejects duplicate interaction before unload",
+		not gift_target.can_interact(actor)) and ok
+	var changed_on_neighbor: Array = []
+	var neighbor := store.load_stage(scene, &"house_01_right", root)
+	await process_frame
+	neighbor.var_changed.connect(func(key: StringName, value: Variant) -> void: changed_on_neighbor.append([key, value]))
+	stage.write_var(&"town_bell", true, &"town_clock")
+	ok = _check("shared Blackboard values propagate while stage-saved values remain independent",
+		neighbor.get_var(&"town_bell") and changed_on_neighbor == [[&"town_bell", true]]
+		and neighbor.bb.last_writers.get(&"town_bell") == &"town_clock"
+		and not neighbor.get_var(&"delivered_robot") and neighbor.get_var(&"gifts_delivered") == 0) and ok
+	var conflict_definition := StageDefinition.new()
+	var conflict_value := VariableData.new()
+	conflict_value.key = &"town_bell"
+	conflict_value.scope = "shared"
+	conflict_value.default_value = 0
+	conflict_value.state_key = &"town_bell"
+	conflict_definition.variables = [conflict_value]
+	var conflict_stage := Stage.new()
+	conflict_stage.definition = conflict_definition
+	store.attach(conflict_stage, &"house_01_conflict")
+	root.add_child(conflict_stage)
+	await process_frame
+	var type_conflicts := conflict_stage.check().filter(func(problem: String) -> bool: return "shared Blackboard key" in problem and "conflicting types" in problem)
+	conflict_stage.write_var(&"town_bell", 1)
+	ok = _check("shared Blackboard type conflicts are diagnosed and incompatible writes are rejected",
+		not type_conflicts.is_empty() and store.shared_values[&"town_bell"] == true) and ok
+	store.unload_stage(conflict_stage)
+	var garage_transform := Transform3D(Basis.IDENTITY, Vector3(0, 1.2, 0))
+	stage.write_var(&"garage_door_transform", garage_transform)
+	store.unload_stage(neighbor)
+	store.unload_stage(stage)
+	actor.queue_free()
+	await process_frame
+	var restored := store.load_stage(scene, &"house_01_left", root)
+	await process_frame
+	if restored == null:
+		return _check("state store reloads a previously unloaded Stage", false) and ok
+	var restored_window := restored.get_node("BedroomWindowRobot") as Node3D
+	var restored_skateboard_window := restored.get_node("BedroomWindowSkateboard") as Node3D
+	var restored_door := restored.get_node("GarageDoor") as Node3D
+	var restored_buster := restored.get_node("Buster") as Node3D
+	var restored_player := restored.get_node("Buster/AnimationPlayer") as AnimationPlayer
+	ok = _check("unloaded Stage restores saved gift state, counter and latch while dormant",
+		not restored.is_active and restored.get_var(&"delivered_robot")
+		and restored.get_var(&"gifts_delivered") == 1 and restored.get_var(&"arrival_count") == 1
+		and restored.has_fired(&"arrival_once")) and ok
+	ok = _check("restoration restores the saved window visibility",
+		restored_window.visible and not restored_skateboard_window.visible) and ok
+	ok = _check("restoration snaps the actor to its Marker3D",
+		restored_buster.global_position.is_equal_approx((restored.get_node("RedDoghouse") as Marker3D).global_position)) and ok
+	ok = _check("restoration applies a saved Node3D transform",
+		restored_door.transform.origin.is_equal_approx(Vector3(0, 1.2, 0))) and ok
+	var restored_visual := restored_buster.get_node("Visual") as Node3D
+	ok = _check("restoration applies and pauses the configured animation pose",
+		is_equal_approx(restored_visual.position.y, 0.125) and not restored_player.is_playing()) and ok
+	var restored_gift := restored.get_node("RobotGiftTarget") as TriggerArea
+	restored_gift.set_eligibility_hook(func(_actor: Node) -> bool: return not restored.get_var(&"delivered_robot"))
+	var restored_skateboard_gift := restored.get_node("SkateboardGiftTarget") as TriggerArea
+	restored_skateboard_gift.set_eligibility_hook(func(_actor: Node) -> bool: return not restored.get_var(&"delivered_skateboard"))
+	var restored_actor := Node3D.new()
+	root.add_child(restored_actor)
+	restored.activate()
+	ok = _check("restored gift flag rejects duplicates while a different gift remains eligible",
+		not restored_gift.can_interact(restored_actor) and restored_skateboard_gift.can_interact(restored_actor)
+		and restored.get_var(&"gifts_delivered") == 1
+		and restored.get_var(&"arrival_count") == 1) and ok
+	var skateboard_result := restored_skateboard_gift.interact(restored_actor)
+	await process_frame
+	ok = _check("a second gift increments the restored aggregate counter exactly once",
+		skateboard_result.get("accepted", false) and restored.get_var(&"delivered_skateboard")
+		and restored.get_var(&"gifts_delivered") == 2
+		and not restored_skateboard_gift.can_interact(restored_actor)) and ok
+	store.unload_stage(restored)
+	restored_actor.queue_free()
+	await process_frame
+	var all_gifts_restored := store.load_stage(scene, &"house_01_left", root)
+	await process_frame
+	var completed_robot_window := all_gifts_restored.get_node("BedroomWindowRobot") as Node3D
+	var completed_skateboard_window := all_gifts_restored.get_node("BedroomWindowSkateboard") as Node3D
+	ok = _check("each gift restores its own visual and the saved counter after the next reload",
+		completed_robot_window.visible and completed_skateboard_window.visible
+		and all_gifts_restored.get_var(&"gifts_delivered") == 2) and ok
+	store.unload_stage(all_gifts_restored)
+	await process_frame
+	return ok
 
 func _test_retriggered_light() -> bool:
 	var bb := Blackboard.new()

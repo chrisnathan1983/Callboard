@@ -6,7 +6,7 @@
 
 ## Stage
 
-[`Stage`](../addons/callboard/core/stage.gd) extends `Node3D`. Your game owns scene loading. The Stage builds its props, Blackboard, and rules during runtime `_ready()`, then calls `_restore_state()`. Call `activate()` once the Stage is ready and your listeners are connected.
+[`Stage`](../addons/callboard/core/stage.gd) extends `Node3D`. Your game owns scene loading. The Stage builds its props, Blackboard, and rules during runtime `_ready()`, then calls `_restore_state()` and its declarative restoration bindings. Call `activate()` once the Stage is ready and your listeners are connected. A managed Stage stays dormant until activation.
 
 ```gdscript
 extends Node3D
@@ -39,9 +39,12 @@ When `SceneTree.paused` is true, rule delays, repeat ticks, timed lights, and th
 
 | Method | Contract |
 | --- | --- |
-| `activate() -> void` | Fires `arrive` after setup. Graph compilation errors block activation. Each call can dispatch `arrive` again. |
-| `deactivate() -> void` | Cancels current runs and queued triggers, releases waits registered with `RuleEngine.interruptible()`, and clears pending diagnostics. Stage exit also cancels runs. |
-| `fire(event: StringName, payload := {}) -> void` | Dispatches a Call ID such as `deliver` or a relay event ID such as `relay:calm_guard`. The optional dictionary is the event payload available to guards and steps. The engine runs any asynchronous work. |
+| `activate() -> void` | Fires `arrive` after setup. Graph compilation errors block activation. Managed Stages activate once per entry; unmanaged Stages retain the existing repeatable behavior. |
+| `deactivate() -> void` | Cancels current runs and queued triggers, releases waits registered with `RuleEngine.interruptible()`, and clears pending diagnostics. For managed Stages this also makes the Stage dormant. Stage exit also cancels runs. |
+| `accepts_calls() -> bool` | Returns false while a managed Stage is dormant. `fire()` ignores Calls in that state. |
+| `attach_state_store(store, instance_id, saved, fired, shared) -> void` | Injects dictionaries before initialization. Usually called by `StageStateStore.attach()` or `load_stage()`. |
+| `define_shared(key, default_val = false, state_key = &"")` | Defines a shared Blackboard key backed by the StageStateStore's shared dictionary. |
+| `fire(event: StringName, payload := {}) -> void` | Dispatches a Call ID such as `deliver` or a relay event ID such as `relay:calm_guard`. The optional dictionary is the event payload available to guards and steps. The engine runs any asynchronous work. Managed dormant Stages ignore Calls. |
 | `get_var(key: StringName) -> Variant` | Reads the resolved Blackboard value. An unknown key returns `null`. |
 | `write_var(key: StringName, value: Variant, writer: StringName = &"") -> void` | Writes a declared key using its Variant type. Integer inputs to float keys are converted to floats. An optional writer label appears in the live Blackboard view. |
 | `is_set(key: StringName) -> bool` | Returns the value's truthiness. |
@@ -95,6 +98,8 @@ Use `@tool` on the Stage script and custom verb factory so Callboard can analyze
 | --- | --- |
 | `stage_script` | The `@tool` script extending `Stage`. |
 | `preview_scene_path` | Optional scene path for editor analysis of scene-assigned props. Callboard otherwise looks for a same-name sibling `.tscn`, then falls back to constructing the script. |
+| `managed_lifecycle` | Opts the Stage into dormant loading, activation on entry, and Call filtering while dormant. |
+| `restoration_bindings` | `StageRestorationBinding` resources that restore visibility, saved transforms, Marker3D positions, and optional AnimationPlayer poses before activation. |
 | `external_calls` | Events supplied by gameplay. Use bare IDs for Calls and `relay:<name>` IDs for external relays. Include `arrive` when using that lifecycle trigger. |
 | `call_positions` | Saved graph positions keyed by external event ID. |
 | `external_vars` | Declared Blackboard keys that gameplay writes. This tells validation which values have a writer outside the graph. |
@@ -111,12 +116,34 @@ Step arguments and delays are evaluated at graph compilation using Godot's [Expr
 
 | Method | Behavior |
 | --- | --- |
-| `define(key, scope, default, state_key = &"")` | Uses the default value's Variant type as the schema. Scope is `&"local"` or `&"saved"`. |
+| `define(key, scope, default, state_key = &"")` | Uses the default value's Variant type as the schema. Scope is `&"local"`, `&"saved"`, or `&"shared"`. |
 | `get_var(key)`, `write(key, value)` | Read or write a declared value. Writes to undeclared keys produce an error. Integer writes to float keys are converted. Other type mismatches warn and discard the write. Saved values with an outdated type revert to the declared default during setup. |
 | `has(key)`, `is_set(key)` | Test whether a key is declared or whether its value is truthy. |
 | `alias(old_key, new_key)`, `resolve_key(key)` | Support renamed keys. Callboard records aliases when it renames authored variables. |
 
 The `changed(key, value)` signal is forwarded as `Stage.var_changed`. Use the write methods when gameplay changes a value so validation and notifications apply. `BlackboardWriter` is a scene component with an exported `callboard_writers` list and a `publish(key, value)` method; the Stage collects its declarations during editor analysis and runtime setup. Custom scene nodes may expose the same property. The live Blackboard shows the most recent non-empty writer label for each key.
+
+## StageStateStore
+
+[`StageStateStore`](../addons/callboard/core/stage_state_store.gd) is a Resource that owns per-instance `saved` and `fired` dictionaries plus a shared Blackboard dictionary. Use a distinct, stable ID for each loaded plot, even when two plots use the same scene.
+
+```gdscript
+var store := StageStateStore.new()
+var left_yard := store.load_stage(yard_scene, &"house_01_left", self)
+var right_yard := store.load_stage(yard_scene, &"house_01_right", self)
+
+# Managed Stages have finished restoring but remain dormant here.
+left_yard.activate()
+
+store.unload_stage(left_yard)
+store.unload_stage(right_yard)
+```
+
+`load_stage()` injects state before adding the Stage to the tree. `unload_stage()` deactivates it and retains its dictionaries for the next load. Save the Resource or serialize `stage_states` and `shared_values` with Variant-preserving storage to persist across game restarts. Shared Blackboard keys should use the same `state_key` and Variant type in every Stage. Conflicting declarations appear in Stage diagnostics, and incompatible shared writes are rejected. Direct `saved_vars` and `fired` dictionary injection remains supported for existing managers.
+
+## Declarative restoration
+
+Add `StageRestorationBinding` resources to a StageDefinition. `VISIBILITY` maps a saved/shared Boolean to `visible` on a `CanvasItem` or `Node3D` (including lights). `TRANSFORM` applies a saved/shared `Transform3D` to a `Node3D`. `SNAP_TO_MARKER` uses a saved/shared Boolean to snap a `Node3D` to a `Marker3D`; optionally set both the AnimationPlayer path and animation name to seek and pause at a resolved pose. Callboard analysis validates the key scope and type, node paths, marker type, and animation reference. Bindings run after `_restore_state()` and before activation.
 
 ## TriggerArea
 

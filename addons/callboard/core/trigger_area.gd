@@ -47,6 +47,8 @@ func set_interaction_handler(handler: Callable) -> void:
 func can_interact(actor: Node) -> bool:
 	if mode != Mode.INTERACT or not is_inside_tree():
 		return false
+	if is_instance_valid(_stage) and not _stage.accepts_calls():
+		return false
 	if _eligibility_hook.is_valid() and not bool(_eligibility_hook.call(actor)):
 		return false
 	return is_interaction_eligible(actor)

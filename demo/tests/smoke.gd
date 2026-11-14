@@ -12,6 +12,9 @@ func _initialize() -> void:
 		and stage.get_node("BumpPad") is BumpProp and not stage.has_node("TreatProp"))
 	root.add_child(stage)
 	await process_frame
+	# This fixture calls the Stage API directly without the demo StageManager.
+	# The managed lifecycle is exercised through GameManager later in this suite.
+	stage.managed_lifecycle = false
 
 	ok = _check("scene-placed and scripted props resolve when the stage builds",
 		stage.window == stage.get_node("Window") and stage.treat == stage.get_node("TreatProp")
@@ -90,6 +93,7 @@ func _test_player_and_bump(stage: Stage, fired: Array[StringName]) -> bool:
 		rule.steps.append(Step.new(func(_ctx: Dictionary) -> void: interactions.append(event)))
 		stage.engine.rules.append(rule)
 	var prompt_changes: Array[String] = []
+	var resolver := player.interaction_resolver
 	player.interaction_resolver.prompt_changed.connect(func(text: String, _icon: Texture2D, _priority: int) -> void:
 		prompt_changes.append(text))
 	for frame in range(3):
@@ -97,6 +101,17 @@ func _test_player_and_bump(stage: Stage, fired: Array[StringName]) -> bool:
 	ok = _check("all test areas overlap the player",
 		player._reach.overlaps_area(nearest) and player._reach.overlaps_area(farther)
 		and player._reach.overlaps_area(enter_only)) and ok
+	var previous_managed_mode := stage.managed_lifecycle
+	var previous_active_state := stage.is_active
+	stage.managed_lifecycle = true
+	stage.is_active = false
+	resolver.refresh()
+	var dormant_prompt_hidden := resolver.selected_trigger == null
+	stage.managed_lifecycle = previous_managed_mode
+	stage.is_active = previous_active_state
+	resolver.refresh()
+	ok = _check("InteractionResolver hides prompts owned by a dormant managed Stage",
+		dormant_prompt_hidden and resolver.selected_trigger != null) and ok
 	var interact_key := InputEventKey.new()
 	interact_key.physical_keycode = KEY_E
 	interact_key.pressed = true
@@ -105,7 +120,6 @@ func _test_player_and_bump(stage: Stage, fired: Array[StringName]) -> bool:
 	interact_key.echo = true
 	player._unhandled_input(interact_key)
 	ok = _check("interaction ignores held-key repeats", interactions.size() == 1) and ok
-	var resolver := player.interaction_resolver
 	farther.interaction_priority = 5
 	resolver.refresh()
 	ok = _check("higher priority selects its trigger and updates the prompt",

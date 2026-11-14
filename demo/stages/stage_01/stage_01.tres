@@ -386,6 +386,7 @@ script = ExtResource("1_6haco")
 stage_script = ExtResource("2_nih50")
 preview_scene_path = "res://demo/stages/stage_01/stage_01.tscn"
 external_calls = PackedStringArray("arrive", "give:duck", "give:decoy", "relay:treat_out", "file:permit")
+managed_lifecycle = true
 call_positions = {
 "arrive": Vector2(-150, 110),
 "give:duck": Vector2(810, 345),

@@ -667,6 +667,7 @@ func _test_numeric_undo() -> bool:
 func _test_live_debug() -> bool:
 	var definition := load(DEFINITION_PATH) as StageDefinition
 	var stage := definition.instantiate_for_analysis(root)
+	stage.is_active = true
 	var board := Callboard.new()
 	root.add_child(board)
 	board._show(GraphDraft.load_error("No stage definitions"), false)

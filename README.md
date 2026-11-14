@@ -149,6 +149,29 @@ func mark_delivered() -> void:
 
 Define `delivered_robot` as a saved Boolean in the Blackboard. Pair it with a saved `gifts_delivered` counter and the graph's `add_var` step when a house needs aggregate completion progress.
 
+### Persist and stream Stage instances
+
+Use `StageStateStore` when several instances of a Stage scene need independent saved values and one-shot latches. Give each loaded plot a stable ID, such as `house_01_left` and `house_01_right`; the state store injects its dictionaries before the Stage initializes.
+
+```gdscript
+var state_store := StageStateStore.new()
+
+func load_plot(scene: PackedScene, plot_id: StringName) -> Stage:
+    return state_store.load_stage(scene, plot_id, self) # Dormant when managed_lifecycle is enabled.
+
+func enter_plot(stage: Stage) -> void:
+    stage.activate()
+
+func leave_plot(stage: Stage) -> void:
+    state_store.unload_stage(stage)
+```
+
+Set `StageDefinition.managed_lifecycle` for streamed yards. A managed Stage builds and restores while dormant, ignores Calls until `activate()`, fires `arrive` on entry, and cancels active rules on `deactivate()` or unload. `TriggerArea` and `InteractionResolver` filter prompts from dormant Stages. Existing projects can keep injecting `saved_vars` and `fired` dictionaries directly.
+
+Blackboard variables can use **Local**, **Saved**, or **Shared** scope. Shared keys use the same `state_key` and type across loaded Stages; writes update all matching boards. The store reports schema conflicts and rejects a write that would violate another loaded Stage's type. Save the `StageStateStore` resource or serialize its dictionaries with a Variant-preserving format if the game needs disk persistence.
+
+Add `StageRestorationBinding` resources to a StageDefinition for resolved visuals. A Boolean binding can set a node's visibility or snap a `Node3D` to a `Marker3D`, with an optional `AnimationPlayer` pose. A saved `Transform3D` can restore a prop directly. Bindings run after the Stage's `_restore_state()` hook and before activation; paths, node types, and animation names are validated during Callboard analysis. For multiple gifts, keep a saved Boolean per gift, have each target reject an already delivered flag, and increment a saved counter with `add_var`. This restores each visual independently while keeping aggregate completion guards simple.
+
 The built-in staging verbs include timed `light`, audio playback, rotation, `AnimationPlayer` playback and posing, material-safe `flash`/`jump`, and `gameplay_event`. Waiting options are explicit for audio, rotation, and animation playback; those waits are released when a Stage deactivates. Connect to `stage.gameplay_event` to handle authored IDs and argument dictionaries in your game. Existing `stage.scored` and `score(points)` behavior remains available. See the [Staging verbs API](docs/api.md#built-in-verbs) for parameter and validation details.
 
 To add a Blackboard numeric guard, enter a comparison such as `score >= 10` below Requires, Forbids, or Cancel If and press **Add**. Supported operators are `>`, `>=`, `<`, `<=`, `==`, and `!=`.

@@ -11,6 +11,7 @@ signal content_size_changed
 const Style := preload("res://addons/callboard/editor/board_style.gd")
 const COL_SAVED := Style.RELAY
 const COL_LOCAL := Style.EVENT
+const COL_SHARED := Style.SUCCESS
 const TYPES := {"bool": false, "int": 0, "float": 0.0, "String": ""}
 
 var _data: GraphDraft
@@ -100,16 +101,19 @@ func _make_row(v: VariableData) -> Control:
 	card.add_child(row)
 	var scope := OptionButton.new()
 	scope.accessibility_name = "Variable scope"
-	scope.add_item("Saved")
 	scope.add_item("Local")
-	scope.get_popup().set_item_tooltip(0, "Keep this variable in saved Stage state.")
-	scope.get_popup().set_item_tooltip(1, "Reset this variable when the Stage is restored.")
-	scope.select(0 if v.scope == "saved" else 1)
+	scope.add_item("Saved")
+	scope.add_item("Shared")
+	scope.get_popup().set_item_tooltip(0, "Reset this variable when the Stage is restored.")
+	scope.get_popup().set_item_tooltip(1, "Keep this variable in saved Stage state.")
+	scope.get_popup().set_item_tooltip(2, "Share this value across loaded Stage instances using the state store.")
+	var scope_index := ["local", "saved", "shared"].find(v.scope)
+	scope.select(scope_index if scope_index >= 0 else 0)
 	scope.disabled = not _editable
-	Style.tint(scope, COL_SAVED if v.scope == "saved" else COL_LOCAL)
+	Style.tint(scope, _scope_color(v.scope))
 	scope.item_selected.connect(func(i: int) -> void:
-		v.scope = "saved" if i == 0 else "local"
-		Style.tint(scope, COL_SAVED if i == 0 else COL_LOCAL)
+		v.scope = ["local", "saved", "shared"][i]
+		Style.tint(scope, _scope_color(v.scope))
 		changed.emit())
 	row.add_child(scope)
 
@@ -126,6 +130,12 @@ func _make_row(v: VariableData) -> Control:
 		_live_labels[v.key] = live
 		card.add_child(live)
 	return Style.entry(card)
+
+func _scope_color(scope: String) -> Color:
+	match scope:
+		"saved": return COL_SAVED
+		"shared": return COL_SHARED
+		_: return COL_LOCAL
 
 ## The control matches the value's type: CheckBox, SpinBox (int / float), or LineEdit.
 func _default_editor(v: VariableData) -> Control:

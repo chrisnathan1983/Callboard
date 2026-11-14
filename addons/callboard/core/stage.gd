@@ -10,6 +10,11 @@ signal var_changed(key: StringName, value: Variant)
 @export var definition: StageDefinition
 var saved_vars := {}    # injected by the manager; survives unloads
 var fired := {}         # injected by the manager; stores one-shot latches
+var shared_vars: Dictionary = {}
+var state_store: StageStateStore
+var stage_instance_id: StringName
+var managed_lifecycle := false
+var is_active := false
 var bb: Blackboard
 var engine: RuleEngine
 var verbs: CoreVerbs
@@ -21,11 +26,16 @@ var external_vars: Array[StringName] = []
 var external_writers: Array[BlackboardWriterData] = []
 var payload_schema: Dictionary = {}
 
+func _enter_tree() -> void:
+	if definition != null:
+		managed_lifecycle = definition.managed_lifecycle
+
 func _ready() -> void:
 	if Engine.is_editor_hint():
 		return
 	build()
 	_restore_state()
+	_apply_restoration_bindings()
 
 ## Also used on an unparented instance by the Callboard.
 func build() -> void:
@@ -33,6 +43,7 @@ func build() -> void:
 	_build_props()
 	if definition:
 		definition.apply_blackboard(self)
+		managed_lifecycle = definition.managed_lifecycle
 	collect_scene_blackboard_writers()
 	_declare_external_writers()
 	_build_blackboard()
@@ -43,6 +54,26 @@ func build() -> void:
 ## data, and the props remain valid across repeated analysis passes.
 func can_reuse_analysis_props() -> bool:
 	return false
+
+## Configure state before the Stage enters the tree so saved values and latches
+## exist when its Blackboard and graph are built.
+func attach_state_store(store: StageStateStore, instance_id: StringName,
+		p_saved_vars: Dictionary, p_fired: Dictionary, p_shared_vars: Dictionary) -> void:
+	state_store = store
+	stage_instance_id = instance_id
+	saved_vars = p_saved_vars
+	fired = p_fired
+	shared_vars = p_shared_vars
+
+func accepts_calls() -> bool:
+	return not managed_lifecycle or is_active
+
+func _apply_restoration_bindings() -> void:
+	if definition == null:
+		return
+	for binding: StageRestorationBinding in definition.restoration_bindings:
+		if binding != null:
+			binding.apply(self)
 
 ## Reapply an authored draft to a retained editor-analysis scene. Props are built once;
 ## Blackboard services and the graph are recreated for each validation pass.
@@ -56,6 +87,7 @@ func rebuild_for_analysis(draft: StageDefinition) -> bool:
 	definition = draft
 	_create_runtime_services()
 	definition.apply_blackboard(self)
+	managed_lifecycle = definition.managed_lifecycle
 	collect_scene_blackboard_writers()
 	_declare_external_writers()
 	_build_blackboard()
@@ -63,8 +95,10 @@ func rebuild_for_analysis(draft: StageDefinition) -> bool:
 	return true
 
 func _create_runtime_services() -> void:
-	bb = Blackboard.new(saved_vars)
+	bb = Blackboard.new(saved_vars, shared_vars)
 	bb.changed.connect(var_changed.emit)
+	if state_store != null:
+		state_store.register_blackboard(bb)
 	engine = RuleEngine.new(bb, fired, _wait)
 	engine.rule_fired.connect(rule_fired.emit)
 	verbs = _make_verbs(StepContext.new(bb, engine, self, scored.emit))
@@ -108,6 +142,8 @@ func _build_blackboard() -> void: pass
 func _restore_state() -> void: pass
 
 func activate() -> void:
+	if managed_lifecycle and is_active:
+		return
 	if not graph_errors.is_empty():
 		for problem in graph_errors:
 			push_error("[%s] %s" % [name, problem])
@@ -115,20 +151,32 @@ func activate() -> void:
 	if OS.is_debug_build():
 		for problem in check():
 			push_warning("[%s] %s" % [name, problem])
+	if managed_lifecycle:
+		is_active = true
 	fire(&"arrive")
 
 func deactivate() -> void:
-	engine.cancel_all()
+	if managed_lifecycle:
+		is_active = false
+	if engine != null:
+		engine.cancel_all()
 
 func _exit_tree() -> void:
 	if engine:
 		deactivate()
+	if state_store != null:
+		if bb != null:
+			state_store.unregister_blackboard(bb)
+		state_store.release_stage(self)
 
 func _wait(seconds: float) -> Signal:
 	return get_tree().create_timer(seconds, false).timeout
 
 func define_saved(key: StringName, default_val: Variant = false, state_key: StringName = &"") -> void:
 	bb.define(key, &"saved", default_val, state_key)
+
+func define_shared(key: StringName, default_val: Variant = false, state_key: StringName = &"") -> void:
+	bb.define(key, &"shared", default_val, state_key)
 
 func define_local(key: StringName, default_val: Variant = false, state_key: StringName = &"") -> void:
 	bb.define(key, &"local", default_val, state_key)
@@ -154,12 +202,16 @@ func has_fired(rule_id: StringName) -> bool:
 	return fired.has(rule_id)
 
 func fire(event: StringName, payload := {}) -> void:
+	if not accepts_calls():
+		return
 	if OS.is_debug_build() and not _event_is_known(event):
 		push_warning("Stage '%s' fired unknown event '%s'. Declare gameplay events in external_calls." % [name, event])
 	engine.fire(event, payload)
 
 ## Publish a typed request for host gameplay code. The Stage does not interpret event IDs.
 func publish_gameplay_event(event_id: StringName, arguments: Dictionary = {}) -> void:
+	if not accepts_calls():
+		return
 	if event_id.is_empty():
 		if OS.is_debug_build():
 			push_warning("Stage '%s' cannot publish a gameplay event with an empty ID." % name)
@@ -168,7 +220,7 @@ func publish_gameplay_event(event_id: StringName, arguments: Dictionary = {}) ->
 
 ## Use a declared Boolean Blackboard key to latch a relay fired by gameplay code.
 func fire_relay_once(relay: StringName, latch: StringName, source_id: StringName, source_event: StringName) -> bool:
-	if bb == null or relay.is_empty():
+	if bb == null or relay.is_empty() or not accepts_calls():
 		return false
 	if not bb.has(latch):
 		if OS.is_debug_build():
@@ -200,6 +252,8 @@ func _event_is_known(event: StringName) -> bool:
 
 func check() -> Array[String]:
 	var problems := RuleValidator.check(engine.rules, bb, external_calls, external_vars, payload_schema, external_writers)
+	if state_store != null:
+		problems.append_array(state_store.shared_schema_errors(bb))
 	if verbs is StagingVerbs:
 		for rule: Rule in engine.rules:
 			for step: Step in rule.steps:
@@ -216,4 +270,7 @@ func check() -> Array[String]:
 			problems.append("payload field '%s' for '%s' has an unsupported type '%s'" % [field.key, field.event_id, field.type_name])
 		if not _event_is_known(field.event_id):
 			problems.append("payload schema refers to unknown Call or relay '%s'" % field.event_id)
+	for binding: StageRestorationBinding in definition.restoration_bindings if definition != null else []:
+		if binding != null:
+			problems.append_array(binding.validate(self))
 	return problems

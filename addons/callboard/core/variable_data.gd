@@ -3,7 +3,7 @@ class_name VariableData extends Resource
 ## Serializable Blackboard key and default.
 
 @export var key: StringName
-@export_enum("local", "saved") var scope := "local"
+@export_enum("local", "saved", "shared") var scope := "local"
 @export var default_value: Variant = false
 @export_multiline var note := ""
 @export var state_key: StringName
