@@ -128,6 +128,77 @@ func _initialize() -> void:
 	route_bb.write(&"cancelled", true)
 	ok = _check("router cancels a rule after cancel_if is set", not router.alive(guarded, 0)) and ok
 
+	var payload_schema := {&"route": {&"action": TYPE_STRING, &"count": TYPE_INT, &"accepted": TYPE_BOOL}}
+	var schema_definition := StageDefinition.new()
+	schema_definition.external_calls = PackedStringArray(["route"])
+	var declared_action := PayloadFieldData.new()
+	declared_action.event_id = &"route"
+	declared_action.key = &"action"
+	declared_action.type_name = "String"
+	schema_definition.payload_fields.append(declared_action)
+	var schema_stage := Stage.new()
+	schema_stage.definition = schema_definition
+	schema_stage.build()
+	ok = _check("StageDefinition payload fields compile into a trigger-specific runtime schema",
+		schema_stage.payload_schema.get(&"route", {}).get(&"action", TYPE_NIL) == TYPE_STRING
+		and schema_stage.engine.payload_schema == schema_stage.payload_schema) and ok
+	schema_stage.free()
+	var confirm_payload := {"action": "confirm", "count": 3, "accepted": true}
+	ok = _check("payload parser separates authored fields from Blackboard keys",
+		GuardExpression.referenced_payload_field(&"payload.action == \"confirm\"") == &"action"
+		and GuardExpression.referenced_key(&"payload.action == \"confirm\"").is_empty()
+		and GuardExpression.referenced_key(&"armed") == &"armed") and ok
+	ok = _check("payload guards compare strings, booleans, and numbers by declared type",
+		GuardExpression.evaluate(route_bb, &"payload.action == \"confirm\"", confirm_payload, &"route", payload_schema)
+		and GuardExpression.evaluate(route_bb, &"payload.accepted != false", confirm_payload, &"route", payload_schema)
+		and GuardExpression.evaluate(route_bb, &"payload.count >= 3", confirm_payload, &"route", payload_schema)) and ok
+	ok = _check("missing and incompatible payload values fail both equality and inequality",
+		not GuardExpression.evaluate(route_bb, &"payload.action != \"confirm\"", {}, &"route", payload_schema)
+		and not GuardExpression.evaluate(route_bb, &"payload.count != 3", {"count": "3"}, &"route", payload_schema)
+		and not GuardExpression.evaluate(route_bb, &"payload.accepted == true", {"accepted": 1}, &"route", payload_schema)) and ok
+	ok = _check("payload presence checks explicitly distinguish present and missing fields",
+		GuardExpression.evaluate(route_bb, &"has(payload.action)", confirm_payload, &"route", payload_schema)
+		and GuardExpression.evaluate(route_bb, &"missing(payload.absent)", confirm_payload, &"route", payload_schema)
+		and not GuardExpression.evaluate(route_bb, &"has(payload.absent)", confirm_payload, &"route", payload_schema)) and ok
+	var payload_guard_rule := Rule.new(&"payload_guard", &"route")
+	payload_guard_rule.requires = [&"payload.action == \"confirm\""]
+	payload_guard_rule.steps.append(Step.new(func(_context: Dictionary) -> void: pass))
+	var payload_guard_diagnostics := RuleValidator.check([payload_guard_rule], route_bb, [&"route"], [], payload_schema)
+	ok = _check("validator treats payload references separately and checks declared field types",
+		not payload_guard_diagnostics.any(func(problem: String) -> bool: return "Blackboard" in problem)
+		and payload_guard_diagnostics.is_empty()) and ok
+	payload_guard_rule.requires = [&"payload.count == \"three\""]
+	payload_guard_diagnostics = RuleValidator.check([payload_guard_rule], route_bb, [&"route"], [], payload_schema)
+	ok = _check("validator reports payload field and operand type mismatches",
+		payload_guard_diagnostics.any(func(problem: String) -> bool: return "incompatible literal or operator" in problem)) and ok
+
+	var payload_engine := RuleEngine.new(Blackboard.new(), {}, Callable())
+	payload_engine.payload_schema = payload_schema
+	var confirmations: Array[String] = []
+	for route_pair in [["confirm", "confirm"], ["decline", "decline"]]:
+		var route_name: String = route_pair[0]
+		var expected_action: String = route_pair[1]
+		var route_rule := Rule.new(StringName("route_" + route_name), &"route")
+		route_rule.requires = [StringName('payload.action == "%s"' % expected_action)]
+		route_rule.steps.append(Step.new(func(c: Dictionary) -> void: confirmations.append(c["payload"]["action"])))
+		payload_engine.rules.append(route_rule)
+	payload_engine.fire(&"route", {"action": "confirm"})
+	payload_engine.fire(&"route", {"action": "decline"})
+	ok = _check("one Call routes distinct payload values to different rules",
+		confirmations == ["confirm", "decline"]) and ok
+
+	var forwarded: Array[String] = []
+	var source_rule := Rule.new(&"payload_source", &"route")
+	source_rule.requires = [&"payload.action == \"confirm\""]
+	source_rule.emits = &"payload_forwarded"
+	var relay_rule := Rule.new(&"payload_relay_listener", &"relay:payload_forwarded")
+	relay_rule.requires = [&"payload.action == \"confirm\""]
+	relay_rule.steps.append(Step.new(func(c: Dictionary) -> void: forwarded.append(c["action"])))
+	payload_engine.rules.append_array([source_rule, relay_rule])
+	payload_engine.fire(&"route", {"action": "confirm"})
+	ok = _check("completion relays preserve authored payload fields for listener guards and steps",
+		forwarded == ["confirm"]) and ok
+
 	var engine_bb := Blackboard.new()
 	var wait_requests: Array[float] = []
 	var fake_wait := func(seconds: float) -> Signal:
@@ -196,8 +267,8 @@ func _initialize() -> void:
 	var listener := Rule.new(&"listener", &"relay:tick")
 	var received: Array[StringName] = []
 	listener.steps.append(Step.new(func(c: Dictionary) -> void:
-		received.append(c["_rule"].id)
-		received.append(c["item"])
+		received.append(c["_callboard"]["rule"].id)
+		received.append(c["payload"]["item"])
 	))
 	engine.rules.append_array([repeated, listener])
 	engine.fire(&"start", {"item": &"parcel"})
@@ -347,6 +418,20 @@ func _test_queue() -> bool:
 	clock_tick.emit()
 	clock_tick.emit()
 	ok = _check("queued triggers recheck fire-time guards", received == [1, 2, 3, 4]) and ok
+
+	var payload_engine := RuleEngine.new(Blackboard.new(), {}, func(_seconds: float) -> Signal: return clock_tick)
+	payload_engine.payload_schema = {&"start": {&"stop": TYPE_BOOL}}
+	var payload_queue := Rule.new(&"payload_queue", &"start")
+	payload_queue.reentry = Rule.ReentryPolicy.QUEUE
+	payload_queue.requires = [&"has(payload.stop)"]
+	payload_queue.cancel_if = [&"payload.stop == true"]
+	var payload_runs: Array[bool] = []
+	payload_queue.steps.append(Step.new(func(c: Dictionary) -> void: payload_runs.append(c["stop"])).after(1.0))
+	payload_engine.rules.append(payload_queue)
+	payload_engine.fire(&"start", {"stop": false})
+	payload_engine.fire(&"start", {"stop": true})
+	clock_tick.emit()
+	ok = _check("queued run cancellation uses that queued event's payload", payload_runs == [false]) and ok
 
 	bb.write(&"enabled", true)
 	engine.fire(&"start", {"id": 6})

@@ -462,6 +462,11 @@ func _test_event_and_relay_edits() -> bool:
 	var ok := _check("connection window lists affected rules and external callers",
 		board._connections_panel.visible and details.visible and "z1_decoy — trigger" in details.text
 		and "gameplay code" in details.text)
+	var call_payload_field := PayloadFieldData.new()
+	call_payload_field.event_id = &"give:decoy"
+	call_payload_field.key = &"action"
+	call_payload_field.type_name = "String"
+	board._data.payload_fields.append(call_payload_field)
 	var edit := card.find_child("ConnectionName", true, false) as LineEdit
 	var renamed_call_pos := Vector2(-640, 202)
 	board.view._event_nodes["give:decoy"].position_offset = renamed_call_pos
@@ -473,6 +478,7 @@ func _test_event_and_relay_edits() -> bool:
 		board.view._event_nodes.has("offer:parcel")
 		and not board.view._event_nodes.has("give:decoy")
 		and _rule(board._data, "z1_decoy").trigger == "offer:parcel"
+		and call_payload_field.event_id == &"offer:parcel"
 		and board.view.get_call_positions()["offer:parcel"] == renamed_call_pos) and ok
 	ok = _check("event name collision leaves connections alone",
 		not board.rename_connection("offer:parcel", "give:duck").is_empty()
@@ -513,7 +519,9 @@ func _test_event_and_relay_edits() -> bool:
 	ok = _check("save and reload preserve typed data and rederive step metadata",
 		reloaded.errors.is_empty() and reloaded.relay_for(tick) == "guard_tick"
 		and reloaded.step_metadata[tick].relay_argument == 1
-		and saved.rules[0] is RuleData and saved.rules[0].steps[0] is StepData) and ok
+		and saved.rules[0] is RuleData and saved.rules[0].steps[0] is StepData
+		and saved.payload_fields.size() == 1 and saved.payload_fields[0].event_id == &"offer:parcel"
+		and saved.payload_fields[0].key == &"action" and saved.payload_fields[0].type_name == "String") and ok
 
 	var affected := RuleConnections.impact(board._data, "relay:guard_tick")
 	ok = _check("relay deletion lists its emitting step and receiving trigger",

@@ -134,6 +134,14 @@ static func _replace_references(data: GraphDraft, old_id: String, new_id: String
 			declarations.remove_at(index)
 		else:
 			declarations[index] = new_id
+	var updated_payload_fields: Array[PayloadFieldData] = []
+	for field: PayloadFieldData in data.payload_fields:
+		if String(field.event_id) == old_id:
+			if new_id.is_empty():
+				continue
+			field.event_id = StringName(new_id)
+		updated_payload_fields.append(field)
+	data.payload_fields = updated_payload_fields
 	for rule in data.rules:
 		if rule.trigger == old_id:
 			rule.trigger = new_id

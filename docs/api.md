@@ -41,7 +41,7 @@ When `SceneTree.paused` is true, rule delays, repeat ticks, timed lights, and th
 | --- | --- |
 | `activate() -> void` | Fires `arrive` after setup. Graph compilation errors block activation. Each call can dispatch `arrive` again. |
 | `deactivate() -> void` | Cancels current runs and queued triggers, releases waits registered with `RuleEngine.interruptible()`, and clears pending diagnostics. Stage exit also cancels runs. |
-| `fire(event: StringName, ctx := {}) -> void` | Dispatches a Call ID such as `deliver` or a relay event ID such as `relay:calm_guard`. The optional `ctx` dictionary is the payload available to steps. The engine runs any asynchronous work. |
+| `fire(event: StringName, payload := {}) -> void` | Dispatches a Call ID such as `deliver` or a relay event ID such as `relay:calm_guard`. The optional dictionary is the event payload available to guards and steps. The engine runs any asynchronous work. |
 | `get_var(key: StringName) -> Variant` | Reads the resolved Blackboard value. An unknown key returns `null`. |
 | `write_var(key: StringName, value: Variant) -> void` | Writes a declared key using its Variant type. Integer inputs to float keys are converted to floats. |
 | `is_set(key: StringName) -> bool` | Returns the value's truthiness. |
@@ -50,6 +50,20 @@ When `SceneTree.paused` is true, rule delays, repeat ticks, timed lights, and th
 | `has_fired(rule_id: StringName) -> bool` | Checks whether a rule has a one-shot latch. Pass the current rule ID after a rename. |
 | `fire_relay_once(relay, latch, source_id, source_event) -> bool` | Uses a declared Boolean Blackboard key as a latch. If it is false, writes true, emits `rule_fired(source_id, source_event)`, then dispatches `relay:<relay>`. Returns false for an empty relay, an invalid latch key, or an already set latch. Pass the bare relay name. |
 | `check() -> Array[String]` | Runs the rule validator on the built Stage. |
+
+### Typed event payloads
+
+Declare optional payload schemas with `PayloadFieldData` entries in the StageDefinition's `payload_fields` array. In the Callboard rule inspector, select a rule and add fields under **Payload fields for [trigger]**. Set the field name and type (`bool`, `int`, `float`, or `String`). The schema is specific to an event ID; relay IDs include their prefix, such as `relay:parcel_ready`.
+
+```gdscript
+stage.fire(&"interact", {"action": "confirm", "item": "key"})
+```
+
+Use `payload.action == "confirm"`, `payload.accepted == true`, or `payload.count >= 2` in Requires, Forbids, and Cancel If. Use `has(payload.item)` and `missing(payload.item)` for explicit presence checks. Missing and incompatible values fail a comparison, including `!=`. String and Boolean fields support equality and inequality; numeric fields support the six comparison operators. A bare name such as `door_open` still addresses the Blackboard.
+
+The inspector lists the selected trigger's declared fields and guard payload references separately. When a trigger schema exists, Callboard validates field names, literal types, and operators against it. Without a schema, runtime comparison still checks the actual Variant type. Relays emitted by rules and `repeat_emit` forward the original authored payload.
+
+Step callables receive authored fields at the top level for compatibility and also under `context["payload"]`. Callboard metadata is grouped under `context["_callboard"]` (`rule` and `run`); reserve `payload` and `_callboard` as field names. Queued runs retain and recheck their own payload. Cancel If always reads the payload of the active run.
 
 | Signal | When it fires |
 | --- | --- |
@@ -172,10 +186,10 @@ Declare a Boolean Blackboard key `door_open` and assign a typed `Node3D` propert
 
 - `Step.sets` lists Blackboard keys written by the step. `Step.emits` names a relay the callable sends. These fields describe the step for validation and graph display.
 - A step sends a relay by dispatching `relay:<name>` through the engine. Set `Step.emit_arg` to the zero-based argument index when that argument supplies the name so Callboard can rewrite it during a relay rename.
-- A step callable accepts a payload dictionary and can await work or return a signal. `Step.after(seconds)` adds a delay before execution.
-- For a custom step that awaits internally, capture `engine.token()` on entry and check `engine.alive(payload["_rule"], token)` after each await before applying more effects. Wrap a signal with `engine.interruptible(signal)` to resume the wait on deactivation, then perform the same cancellation check. Resolve the engine through `context.engine_ref` and release the strong reference before awaiting. See [`repeat_emit`](../addons/callboard/core/core_verbs.gd) for the pattern.
+- A step callable accepts a context dictionary and can await work or return a signal. Read event fields from `context["payload"]` (or from their top-level compatibility aliases). `Step.after(seconds)` adds a delay before execution.
+- For a custom step that awaits internally, capture `engine.token()` on entry and check `engine.alive(context["_callboard"]["rule"], token)` after each await before applying more effects. Wrap a signal with `engine.interruptible(signal)` to resume the wait on deactivation, then perform the same cancellation check. Resolve the engine through `context.engine_ref` and release the strong reference before awaiting. See [`repeat_emit`](../addons/callboard/core/core_verbs.gd) for the pattern.
 
-[`StepContext`](../addons/callboard/core/step_context.gd) supplies `bb`, the Stage `host`, a weak `engine_ref`, and the `score` callable. Treat underscore-prefixed payload fields as engine-owned.
+[`StepContext`](../addons/callboard/core/step_context.gd) supplies `bb`, the Stage `host`, a weak `engine_ref`, and the `score` callable. Engine run metadata is isolated under the step context's `_callboard` key.
 
 ## RuleEngine
 

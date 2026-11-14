@@ -13,6 +13,7 @@ class AwaitedSignal extends RefCounted:
 var rules: Array[Rule] = []
 var fired: Dictionary                 # injected, latches one-shot rules
 var bb: Blackboard
+var payload_schema: Dictionary = {}
 var wait: Callable                    # func(seconds: float) -> Signal; tests swap this
 var _gen := 0
 var _active := {}                      # Rule -> pending payloads and restart request
@@ -49,22 +50,23 @@ func cancel_all() -> void:
 			source.disconnect(callback)
 		entry["completion"].completed.emit()
 
-func fire(event: StringName, ctx := {}) -> void:
-	var depth := int(ctx.get("_callboard_fire_depth", 0)) + 1
+func fire(event: StringName, payload := {}) -> void:
+	_fire(event, payload, 0)
+
+func _fire(event: StringName, payload: Dictionary, prior_depth: int) -> void:
+	var depth := prior_depth + 1
 	if depth > MAX_FIRE_DEPTH:
 		push_error("Callboard stopped relay recursion at depth %d while firing '%s'." % [MAX_FIRE_DEPTH, event])
 		return
-	var forwarded: Dictionary = ctx.duplicate(true)
-	forwarded["_callboard_fire_depth"] = depth
 	_emit_trace("event_fired", &"", event)
 	var gen := _gen
 	for r in rules:
 		if gen != _gen:
 			return
-		if r.trigger == event and passes(r):
-			_dispatch(r, event, forwarded, gen)
+		if r.trigger == event and passes(r, payload, event):
+			_dispatch(r, event, payload.duplicate(true), gen, depth)
 
-func _dispatch(r: Rule, event: StringName, ctx: Dictionary, gen: int) -> void:
+func _dispatch(r: Rule, event: StringName, payload: Dictionary, gen: int, depth: int) -> void:
 	if _active.has(r):
 		var active: Dictionary = _active[r]
 		var pending: Array[Dictionary] = active["pending"]
@@ -73,27 +75,28 @@ func _dispatch(r: Rule, event: StringName, ctx: Dictionary, gen: int) -> void:
 				active["restart"] = true
 				active["run"]["cancelled"] = true
 				pending.clear()
-				pending.append(ctx.duplicate(true))
+				pending.append({"payload": payload.duplicate(true), "depth": depth})
 			Rule.ReentryPolicy.QUEUE:
-				pending.append(ctx.duplicate(true))
+				pending.append({"payload": payload.duplicate(true), "depth": depth})
 		return
 
 	var pending: Array[Dictionary] = []
 	var active := {"pending": pending, "restart": false}
 	_active[r] = active
-	await _run(r, event, ctx, gen)
+	await _run(r, event, payload, gen, depth)
 	while gen == _gen and not pending.is_empty():
 		var next: Dictionary = pending.pop_front()
 		active["restart"] = false
-		if passes(r) and alive(r, gen):
-			await _run(r, event, next, gen)
+		var next_payload: Dictionary = next["payload"]
+		if passes(r, next_payload, event) and alive(r, gen, next_payload):
+			await _run(r, event, next_payload, gen, int(next["depth"]))
 	if gen == _gen:
 		_active.erase(r)
 
-func _run(rule: Rule, event: StringName, payload: Dictionary, generation: int) -> void:
+func _run(rule: Rule, event: StringName, payload: Dictionary, generation: int, depth: int) -> void:
 	# Non-blocking steps can outlive a successful run, so keep cancellation
 	# on the run itself even after the rule leaves the active table.
-	var run := {"cancelled": false}
+	var run := {"cancelled": false, "payload": payload.duplicate(true), "event": event, "depth": depth}
 	_active[rule]["run"] = run
 	if rule.one_shot:
 		fired[rule.latch_key()] = true
@@ -102,23 +105,25 @@ func _run(rule: Rule, event: StringName, payload: Dictionary, generation: int) -
 	if not alive(rule, generation):
 		_cancel_run(run, rule.id, event)
 		return
-	var step_payload := payload.merged({"_rule": rule, "_run": run}, true)
+	var step_payload := payload.duplicate(true)
+	step_payload["payload"] = payload.duplicate(true)
+	step_payload["_callboard"] = {"rule": rule, "run": run}
 	for step_index in rule.steps.size():
 		var step := rule.steps[step_index]
 		if step.delay > 0.0:
 			_emit_trace("delay_started", rule.id, event, step_index, step, "%0.2fs" % step.delay)
 			await interruptible(wait_tracked(step.delay, rule.id, "step delay"))
-			if not alive(rule, generation):
+			if not alive(rule, generation, payload):
 				_cancel_run(run, rule.id, event, step_index, step)
 				return
 		_emit_trace("step_started", rule.id, event, step_index, step)
 		await step.fn.call(step_payload)
-		if not alive(rule, generation):
+		if not alive(rule, generation, payload):
 			_cancel_run(run, rule.id, event, step_index, step)
 			return
 		_emit_trace("step_completed", rule.id, event, step_index, step)
 	if not rule.emits.is_empty():
-		fire("relay:" + rule.emits, payload)
+		_fire("relay:" + rule.emits, payload, depth)
 	_emit_trace("rule_completed", rule.id, event)
 
 func _cancel_run(run: Dictionary, rule_id: StringName, event: StringName,
@@ -202,11 +207,18 @@ func _emit_trace(kind: String, rule_id: StringName, event: StringName,
 		"detail": detail,
 	})
 
-func passes(r: Rule) -> bool:
+func passes(r: Rule, payload: Dictionary = {}, event: StringName = &"") -> bool:
 	if r.one_shot and fired.has(r.latch_key()): return false
-	return (r.requires.all(func(guard: StringName) -> bool: return GuardExpression.evaluate(bb, guard))
-		and not r.forbids.any(func(guard: StringName) -> bool: return GuardExpression.evaluate(bb, guard)))
+	return (r.requires.all(func(guard: StringName) -> bool: return GuardExpression.evaluate(bb, guard, payload, event, _payload_schema()))
+		and not r.forbids.any(func(guard: StringName) -> bool: return GuardExpression.evaluate(bb, guard, payload, event, _payload_schema())))
 
-func alive(r: Rule, gen: int) -> bool:
+func alive(r: Rule, gen: int, payload: Dictionary = {}) -> bool:
+	if payload.is_empty() and _active.has(r):
+		var active_run: Dictionary = _active[r].get("run", {})
+		payload = active_run.get("payload", {})
+	var event: StringName = _active.get(r, {}).get("run", {}).get("event", r.trigger)
 	return (gen == _gen and not _active.get(r, {}).get("restart", false)
-		and not r.cancel_if.any(func(guard: StringName) -> bool: return GuardExpression.evaluate(bb, guard)))
+		and not r.cancel_if.any(func(guard: StringName) -> bool: return GuardExpression.evaluate(bb, guard, payload, event, _payload_schema())))
+
+func _payload_schema() -> Dictionary:
+	return payload_schema

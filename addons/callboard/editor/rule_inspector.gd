@@ -119,6 +119,7 @@ func _build_rule() -> void:
 		apply_trig.call())
 	trig.add_child(pick)
 	_box.add_child(trig)
+	_box.add_child(_payload_schema_panel())
 
 	for g in AuthoredData.GUARDS:
 		_box.add_child(_guard_menu(g))
@@ -285,6 +286,84 @@ func _trigger_options() -> Array:
 				out.append("relay:" + relay)
 	return out
 
+func _payload_schema_panel() -> Control:
+	var section := VBoxContainer.new()
+	section.add_child(Style.label("Payload fields for %s" % _rule.trigger, Style.RELAY, 12))
+	var fields: Array[PayloadFieldData] = []
+	for field: PayloadFieldData in _data.payload_fields:
+		if field.event_id == StringName(_rule.trigger):
+			fields.append(field)
+	if fields.is_empty():
+		var empty := Style.label("No fields declared. Calls can still pass payload dictionaries; guards are checked at runtime.", Style.MUTED, 11)
+		empty.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		section.add_child(empty)
+	var referenced := {}
+	for guard in _rule.requires + _rule.forbids + _rule.cancel_if:
+		var field_key := GuardExpression.referenced_payload_field(guard)
+		if not field_key.is_empty():
+			referenced[field_key] = true
+	var reference_names: Array[String] = []
+	for field_key in referenced:
+		reference_names.append(String(field_key))
+	reference_names.sort()
+	var refs_text := "Guard payload references: " + (", ".join(reference_names) if not reference_names.is_empty() else "None")
+	var refs := Style.label(refs_text, Style.MUTED, 11)
+	refs.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	section.add_child(refs)
+	for field in fields:
+		var row := HBoxContainer.new()
+		var name_edit := LineEdit.new()
+		name_edit.text = String(field.key)
+		name_edit.placeholder_text = "field_name"
+		name_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var committed := [name_edit.text]
+		var apply_name := func(_value := "") -> void:
+			var new_key := name_edit.text.strip_edges()
+			if new_key == committed[0]: return
+			if not new_key.is_valid_identifier() or new_key in ["payload", "_callboard"] or _data.payload_fields.any(func(other: PayloadFieldData) -> bool:
+				return other != field and other.event_id == field.event_id and other.key == StringName(new_key)):
+				name_edit.text = committed[0]
+				return
+			field.key = StringName(new_key)
+			committed[0] = new_key
+			changed.emit(_rule.id)
+		name_edit.text_submitted.connect(apply_name)
+		name_edit.focus_exited.connect(apply_name)
+		row.add_child(name_edit)
+		var type_picker := OptionButton.new()
+		for type_name in ["bool", "int", "float", "String"]:
+			type_picker.add_item(type_name)
+		type_picker.select(["bool", "int", "float", "String"].find(field.type_name))
+		type_picker.item_selected.connect(func(index: int) -> void:
+			field.type_name = ["bool", "int", "float", "String"][index]
+			changed.emit(_rule.id))
+		row.add_child(type_picker)
+		var remove := Button.new()
+		remove.text = "×"
+		remove.tooltip_text = "Remove payload field"
+		remove.pressed.connect(func() -> void:
+			_data.payload_fields.erase(field)
+			changed.emit(_rule.id)
+			_rebuild_later())
+		row.add_child(remove)
+		section.add_child(row)
+	var add := Button.new()
+	add.text = "+ Payload field"
+	add.disabled = _read_only
+	add.pressed.connect(func() -> void:
+		var field := PayloadFieldData.new()
+		field.event_id = StringName(_rule.trigger)
+		field.key = &"new_field"
+		var suffix := 2
+		while _data.payload_fields.any(func(other: PayloadFieldData) -> bool: return other.event_id == field.event_id and other.key == field.key):
+			field.key = StringName("new_field_%d" % suffix)
+			suffix += 1
+		_data.payload_fields.append(field)
+		changed.emit(_rule.id)
+		_rebuild_later())
+	section.add_child(add)
+	return section
+
 func _guard_menu(field: String) -> Control:
 	var mb := MenuButton.new()
 	mb.flat = false
@@ -323,8 +402,8 @@ func _guard_menu(field: String) -> Control:
 	var comparison_row := HBoxContainer.new()
 	var comparison_edit := LineEdit.new()
 	comparison_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	comparison_edit.placeholder_text = "score >= 10"
-	comparison_edit.tooltip_text = "Add an int/float comparison; operators: >, >=, <, <=, ==, !="
+	comparison_edit.placeholder_text = "score >= 10 or payload.action == \"confirm\""
+	comparison_edit.tooltip_text = "Blackboard numeric comparisons and typed payload comparisons. Use has(payload.name) or missing(payload.name) to test presence."
 	comparison_edit.editable = not _read_only
 	comparison_row.add_child(comparison_edit)
 	var add_comparison := Button.new()
@@ -332,18 +411,33 @@ func _guard_menu(field: String) -> Control:
 	add_comparison.disabled = _read_only
 	add_comparison.pressed.connect(func() -> void:
 		var parsed := GuardExpression.parse(comparison_edit.text)
-		if not parsed["ok"] or not parsed["comparison"]:
-			comparison_edit.tooltip_text = "Enter a comparison such as score >= 10."
+		if not parsed["ok"] or (not parsed["comparison"] and parsed.get("presence", "").is_empty()):
+			comparison_edit.tooltip_text = "Enter a comparison or has(payload.name) / missing(payload.name)."
 			return
-		var variable: VariableData
-		for item in _data.variables:
-			if item.key == String(parsed["key"]):
-				variable = item
-				break
-		if variable == null or typeof(variable.default_value) not in [TYPE_INT, TYPE_FLOAT]:
-			comparison_edit.tooltip_text = "Comparisons require a declared int or float Blackboard key."
-			return
-		var expression := "%s %s %s" % [parsed["key"], parsed["operator"], parsed["literal"]]
+		if not parsed["payload"] and parsed["comparison"]:
+			var variable: VariableData
+			for item in _data.variables:
+				if item.key == String(parsed["key"]):
+					variable = item
+					break
+			if variable == null or typeof(variable.default_value) not in [TYPE_INT, TYPE_FLOAT]:
+				comparison_edit.tooltip_text = "Blackboard comparisons require a declared int or float key."
+				return
+		if parsed["payload"] and parsed["comparison"]:
+			var declared: PayloadFieldData
+			for item: PayloadFieldData in _data.payload_fields:
+				if item.event_id == StringName(_rule.trigger) and item.key == parsed["key"]:
+					declared = item
+					break
+			if declared != null:
+				var field_type := declared.value_type()
+				var literal_type: int = parsed["value_type"]
+				var compatible := field_type in [TYPE_INT, TYPE_FLOAT] and literal_type in [TYPE_INT, TYPE_FLOAT]
+				compatible = compatible or (field_type in [TYPE_BOOL, TYPE_STRING] and literal_type == field_type and parsed["operator"] in ["==", "!="])
+				if not compatible:
+					comparison_edit.tooltip_text = "The literal or operator does not match the declared payload field type."
+					return
+		var expression := comparison_edit.text.strip_edges()
 		var guards: PackedStringArray = _rule.get(field)
 		if not guards.has(expression):
 			guards.append(expression)

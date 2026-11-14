@@ -39,7 +39,8 @@ func _light(n: Node3D, on: bool, duration: float, key: StringName) -> Step:
 	var ctx := context
 	var f := func(c: Dictionary) -> void:
 		var engine := ctx.engine_ref.get_ref() as RuleEngine
-		var rule := c.get("_rule") as Rule
+		var callboard: Dictionary = c.get("_callboard", {})
+		var rule := callboard.get("rule") as Rule
 		var gen := engine.token()
 		var rule_id := StringName(rule.id) if rule != null else &"<anonymous>"
 		var node_id := n.get_instance_id()
@@ -67,7 +68,7 @@ func _light(n: Node3D, on: bool, duration: float, key: StringName) -> Step:
 					light_node.set_meta(LIGHT_ACTIVATION_META, activation + 1)
 					light_node.hide()
 					ctx.bb.write(key, false)
-			var run: Dictionary = c.get("_run", {})
+			var run: Dictionary = callboard.get("run", {})
 			on_run_cancelled = func(cancelled_rule_id: StringName) -> void:
 				if cancelled_rule_id == rule_id and run.get("cancelled", false):
 					turn_off.call()
@@ -158,7 +159,7 @@ func jump(m: MeshInstance3D) -> Step:
 	return Step.new(f)
 
 func _animation_completion(payload: Dictionary, finished: Signal) -> Signal:
-	if payload.has("_rule"):
+	if payload.has("_callboard"):
 		var engine := context.engine_ref.get_ref() as RuleEngine
 		if engine != null:
 			return engine.interruptible(finished)

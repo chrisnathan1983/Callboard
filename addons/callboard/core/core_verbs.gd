@@ -21,7 +21,9 @@ func score(points: int) -> Step:
 func repeat_emit(interval: float, tick: StringName) -> Step:
 	var ctx := context
 	var run := func(c: Dictionary) -> void:
-		var rule: Rule = c["_rule"]
+		var callboard: Dictionary = c["_callboard"]
+		var rule: Rule = callboard["rule"]
+		var authored_payload: Dictionary = c["payload"]
 		var engine := ctx.engine_ref.get_ref() as RuleEngine
 		if not engine:
 			return
@@ -33,11 +35,7 @@ func repeat_emit(interval: float, tick: StringName) -> Step:
 			engine = ctx.engine_ref.get_ref() as RuleEngine
 			if not engine or not engine.alive(rule, gen):
 				return
-			var tick_context: Dictionary = c.duplicate(true)
-			tick_context.erase("_callboard_fire_depth")
-			tick_context.erase("_rule")
-			tick_context.erase("_run")
-			engine.fire("relay:" + tick, tick_context)
+			engine.fire("relay:" + tick, authored_payload)
 	var step := Step.new(run)
 	step.emits = tick
 	step.emit_arg = 1

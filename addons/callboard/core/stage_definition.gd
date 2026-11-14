@@ -2,7 +2,7 @@
 class_name StageDefinition extends Resource
 ## Authored data shared by the runtime and the Callboard.
 
-const CURRENT_FORMAT_VERSION := 4
+const CURRENT_FORMAT_VERSION := 5
 const ANALYSIS_SCENE_SOURCE_META := &"_analysis_scene_source"
 static var _string_token_pattern: RegEx
 
@@ -11,6 +11,8 @@ static var _string_token_pattern: RegEx
 ## when the scene itself references this StageDefinition.
 @export_file("*.tscn") var preview_scene_path := ""
 @export var external_calls := PackedStringArray()
+## Optional typed payload schema. Call IDs and relay IDs use the same namespace.
+@export var payload_fields: Array[PayloadFieldData] = []
 ## Canvas positions for external event nodes, keyed by event ID.
 @export var call_positions: Dictionary = {}
 @export var external_vars := PackedStringArray()
@@ -39,6 +41,7 @@ func _migrate() -> void:
 	rules = _normalize_rules(rules)
 	variables = _normalize_variables(variables)
 	groups = _normalize_groups(groups)
+	payload_fields = _normalize_payload_fields(payload_fields)
 	format_version = maxi(format_version, CURRENT_FORMAT_VERSION)
 
 static func _normalize_rules(source: Array) -> Array:
@@ -66,6 +69,15 @@ static func _normalize_groups(source: Array) -> Array:
 			normalized.append(entry)
 		elif entry is Dictionary:
 			normalized.append(GroupData.from_dictionary(entry))
+	return normalized
+
+static func _normalize_payload_fields(source: Array) -> Array[PayloadFieldData]:
+	var normalized: Array[PayloadFieldData] = []
+	for entry in source:
+		if entry is PayloadFieldData:
+			normalized.append(entry)
+		elif entry is Dictionary:
+			normalized.append(PayloadFieldData.from_dictionary(entry))
 	return normalized
 
 func instantiate() -> Stage:
@@ -115,6 +127,9 @@ func apply_blackboard(stage: Stage) -> void:
 	_migrate()
 	stage.external_calls.assign(external_calls)
 	stage.external_vars.assign(external_vars)
+	stage.payload_schema = payload_schema()
+	if stage.engine != null:
+		stage.engine.payload_schema = stage.payload_schema
 	for variable: VariableData in variables:
 		if variable.scope == "saved":
 			stage.define_saved(variable.key, variable.default_value, variable.state_key)
@@ -122,6 +137,17 @@ func apply_blackboard(stage: Stage) -> void:
 			stage.define_local(variable.key, variable.default_value, variable.state_key)
 		for alias in variable.aliases:
 			stage.bb.alias(alias, variable.key)
+
+func payload_schema() -> Dictionary:
+	_migrate()
+	var schema := {}
+	for field: PayloadFieldData in payload_fields:
+		if field.event_id.is_empty() or field.key.is_empty():
+			continue
+		if not schema.has(field.event_id):
+			schema[field.event_id] = {}
+		schema[field.event_id][field.key] = field.value_type()
+	return schema
 
 func apply_graph(stage: Stage) -> Array[String]:
 	_migrate()

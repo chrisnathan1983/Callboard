@@ -2,11 +2,17 @@
 class_name RuleValidator extends RefCounted
 
 static func check(rules: Array[Rule], bb: Blackboard,
-		external_calls: Array[StringName], external_vars: Array[StringName]) -> Array[String]:
+		external_calls: Array[StringName], external_vars: Array[StringName],
+		payload_schema: Dictionary = {}) -> Array[String]:
 	var problems: Array[String] = []
 	var emitted := {}
 	var settable := {}
 	var seen := {}
+	var payload_names := {}
+	for event_id in payload_schema:
+		payload_names[event_id] = {}
+		for field_name in payload_schema[event_id]:
+			payload_names[event_id][field_name] = payload_schema[event_id][field_name]
 	for k in external_vars:
 		settable[bb.resolve_key(k)] = true
 	for r in rules:
@@ -33,6 +39,28 @@ static func check(rules: Array[Rule], bb: Blackboard,
 			var parsed := GuardExpression.parse(String(guard))
 			if not parsed["ok"]:
 				problems.append("rule '%s' has an invalid guard '%s'" % [r.id, guard])
+				continue
+			if parsed["payload"]:
+				var trigger_schema: Dictionary = payload_names.get(r.trigger, {})
+				var field_key: StringName = parsed["key"]
+				if parsed.get("presence", "") != "":
+					if payload_names.has(r.trigger) and not trigger_schema.has(field_key):
+						problems.append("rule '%s' checks undeclared payload field '%s' for trigger '%s'" % [r.id, field_key, r.trigger])
+					continue
+				if parsed["comparison"]:
+					if payload_names.has(r.trigger) and not trigger_schema.has(field_key):
+						problems.append("rule '%s' checks undeclared payload field '%s' for trigger '%s'" % [r.id, field_key, r.trigger])
+						continue
+					var field_type: int = trigger_schema.get(field_key, TYPE_NIL)
+					var literal_type: int = parsed["value_type"]
+					var operator: String = parsed["operator"]
+					var compatible := false
+					if field_type in [TYPE_INT, TYPE_FLOAT]:
+						compatible = literal_type in [TYPE_INT, TYPE_FLOAT]
+					elif field_type in [TYPE_BOOL, TYPE_STRING]:
+						compatible = literal_type == field_type and operator in ["==", "!="]
+					if not compatible:
+						problems.append("rule '%s' compares payload field '%s' with an incompatible literal or operator" % [r.id, field_key])
 				continue
 			var key: StringName = bb.resolve_key(parsed["key"])
 			if not bb.schema.has(key):

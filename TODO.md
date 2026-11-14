@@ -6,11 +6,11 @@ Keep the readme in sync with the code.
 
 ## 1. Call and relay payloads in guards
 
-- [ ] Let a stage definition optionally declare typed payload fields for its Calls and relays. In guard expressions such as `payload.action == "confirm"`, the `payload.` prefix identifies an incoming field. Bare keys continue to refer to the Blackboard.
-- [ ] Support string and Boolean equality, numeric comparisons, and field presence checks. A missing or incompatible field makes a value comparison fail, including inequality. Provide a separate presence check for rules that intentionally handle missing fields.
-- [ ] Use the event payload in `requires`, `forbids`, and `cancel_if`. Recheck queued runs against their own payload when they start and use the active run's payload at cancellation checkpoints. Preserve payload fields when forwarding relays and keep engine bookkeeping out of the authored field namespace.
-- [ ] Show fields from the selected trigger in the rule inspector. Validate field names and operand types where a schema is available, and list payload references separately from Blackboard dependencies.
-- **Done when** one Call routes different payloads to different rules, with coverage for missing fields, relays, queued runs, and cancellation after a wait.
+- [x] Let a stage definition optionally declare typed payload fields for its Calls and relays. In guard expressions such as `payload.action == "confirm"`, the `payload.` prefix identifies an incoming field. Bare keys continue to refer to the Blackboard.
+- [x] Support string and Boolean equality, numeric comparisons, and field presence checks. A missing or incompatible field makes a value comparison fail, including inequality. Provide a separate presence check for rules that intentionally handle missing fields.
+- [x] Use the event payload in `requires`, `forbids`, and `cancel_if`. Recheck queued runs against their own payload when they start and use the active run's payload at cancellation checkpoints. Preserve payload fields when forwarding relays and keep engine bookkeeping out of the authored field namespace.
+- [x] Show fields from the selected trigger in the rule inspector. Validate field names and operand types where a schema is available, and list payload references separately from Blackboard dependencies.
+- **Done when** one Call routes different payloads to different rules, with coverage for missing fields, relays, queued runs, and cancellation after a wait. **Complete:** `addons/callboard/tests/unit.gd` covers routing, incompatible/missing values, relays, per-run queued payloads, and cancellation after a queued wait; the editor inspector exposes and validates trigger schemas.
 
 ## 2. Numeric Blackboard updates
 

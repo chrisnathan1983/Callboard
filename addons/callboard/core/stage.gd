@@ -17,6 +17,7 @@ var graph_errors: Array[String] = []
 ## Call IDs, external relay event IDs, and keys supplied by gameplay code.
 var external_calls: Array[StringName] = [&"arrive"]
 var external_vars: Array[StringName] = []
+var payload_schema: Dictionary = {}
 
 func _ready() -> void:
 	if Engine.is_editor_hint():
@@ -112,10 +113,10 @@ func has_fired(rule_id: StringName) -> bool:
 			return fired.has(rule.latch_key())
 	return fired.has(rule_id)
 
-func fire(event: StringName, ctx := {}) -> void:
+func fire(event: StringName, payload := {}) -> void:
 	if OS.is_debug_build() and not _event_is_known(event):
 		push_warning("Stage '%s' fired unknown event '%s'. Declare gameplay events in external_calls." % [name, event])
-	engine.fire(event, ctx)
+	engine.fire(event, payload)
 
 ## Use a declared Boolean Blackboard key to latch a relay fired by gameplay code.
 func fire_relay_once(relay: StringName, latch: StringName, source_id: StringName, source_event: StringName) -> bool:
@@ -150,4 +151,17 @@ func _event_is_known(event: StringName) -> bool:
 	return false
 
 func check() -> Array[String]:
-	return RuleValidator.check(engine.rules, bb, external_calls, external_vars)
+	var problems := RuleValidator.check(engine.rules, bb, external_calls, external_vars, payload_schema)
+	var seen_fields := {}
+	for field: PayloadFieldData in definition.payload_fields if definition != null else []:
+		if not field.key.is_valid_identifier() or field.key in [&"payload", &"_callboard"]:
+			problems.append("payload field '%s' has an invalid name" % field.key)
+		var pair := "%s.%s" % [field.event_id, field.key]
+		if seen_fields.has(pair):
+			problems.append("payload field '%s' is declared more than once for '%s'" % [field.key, field.event_id])
+		seen_fields[pair] = true
+		if field.type_name not in ["bool", "int", "float", "String"]:
+			problems.append("payload field '%s' for '%s' has an unsupported type '%s'" % [field.key, field.event_id, field.type_name])
+		if not _event_is_known(field.event_id):
+			problems.append("payload schema refers to unknown Call or relay '%s'" % field.event_id)
+	return problems

@@ -18,6 +18,8 @@ static func read(stage: Stage) -> GraphDraft:
 	data.props = VerbCatalog.props_of(stage)
 	data.external_calls.assign(stage.external_calls)
 	data.external_vars.assign(stage.external_vars)
+	for field: PayloadFieldData in definition.payload_fields:
+		data.payload_fields.append(field.duplicate(true))
 	data.call_positions = definition.call_positions.duplicate(true)
 	_read_results(data, stage)
 	return data
@@ -67,6 +69,7 @@ static func make_definition(data: GraphDraft) -> StageDefinition:
 	draft.set_meta(StageDefinition.ANALYSIS_SCENE_SOURCE_META, original.analysis_source_path())
 	draft.external_calls = PackedStringArray(data.external_calls)
 	draft.external_vars = PackedStringArray(data.external_vars)
+	draft.payload_fields = data.payload_fields.duplicate_deep(Resource.DEEP_DUPLICATE_ALL)
 	draft.call_positions = data.call_positions.duplicate(true)
 	# The analysis scene and resource saver each get an independent copy.
 	draft.variables = data.variables.duplicate_deep(Resource.DEEP_DUPLICATE_ALL)
