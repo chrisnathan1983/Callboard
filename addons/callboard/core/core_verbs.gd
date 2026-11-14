@@ -2,10 +2,42 @@
 class_name CoreVerbs extends RefCounted
 ## Blackboard writes, scoring and repeatable relays.
 
+const RuntimeInputRefScript := preload("res://addons/callboard/core/runtime_input_ref.gd")
+
 var context: StepContext
+var runtime_input_event: StringName = &""
 
 func _init(p_context: StepContext) -> void:
 	context = p_context
+
+## Authored expression helper: resolves a declared payload field when a rule step runs.
+func callboard_payload(key_value: Variant) -> RefCounted:
+	if not (key_value is String or key_value is StringName):
+		return RuntimeInputRefScript.new(RuntimeInputRefScript.Source.PAYLOAD, &"", TYPE_NIL, false,
+			"payload input key must be a String or StringName")
+	var key := StringName(String(key_value))
+	var engine := context.engine_ref.get_ref() as RuleEngine
+	var schema: Dictionary = engine.payload_schema.get(runtime_input_event, {}) if engine != null else {}
+	if not key.is_valid_identifier():
+		return RuntimeInputRefScript.new(RuntimeInputRefScript.Source.PAYLOAD, key, TYPE_NIL, false,
+			"payload field '%s' is not a valid identifier" % key)
+	if engine != null and engine.payload_schema.has(runtime_input_event) and not schema.has(key):
+		return RuntimeInputRefScript.new(RuntimeInputRefScript.Source.PAYLOAD, key, TYPE_NIL, false,
+			"payload field '%s' is not declared for '%s'" % [key, runtime_input_event])
+	return RuntimeInputRefScript.new(RuntimeInputRefScript.Source.PAYLOAD, key, schema.get(key, TYPE_NIL))
+
+## Authored expression helper: resolves the current value of a declared Blackboard key.
+func callboard_blackboard(key_value: Variant) -> RefCounted:
+	if not (key_value is String or key_value is StringName):
+		return RuntimeInputRefScript.new(RuntimeInputRefScript.Source.BLACKBOARD, &"", TYPE_NIL, false,
+			"Blackboard input key must be a String or StringName")
+	var key := StringName(String(key_value))
+	var resolved: StringName = context.bb.resolve_key(key)
+	if not key.is_valid_identifier() or not context.bb.schema.has(resolved):
+		return RuntimeInputRefScript.new(RuntimeInputRefScript.Source.BLACKBOARD, key, TYPE_NIL, false,
+			"Blackboard key '%s' is not declared" % key)
+	return RuntimeInputRefScript.new(RuntimeInputRefScript.Source.BLACKBOARD, resolved,
+		context.bb.schema[resolved].get("type", TYPE_NIL))
 
 func set_var(key: StringName, value: Variant = true) -> Step:
 	var bb := context.bb
@@ -68,14 +100,24 @@ func emit_relay(relay: StringName, field_map: Dictionary = {}) -> Step:
 			output_payload.clear()
 			for output_field: Variant in field_map:
 				var input_field: Variant = field_map[output_field]
-				if not _is_payload_field_name(output_field) or not _is_payload_field_name(input_field):
-					push_warning("Callboard emit_relay skipped: field mappings must use String or StringName field names.")
+				if not _is_payload_field_name(output_field):
+					push_warning("Callboard emit_relay skipped: output field names must use String or StringName.")
 					return
 				var output_name := StringName(String(output_field))
-				var input_name := StringName(String(input_field))
 				if not output_name.is_valid_identifier():
 					push_warning("Callboard emit_relay skipped: '%s' is not a valid output field name." % output_name)
 					return
+				if input_field is RuntimeInputRefScript:
+					var resolved := (input_field as RuntimeInputRefScript).resolve(c, ctx.bb)
+					if not resolved["ok"]:
+						push_warning("Callboard emit_relay skipped: %s" % resolved["error"])
+						return
+					output_payload[String(output_name)] = resolved["value"]
+					continue
+				if not _is_payload_field_name(input_field):
+					push_warning("Callboard emit_relay skipped: field mappings must use String or StringName input names or typed runtime references.")
+					return
+				var input_name := StringName(String(input_field))
 				if input_payload.has(input_name):
 					output_payload[String(output_name)] = input_payload[input_name].duplicate(true) if input_payload[input_name] is Array or input_payload[input_name] is Dictionary else input_payload[input_name]
 				elif input_payload.has(String(input_name)):
@@ -105,9 +147,12 @@ func _mapped_payload_matches_schema(engine: RuleEngine, relay_event: StringName,
 			push_warning("Callboard emit_relay skipped: output field '%s' is not declared for '%s'." % [key, relay_event])
 			return false
 		var expected_type: int = schema[key]
-		if expected_type != TYPE_NIL and typeof(payload[field]) != expected_type:
+		var actual_type := typeof(payload[field])
+		if expected_type == TYPE_FLOAT and actual_type == TYPE_INT:
+			payload[field] = float(payload[field])
+		elif expected_type != TYPE_NIL and actual_type != expected_type:
 			push_warning("Callboard emit_relay skipped: output field '%s' has type %s, expected %s for '%s'." % [
-				key, type_string(typeof(payload[field])), type_string(expected_type), relay_event])
+				key, type_string(actual_type), type_string(expected_type), relay_event])
 			return false
 	return true
 

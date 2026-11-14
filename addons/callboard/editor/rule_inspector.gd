@@ -518,6 +518,24 @@ func _step_panel(idx: int) -> Control:
 		var w := _arg_widget(step, j, params[j])
 		w.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		row.add_child(w)
+		var runtime_sources := _runtime_input_options(step, j, params[j])
+		if not runtime_sources.is_empty():
+			var source_button := Button.new()
+			source_button.text = "Dyn"
+			source_button.tooltip_text = "Choose a typed payload or Blackboard input"
+			source_button.accessibility_name = "Choose a runtime input for %s" % params[j]["name"]
+			row.add_child(source_button)
+			var popup := PopupMenu.new()
+			for source_index in runtime_sources.size():
+				popup.add_item(runtime_sources[source_index]["label"], source_index)
+			popup.id_pressed.connect(func(source_index: int) -> void:
+				if source_index >= 0 and source_index < runtime_sources.size():
+					_set_arg(step, j, runtime_sources[source_index]["expression"])
+					_rebuild_later())
+			source_button.add_child(popup)
+			source_button.pressed.connect(func() -> void:
+				popup.position = Vector2i(source_button.get_screen_position()) + Vector2i(0, source_button.size.y)
+				popup.popup())
 		vb.add_child(row)
 
 	var delay_row := HBoxContainer.new()
@@ -632,6 +650,96 @@ func _arg_widget(step: StepData, i: int, param: Dictionary) -> Control:
 	raw.text_submitted.connect(apply)
 	raw.focus_exited.connect(apply)
 	return raw
+
+func _runtime_input_options(step: StepData, index: int, param: Dictionary) -> Array[Dictionary]:
+	var options: Array[Dictionary] = []
+	var supported := ((step.verb in [&"set_var", &"add_var", &"say"] and index == 1)
+		or (step.verb == &"score" and index == 0)
+		or (step.verb in [&"gameplay_event", &"emit_relay"] and index == 1))
+	if not supported:
+		return options
+	var sources: Array[Dictionary] = []
+	for field: PayloadFieldData in _data.payload_fields:
+		if field.event_id == _rule.trigger:
+			sources.append({"label": "payload.%s" % field.key, "key": field.key,
+				"type": field.value_type(), "source": "payload"})
+	for variable: VariableData in _data.variables:
+		sources.append({"label": "Blackboard.%s" % variable.key, "key": variable.key,
+			"type": typeof(variable.default_value), "source": "blackboard"})
+	for writer: BlackboardWriterData in _data.external_writers:
+		var writer_type := _writer_value_type(writer.value_type)
+		if writer_type != TYPE_NIL:
+			sources.append({"label": "Blackboard.%s" % writer.key, "key": writer.key,
+				"type": writer_type, "source": "blackboard"})
+	if param["type"] == TYPE_DICTIONARY:
+		if step.verb == &"gameplay_event" and index == 1:
+			for source: Dictionary in sources:
+				if source["type"] == TYPE_DICTIONARY:
+					_add_runtime_input_option(options, source["label"], source, param["type"])
+				elif source["type"] != TYPE_NIL:
+					var key := String(source["key"])
+					var expression := "{\"%s\": %s(&\"%s\")}" % [key,
+						"callboard_payload" if source["source"] == "payload" else "callboard_blackboard", key]
+					options.append({"label": "Request field %s" % source["label"], "expression": expression})
+		elif step.verb == &"emit_relay" and index == 1:
+			var relay_name := ""
+			if not step.args.is_empty():
+				var parsed_relay := ExprText.parse_literal(step.args[0])
+				if parsed_relay.ok:
+					relay_name = String(parsed_relay.value)
+			var outputs: Array[PayloadFieldData] = []
+			for field: PayloadFieldData in _data.payload_fields:
+				if field.event_id == StringName("relay:" + relay_name):
+					outputs.append(field)
+			for output: PayloadFieldData in outputs:
+				for source: Dictionary in sources:
+					if _input_types_compatible(source["type"], output.value_type()):
+						var expression := "{\"%s\": %s(&\"%s\")}" % [output.key,
+						"callboard_payload" if source["source"] == "payload" else "callboard_blackboard", source["key"]]
+						options.append({"label": "%s <- %s" % [output.key, source["label"]], "expression": expression})
+		return options
+	var expected_type: int = param["type"]
+	if step.verb == &"set_var" and index == 1 and not step.args.is_empty():
+		var target := ExprText.parse_literal(step.args[0])
+		if target.ok and target.value is StringName:
+			expected_type = _blackboard_type(target.value)
+	if step.verb == &"add_var" and index == 1:
+		expected_type = TYPE_INT if not step.args.is_empty() and _blackboard_type_from_arg(step.args[0]) == TYPE_INT else TYPE_FLOAT
+	for source: Dictionary in sources:
+		if _input_types_compatible(source["type"], expected_type):
+			_add_runtime_input_option(options, source["label"], source, expected_type)
+	return options
+
+func _add_runtime_input_option(options: Array[Dictionary], label: String,
+		source: Dictionary, _expected_type: int) -> void:
+	var helper := "callboard_payload" if source["source"] == "payload" else "callboard_blackboard"
+	options.append({"label": label, "expression": "%s(&\"%s\")" % [helper, source["key"]]})
+
+func _input_types_compatible(source_type: int, target_type: int) -> bool:
+	return (target_type == TYPE_NIL or source_type == target_type
+		or (target_type == TYPE_FLOAT and source_type == TYPE_INT))
+
+func _blackboard_type(key: StringName) -> int:
+	for variable: VariableData in _data.variables:
+		if variable.key == key or variable.aliases.has(key):
+			return typeof(variable.default_value)
+	for writer: BlackboardWriterData in _data.external_writers:
+		if writer.key == key:
+			return _writer_value_type(writer.value_type)
+	return TYPE_NIL
+
+func _blackboard_type_from_arg(expression: String) -> int:
+	var key := ExprText.parse_literal(expression)
+	return _blackboard_type(key.value) if key.ok and key.value is StringName else TYPE_NIL
+
+func _writer_value_type(type_name: String) -> int:
+	match type_name:
+		"bool": return TYPE_BOOL
+		"int": return TYPE_INT
+		"float": return TYPE_FLOAT
+		"String": return TYPE_STRING
+		"StringName": return TYPE_STRING_NAME
+		_: return TYPE_NIL
 
 func _text_arg(step: StepData, i: int, text: String, to_expr: Callable) -> Control:
 	var e := LineEdit.new()

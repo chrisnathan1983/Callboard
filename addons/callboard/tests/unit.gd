@@ -529,6 +529,7 @@ func _initialize() -> void:
 	ok = await _test_cancel_if_interrupts_a_wait() and ok
 	ok = _test_shared_write_order() and ok
 	ok = _test_emit_relay() and ok
+	ok = _test_runtime_step_inputs() and ok
 	ok = _test_on_change_triggers() and ok
 	ok = await _test_dispatch_limits_and_ancestry() and ok
 	ok = _test_stage_dispatch_policy() and ok
@@ -762,6 +763,88 @@ func _test_emit_relay() -> bool:
 		and _check("emit_relay payload mappings validate source and destination schema types",
 		valid_types and mismatch_reported) \
 		and _check("immediate relay cycles carry ancestry into the engine depth limit", cycle_stopped[0]))
+
+func _test_runtime_step_inputs() -> bool:
+	var stage_script := GDScript.new()
+	stage_script.source_code = """extends Stage
+var actor: Node3D
+func _build_props() -> void:
+	actor = Node3D.new()
+	actor.name = "Actor"
+	add_child(actor)
+"""
+	if stage_script.reload() != OK:
+		return _check("runtime input fixture compiles", false)
+	var definition := StageDefinition.new()
+	definition.stage_script = stage_script
+	definition.external_calls = PackedStringArray(["start"])
+	for spec in [
+		{"key": "total", "default": 0},
+		{"key": "source", "default": 3},
+		{"key": "relayed", "default": 0},
+		{"key": "sourced", "default": 0},
+	]:
+		var variable := VariableData.new()
+		variable.key = StringName(spec["key"])
+		variable.default_value = spec["default"]
+		definition.variables.append(variable)
+	definition.payload_fields = [
+		PayloadFieldData.from_dictionary({"event_id": "start", "key": "points", "type": "int"}),
+		PayloadFieldData.from_dictionary({"event_id": "start", "key": "message", "type": "String"}),
+		PayloadFieldData.from_dictionary({"event_id": "relay:paid", "key": "points", "type": "int"}),
+	]
+	var start_rule := RuleData.new()
+	start_rule.id = &"dynamic_inputs"
+	start_rule.trigger = &"start"
+	for verb_args in [
+		["add_var", ['&"total"', 'callboard_payload(&"points")']],
+		["say", ["actor", 'callboard_payload(&"message")']],
+		["set_var", ['&"sourced"', 'callboard_blackboard(&"source")']],
+		["score", ['callboard_payload(&"points")']],
+		["gameplay_event", ['&"host_ack"', '{"points": callboard_payload(&"points"), "source": callboard_blackboard(&"source")}']],
+		["emit_relay", ['&"paid"', '{"points": callboard_payload(&"points")}']],
+	]:
+		var step := StepData.new()
+		step.verb = StringName(verb_args[0])
+		step.args = PackedStringArray(verb_args[1])
+		start_rule.steps.append(step)
+	var relay_listener := RuleData.new()
+	relay_listener.id = &"read_paid"
+	relay_listener.trigger = &"relay:paid"
+	var relay_step := StepData.new()
+	relay_step.verb = &"set_var"
+	relay_step.args = PackedStringArray(['&"relayed"', 'callboard_payload(&"points")'])
+	relay_listener.steps.append(relay_step)
+	definition.rules = [start_rule, relay_listener]
+	var stage := definition.instantiate()
+	if stage == null:
+		return _check("runtime input fixture instantiates", false)
+	stage.build()
+	var score_total := [0]
+	var request_seen: Array[Dictionary] = []
+	stage.scored.connect(func(points: int) -> void: score_total[0] += points)
+	stage.gameplay_event.connect(func(_id: StringName, arguments: Dictionary) -> void:
+		request_seen.append(arguments.duplicate(true)))
+	var built_ok := stage.graph_errors.is_empty()
+	if built_ok:
+		stage.fire(&"start", {"points": 4, "message": "Hello at runtime"})
+	var actor := stage.get("actor") as Node3D
+	var label := actor.get_node_or_null(NodePath("CallboardSpeech")) as Label3D if actor != null else null
+	var passed_payload: bool = (stage.get_var(&"total") == 4 and stage.get_var(&"relayed") == 4
+		and stage.get_var(&"sourced") == 3
+		and score_total[0] == 4 and label != null and label.text == "Hello at runtime"
+		and request_seen == [{"points": 4, "source": 3}])
+	if built_ok:
+		stage.fire(&"start", {"message": "No points"})
+	var missing_skips_only_affected_steps: bool = stage.get_var(&"total") == 4 and score_total[0] == 4
+	if built_ok:
+		stage.fire(&"start", {"points": "wrong type", "message": "Bad points"})
+	var incompatible_skips_only_affected_steps: bool = stage.get_var(&"total") == 4 and score_total[0] == 4
+	stage.free()
+	return (_check("runtime input references resolve payload and Blackboard values across gameplay steps",
+		built_ok and passed_payload) \
+		and _check("missing or type-incompatible runtime inputs skip affected steps without blocking static arguments",
+		missing_skips_only_affected_steps and incompatible_skips_only_affected_steps))
 
 func _test_on_change_triggers() -> bool:
 	var definition := StageDefinition.new()

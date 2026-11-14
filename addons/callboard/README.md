@@ -97,6 +97,8 @@ Select the built-in `on_change` trigger to react to Blackboard commits. Filter a
 
 Use the built-in `add_var` step to update numeric Blackboard counters. It reads the current value when it runs, so multiple Calls accumulate and later steps see the new value. Integer keys accept whole-number positive or negative deltas; float keys accept fractional deltas. Saved counters continue from the values in your Stage's injected save dictionary.
 
+For arguments that should use the current run's data, choose a source with the **Dyn** button beside the argument. It lists compatible fields from the rule's incoming payload and declared Blackboard keys. The same references can be typed in expressions: `callboard_payload(&"reward")` reads a field from the incoming payload, and `callboard_blackboard(&"coins")` reads the current Blackboard value. They work in steps such as `set_var`, `add_var`, `say`, `score`, host request arguments, and relay field maps. Missing or type-incompatible values warn and skip that step; later steps still run. Existing constant, prop, and verb-factory expressions remain build-time values.
+
 ### Declare gameplay Blackboard writers
 
 Use `StageDefinition.external_writers` to declare outputs supplied by gameplay. Each `BlackboardWriterData` names a Blackboard key, a source label, and the output type. The editor treats these as producers when checking guards and reports undeclared keys or type mismatches. Existing `external_vars` entries remain supported as anonymous producers.

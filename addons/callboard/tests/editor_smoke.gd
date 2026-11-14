@@ -414,6 +414,12 @@ func _test_emit_relay_authoring() -> bool:
 	data.catalog = RuntimeVerbCatalog.from_factory(CoreVerbs.new(StepContext.new(bb, null, null, Callable())))
 	RuleGraphReader.validate_resources(data)
 	var metadata := data.step_metadata.get(emit_step) as GraphDraft.StepAnalysis
+	var inspector := RuleInspector.new()
+	inspector._data = data
+	inspector._rule = producer
+	inspector.show_rule(producer, data)
+	var emit_params: Array = VerbCatalog.find(data.catalog, "emit_relay")["args"]
+	var runtime_options := inspector._runtime_input_options(emit_step, 1, emit_params[1])
 	var graph := RuleGraphView.new()
 	root.add_child(graph)
 	graph.show_data(data)
@@ -425,12 +431,19 @@ func _test_emit_relay_authoring() -> bool:
 		data.errors.is_empty() and data.relay_for(emit_step) == "mapped"
 		and metadata != null and metadata.relay_argument == 0 and has_emitter_wire
 		and RuleConnections.ids(data).has("relay:mapped"))
+	var offers_payload_picker := false
+	for option: Dictionary in runtime_options:
+		if option["label"] == "result <- payload.action" and option["expression"] == '{"result": callboard_payload(&"action")}':
+			offers_payload_picker = true
+	ok = _check("step argument picker offers schema-compatible payload and Blackboard sources",
+		offers_payload_picker) and ok
 	ok = _check("renaming an emitted relay updates the step argument and its listener",
 		RuleConnections.rename(data, "relay:mapped", "renamed").is_empty()
 		and data.rules[0].steps[0].args[0] == '&"renamed"'
 		and data.rules[1].trigger == "relay:renamed"
 		and data.rules[0].steps[0].args[1] == '{"result": "action"}') and ok
 	graph.free()
+	inspector.free()
 	return ok
 
 func _test_project_settings() -> bool:

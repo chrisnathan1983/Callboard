@@ -197,10 +197,13 @@ static func _validate_resource_relay_mapping(rule: RuleData, relay_name: String,
 		if payloads.has(relay_event) and not output_schema.has(output_name):
 			errors.append("rule '%s' emit_relay writes undeclared output field '%s' for '%s'" % [rule.id, output_name, relay_event])
 			continue
-		if input_schema.has(input_name) and output_schema.has(output_name) and input_schema[input_name] != TYPE_NIL and input_schema[input_name] != output_schema[output_name]:
+		var input_type: int = input_schema.get(input_name, TYPE_NIL)
+		var output_type: int = output_schema.get(output_name, TYPE_NIL)
+		if input_schema.has(input_name) and output_schema.has(output_name) and input_type != TYPE_NIL \
+				and input_type != output_type and not (output_type == TYPE_FLOAT and input_type == TYPE_INT):
 			errors.append("rule '%s' emit_relay maps '%s' (%s) to '%s' (%s) with incompatible types" % [
-				rule.id, input_name, type_string(input_schema[input_name]),
-				output_name, type_string(output_schema[output_name])])
+				rule.id, input_name, type_string(input_type),
+				output_name, type_string(output_type)])
 
 ## Scene-backed analysis. This instantiates the preview and executes Stage build
 ## hooks, the verb factory, and authored argument expressions. Call explicitly

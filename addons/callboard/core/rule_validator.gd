@@ -1,6 +1,8 @@
 @tool
 class_name RuleValidator extends RefCounted
 
+const RuntimeInputRefScript := preload("res://addons/callboard/core/runtime_input_ref.gd")
+
 static func check(rules: Array[Rule], bb: Blackboard,
 		external_calls: Array[StringName], external_vars: Array[StringName],
 		payload_schema: Dictionary = {}, external_writers: Array[BlackboardWriterData] = []) -> Array[String]:
@@ -174,12 +176,35 @@ static func _validate_mapped_relay_step(rule: Rule, step: Step,
 		field_map = step.args[1]
 	for output_field: Variant in field_map:
 		var input_field: Variant = field_map[output_field]
-		if not (output_field is String or output_field is StringName) or not (input_field is String or input_field is StringName):
-			problems.append("rule '%s' emit_relay field mappings must use String or StringName field names" % rule.id)
+		if not (output_field is String or output_field is StringName):
+			problems.append("rule '%s' emit_relay output field names must be String or StringName" % rule.id)
 			continue
 		var output_name := StringName(String(output_field))
+		if not output_name.is_valid_identifier():
+			problems.append("rule '%s' emit_relay output field '%s' is not a valid identifier" % [rule.id, output_name])
+			continue
+		if input_field is RuntimeInputRefScript:
+			var input_ref = input_field as RuntimeInputRefScript
+			if not input_ref.valid:
+				problems.append("rule '%s' emit_relay has an invalid runtime input: %s" % [rule.id, input_ref.issue])
+				continue
+			var relay_event := StringName("relay:" + relay_name)
+			var relay_schema: Dictionary = payload_schemas.get(relay_event, {})
+			if payload_schemas.has(relay_event) and not relay_schema.has(output_name):
+				problems.append("rule '%s' emit_relay writes undeclared output field '%s' for '%s'" % [
+					rule.id, output_name, relay_event])
+				continue
+			if relay_schema.has(output_name) and input_ref.value_type != TYPE_NIL:
+				if not (input_ref.value_type == relay_schema[output_name]
+						or (relay_schema[output_name] == TYPE_FLOAT and input_ref.value_type == TYPE_INT)):
+					problems.append("rule '%s' emit_relay runtime input '%s' has an incompatible type for output '%s'" % [
+						rule.id, input_ref.key, output_name])
+			continue
+		if not (input_field is String or input_field is StringName):
+			problems.append("rule '%s' emit_relay field mappings must use String or StringName field names" % rule.id)
+			continue
 		var input_name := StringName(String(input_field))
-		if not output_name.is_valid_identifier() or not input_name.is_valid_identifier():
+		if not input_name.is_valid_identifier():
 			problems.append("rule '%s' emit_relay maps invalid field name '%s' to '%s'" % [rule.id, output_name, input_name])
 			continue
 		var source_schema: Dictionary = payload_schemas.get(rule.trigger, {})
@@ -191,10 +216,13 @@ static func _validate_mapped_relay_step(rule: Rule, step: Step,
 		if payload_schemas.has(relay_event) and not target_schema.has(output_name):
 			problems.append("rule '%s' emit_relay writes undeclared output field '%s' for '%s'" % [rule.id, output_name, relay_event])
 			continue
-		if source_schema.has(input_name) and target_schema.has(output_name) and source_schema[input_name] != TYPE_NIL and source_schema[input_name] != target_schema[output_name]:
+		var source_type: int = source_schema.get(input_name, TYPE_NIL)
+		var target_type: int = target_schema.get(output_name, TYPE_NIL)
+		if source_schema.has(input_name) and target_schema.has(output_name) and source_type != TYPE_NIL \
+				and source_type != target_type and not (target_type == TYPE_FLOAT and source_type == TYPE_INT):
 			problems.append("rule '%s' emit_relay maps '%s' (%s) to '%s' (%s) with incompatible types" % [
-				rule.id, input_name, type_string(source_schema[input_name]),
-				output_name, type_string(target_schema[output_name])])
+				rule.id, input_name, type_string(source_type),
+				output_name, type_string(target_type)])
 	return problems
 
 static func _find_shared_trigger_conflicts(rules: Array[Rule]) -> Array[String]:

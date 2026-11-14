@@ -79,10 +79,10 @@ The first five items retain the high priority assigned in `TODO.md`.
   - [x] Completion relays and `repeat_emit` forward the incoming payload. `Step.emits` and `emit_arg` already carry step-level relay metadata.
   - [x] Emit once at a chosen point in a sequence; forward the full incoming payload or select and remap fields. Validate mapped schemas and runtime output types, expose the emitter and argument in board connections and traces, include it in cycle analysis, and carry dispatch ancestry into the new relay.
 
-- [ ] **Support typed runtime step inputs from the Call payload and Blackboard.** See [StageDefinition](addons/callboard/core/stage_definition.gd) and [RuleInspector](addons/callboard/editor/rule_inspector.gd).
+- [x] **Support typed runtime step inputs from the Call payload and Blackboard.** See [StageDefinition](addons/callboard/core/stage_definition.gd), [RuntimeInputRef](addons/callboard/core/runtime_input_ref.gd), and [RuleInspector](addons/callboard/editor/rule_inspector.gd).
   - [x] Authored payload schemas drive guard checks. Custom step callbacks receive the runtime payload, and `add_var` reads the current key value before applying its authored delta.
-  - [ ] Add explicit typed references resolved at step execution. Authored arguments now evaluate at Stage build time against props, constants, and the verb factory. Keep those existing arguments valid and define what happens when a runtime value is missing or has an incompatible type.
-  - [ ] Let authors use dynamic values for `set_var`, `add_var`, `say`, scoring, relay mapping, and host request arguments. Expose compatible sources in the board and validate known input types.
+  - [x] Add `callboard_payload()` and `callboard_blackboard()` typed references resolved for each step run. Existing constant, prop, and verb-factory arguments remain build-time expressions. Missing values and runtime type mismatches warn and skip the affected step while later steps continue.
+  - [x] Support dynamic values for `set_var`, `add_var`, `say`, scoring, relay field maps, and host request dictionaries. The inspector offers compatible declared payload and Blackboard sources and known schema mismatches are rejected during Stage build.
 
 - [ ] **Add cancellable `wait_for_call` and `wait_until` steps with timeouts.** See [RuleEngine](addons/callboard/core/rule_engine.gd) and [Step](addons/callboard/core/step.gd).
   - [x] `.after()` delays and verb-specific waits already exist, with an injected timer for engine tests.

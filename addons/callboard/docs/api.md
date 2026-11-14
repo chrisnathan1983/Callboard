@@ -77,6 +77,21 @@ emit_relay(&"parcel_ready", {"item": "gift_id", "accepted": "approved"})
 
 Missing input fields are omitted from the emitted payload. When input and output schemas are declared, authoring validation checks mapped field names and types; the runtime checks supplied values against the output schema before dispatch. The relay dispatch carries the current event ancestry, so recursive relay chains remain subject to the same depth and per-frame dispatch limits. The rule board draws the step as a relay emitter, and live step traces include its relay name and argument position.
 
+### Runtime step inputs
+
+To read the current rule's payload or Blackboard at step execution time, use a typed reference in an argument expression:
+
+```gdscript
+add_var(&"coins", callboard_payload(&"reward"))
+say(guide, callboard_payload(&"message"))
+gameplay_event(&"reward_claimed", {"amount": callboard_payload(&"reward")})
+set_var(&"next_target", callboard_blackboard(&"selected_target"))
+```
+
+`callboard_payload(key)` reads the field from this rule run's incoming payload; `callboard_blackboard(key)` reads the current declared Blackboard value when the step starts. The Callboard argument picker offers the compatible fields declared for the trigger and typed Blackboard keys. It also offers dynamic values inside host request dictionaries and relay field maps. The references can be nested in arrays and dictionaries.
+
+The reference type comes from the payload schema or Blackboard declaration. Known mismatches are rejected while building or analyzing the Stage; integer values may feed float arguments. Within host request dictionaries and relay maps, references can be nested in arrays or dictionaries. If a payload field is absent at runtime, or a value does not match its declared or destination type, Callboard warns and skips only that step. This lets the rest of the rule sequence continue. Without a payload schema, the destination argument type is checked against the actual runtime value. Existing arguments that use constants, Stage props, or verb-factory expressions continue to be evaluated when the Stage builds.
+
 ### Blackboard change triggers
 
 Use the reserved trigger ID `on_change` to run a rule after a declared Blackboard value commits a different value. Its payload contains `key` (String), `previous`, `value`, `scope` (String), and `writer` (String). `previous` and `value` retain the Blackboard key's declared Variant type, so numeric, Boolean, String, and other supported values can be compared or consumed by a step. For example, add `payload.key == "garage_open"` to Requires to filter a listener to one key, then inspect `context["payload"]["previous"]` and `context["payload"]["value"]` in a custom step.
