@@ -167,9 +167,9 @@ The first five items retain the high priority assigned in `TODO.md`.
   - [x] Define initial and restoration semantics: the Blackboard default supplies initial state; Local resets on rebuild, Session lasts for the StageStateStore session, Saved restores across Stage reloads, and Shared state synchronizes loaded Stages. `idle`, `active`, and `resolved` are conventions; the addon does not enforce a transition graph.
   - [x] Make `repeat_emit(interval)` support a relay-free ambient lifetime loop. A tick relay is optional; when supplied it retains the existing listener validation and periodic dispatch behavior. Tracking, following, navigation, objective order, and session timers remain host-owned.
 
-- [ ] **Support dynamic prompts and interaction enablement.** See [TriggerArea](addons/callboard/core/trigger_area.gd) and [InteractionResolver](addons/callboard/core/interaction_resolver.gd).
+- [x] **Support dynamic prompts and interaction enablement.** See [TriggerArea](addons/callboard/core/trigger_area.gd) and [InteractionResolver](addons/callboard/core/interaction_resolver.gd).
   - [x] The resolver reevaluates eligibility, notices changes to the configured prompt on refresh, and resolves again before dispatch. Triggers expose prompt text, icon, and priority.
-  - [ ] Let authors derive prompt text/icon or availability from Blackboard state and host-provided context such as the held item. Add `set_interaction_enabled` and ensure disabling a target updates the resolver/prompt while the actor remains in range.
+  - [x] Let authors derive prompt text/icon and availability from Blackboard state or host-provided context such as the held item. Keep one-argument eligibility callbacks compatible, and refresh the selected target and prompt immediately when `set_interaction_enabled` changes while the actor remains in range.
 
 - [ ] **Add cancellation-safe input and camera control.**
   - [ ] Define generic `lock_input` and `release_input` requests with ownership, support for overlapping locks, and automatic release on cancellation or Stage teardown. Use host adapters for projects with their own controls.

@@ -257,29 +257,37 @@ Add `StageRestorationBinding` resources to a StageDefinition. `VISIBILITY` maps 
 
 `TriggerArea` defaults to collision layer `TRIGGER` and mask `PLAYER | COMPANION`, preserving the addon's previous runtime behavior. These defaults are set before scene data is applied, so authored `collision_layer` and `collision_mask` values remain in effect. Set `collision_mask_override` to a nonnegative mask to replace the authored mask at runtime; `-1` means no override, and `0` intentionally disables all collision-mask matches. The override does not change the collision layer. Use [`StageCollisionLayers`](../core/collision_layers.gd) for the standard bit masks, or call `stage.fire()` directly from your own interaction system.
 
-Interactable triggers expose `prompt_text`, optional `prompt_icon`, and `interaction_priority`. The resolver chooses the eligible trigger with the highest priority, then the shortest distance from the actor, then the lexicographically first node path. It polls while the actor remains in range, so host state can enable or disable an interaction without an area exit/re-entry.
+Interactable triggers expose `prompt_text`, optional `prompt_icon`, and `interaction_priority`. The resolver chooses the eligible trigger with the highest priority, then the shortest distance from the actor, then the lexicographically first node path. It polls while the actor remains in range, so Blackboard or host state can update availability and prompt values without an area exit/re-entry. `set_interaction_enabled(false)` emits a state-change signal that refreshes connected resolvers immediately.
 
 ```gdscript
 var resolver := InteractionResolver.new()
 add_child(resolver)
-resolver.configure(actor, reach_area)
+resolver.configure(actor, reach_area, func(interacting_actor: Node) -> Dictionary:
+    return {"held_item": inventory.held_item_id(interacting_actor)}
+)
 resolver.prompt_changed.connect(_show_prompt) # (text, icon, priority)
 resolver.selected_trigger_changed.connect(_refresh_selection)
 
-# For example, a host-owned inventory rule can decide whether this trigger is available.
-trigger.set_eligibility_hook(func(interacting_actor: Node) -> bool:
-    return inventory.has("permit")
+# Callbacks can read live context and captured Blackboard state.
+trigger.set_eligibility_hook(func(interacting_actor: Node, context: Dictionary) -> bool:
+    return context.get("held_item") == &"permit" and stage.get_var(&"permit_stamped")
+)
+trigger.set_prompt_provider(func(interacting_actor: Node, context: Dictionary) -> Dictionary:
+    return {"text": "Use %s" % context.get("held_item", ""), "icon": trigger.prompt_icon}
 )
 trigger.set_interaction_handler(func(interacting_actor: Node, context: Dictionary) -> Dictionary:
     inventory.erase("permit")
     return {"accepted": true, "payload": {"accepted": true, "item": "permit"}}
 )
 var result: Dictionary = resolver.interact({"source": "door_ui"})
+trigger.set_interaction_enabled(false) # immediately updates the in-range prompt
 ```
 
-`set_eligibility_hook()` receives the interacting actor. It controls whether the trigger is offered. Override `is_interaction_eligible(actor)` for a reusable trigger subtype. The prompt signal carries the displayed text, icon, and priority; read `resolver.selected_trigger` when the subscriber needs the trigger itself. `selected_trigger_changed` has no arguments and fires when selection changes.
+`InteractionResolver.configure(actor, reach_area, context_provider)` accepts an optional Callable that receives the actor and returns a Dictionary. You can also call `set_context_provider()` later. The returned context is reevaluated during each resolver refresh and is passed to eligibility and prompt callbacks; explicit context passed to `refresh()` or `interact()` overrides provider fields. A one-argument `set_eligibility_hook(actor)` remains supported; the two-argument form receives `(actor, context)`. The eligibility hook controls whether a trigger is offered. Override `is_interaction_eligible(actor)` for reusable actor-only eligibility. `set_prompt_provider()` receives `(actor, context)` and returns a Dictionary with optional `text: String` and `icon: Texture2D` fields; omitted fields use `prompt_text` and `prompt_icon`. The prompt signal carries the resolved text, icon, and priority; read `resolver.selected_trigger` when the subscriber needs the trigger itself. `selected_trigger_changed` has no arguments and fires when selection changes.
 
-The interaction context begins as a deep copy of the trigger's `ctx`, then caller context values override matching keys. `set_interaction_handler()` or an override of `handle_interaction(actor, context)` returns `{accepted: bool, payload: Dictionary}`. Accepted results dispatch the trigger's `event`; rejected results dispatch `rejected_event` if configured. The returned result dictionary includes `accepted`, dispatched `event`, and `payload`. `interaction_completed(actor, result)` on the trigger and `interaction_completed(trigger, result)` on the resolver report the result. Inventory checks, item consumption, and other game policy stay in the host handler.
+Use `set_interaction_enabled(false)` to remove a target while it remains overlapped. The resolver subscribes to trigger state changes and immediately selects the next eligible target or clears the prompt. Blackboard- and inventory-backed eligibility can also change between frames; the resolver's normal refresh polling picks up those updates. Callbacks should be side-effect free because prompt and eligibility callbacks can be evaluated repeatedly.
+
+Interaction handlers receive a deep copy of trigger `ctx`, overlaid with the resolver context provider's values and then the explicit context passed by the caller. `set_interaction_handler()` or an override of `handle_interaction(actor, context)` returns `{accepted: bool, payload: Dictionary}`. Accepted results dispatch the trigger's `event`; rejected results dispatch `rejected_event` if configured. The returned result dictionary includes `accepted`, dispatched `event`, and `payload`. `interaction_completed(actor, result)` on the trigger and `interaction_completed(trigger, result)` on the resolver report the result. Inventory checks, item consumption, and other game policy stay in the host handler.
 
 ### DeliveryTarget
 

@@ -60,18 +60,25 @@ Use `InteractionResolver` to choose one prompt and one interactable trigger from
 
 ```gdscript
 resolver.prompt_changed.connect(_show_prompt) # text, icon, priority
+resolver.set_context_provider(func(actor: Node) -> Dictionary:
+    return {"held_item": inventory.held_item_id(actor)}
+)
 resolver.interact({"source": "inventory_ui"})
 
-trigger.set_eligibility_hook(func(actor: Node) -> bool:
-    return inventory.has("permit")
+trigger.set_eligibility_hook(func(actor: Node, context: Dictionary) -> bool:
+    return context.get("held_item") == &"permit" and stage.get_var(&"permit_stamped")
+)
+trigger.set_prompt_provider(func(actor: Node, context: Dictionary) -> Dictionary:
+    return {"text": "Use %s" % context.get("held_item", ""), "icon": trigger.prompt_icon}
 )
 trigger.set_interaction_handler(func(actor: Node, context: Dictionary) -> Dictionary:
     inventory.erase("permit")
     return {"accepted": true, "payload": {"accepted": true}}
 )
+trigger.set_interaction_enabled(false) # immediately refreshes an in-range resolver
 ```
 
-The host's eligibility hook decides whether an option is offered. Its interaction handler decides acceptance, performs any inventory policy, and supplies the Call payload. Accepted outcomes dispatch `event`; rejected outcomes can dispatch `rejected_event`. See the [TriggerArea and InteractionResolver API](addons/callboard/docs/api.md#triggerarea) for setup and signals.
+The host's eligibility and prompt providers decide whether an option is offered and what it displays. They can read Blackboard values and the resolver's current host context, such as the held item. The interaction handler decides acceptance, performs inventory policy, and supplies the Call payload. Accepted outcomes dispatch `event`; rejected outcomes can dispatch `rejected_event`. See the [TriggerArea and InteractionResolver API](addons/callboard/docs/api.md#triggerarea) for setup and signals.
 
 For reusable item handoffs, `DeliveryTarget` accepts host inventory callbacks for reading, atomically consuming, and returning a held item. It tracks target capacity and reports accepted or rejected outcomes without storing inventory itself. Hosts can expose inventory facts to rules through typed Boolean Blackboard variables. See the [DeliveryTarget API](addons/callboard/docs/api.md#deliverytarget).
 

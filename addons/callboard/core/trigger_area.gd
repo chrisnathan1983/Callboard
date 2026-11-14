@@ -7,6 +7,7 @@ class_name TriggerArea extends Area3D
 enum Mode { ENTER, INTERACT }
 
 signal interaction_completed(actor: Node, result: Dictionary)
+signal interaction_state_changed
 
 const LAYER_TRIGGER := StageCollisionLayers.TRIGGER
 const LAYER_PLAYER := StageCollisionLayers.PLAYER
@@ -27,9 +28,16 @@ const LAYER_COMPANION := StageCollisionLayers.COMPANION
 @export_multiline var prompt_text := "Interact"
 @export var prompt_icon: Texture2D
 @export var interaction_priority := 0
+@export var interaction_enabled := true:
+	set(value):
+		if interaction_enabled == value:
+			return
+		interaction_enabled = value
+		interaction_state_changed.emit()
 var _stage: Stage
 var _eligibility_hook: Callable
 var _interaction_handler: Callable
+var _prompt_provider: Callable
 var _active_contact_ids: Dictionary = {}
 
 func _init() -> void:
@@ -87,19 +95,54 @@ func _matches_trigger_groups(body: Node) -> bool:
 ## Set a game-owned predicate; it receives the actor and can inspect inventory or other host state.
 func set_eligibility_hook(hook: Callable) -> void:
 	_eligibility_hook = hook
+	interaction_state_changed.emit()
+
+## Provide a dynamic prompt dictionary: {"text": String, "icon": Texture2D}.
+## The callback receives (actor, context); omitted fields use authored defaults.
+func set_prompt_provider(provider: Callable) -> void:
+	_prompt_provider = provider
+	interaction_state_changed.emit()
+
+## Enable or disable this INTERACT target without requiring an overlap transition.
+func set_interaction_enabled(enabled: bool) -> void:
+	interaction_enabled = enabled
 
 ## Set a game-owned handler that returns `{accepted: bool, payload: Dictionary}`.
 func set_interaction_handler(handler: Callable) -> void:
 	_interaction_handler = handler
 
-func can_interact(actor: Node) -> bool:
-	if mode != Mode.INTERACT or not is_inside_tree():
+func can_interact(actor: Node, interaction_context: Dictionary = {}) -> bool:
+	if mode != Mode.INTERACT or not interaction_enabled or not is_inside_tree():
 		return false
 	if is_instance_valid(_stage) and not _stage.accepts_calls():
 		return false
-	if _eligibility_hook.is_valid() and not bool(_eligibility_hook.call(actor)):
+	if _eligibility_hook.is_valid() and not bool(_call_context_hook(_eligibility_hook, actor, interaction_context)):
 		return false
 	return is_interaction_eligible(actor)
+
+## Resolve dynamic prompt values using host context and current Stage state.
+func resolve_prompt(actor: Node, interaction_context: Dictionary = {}) -> Dictionary:
+	var resolved := {"text": prompt_text, "icon": prompt_icon}
+	if not _prompt_provider.is_valid():
+		return resolved
+	var supplied: Variant = _prompt_provider.call(actor, interaction_context.duplicate(true))
+	if not supplied is Dictionary:
+		push_warning("TriggerArea '%s' prompt provider must return a Dictionary." % name)
+		return resolved
+	if supplied.has("text"):
+		if supplied["text"] is String:
+			resolved["text"] = supplied["text"]
+		else:
+			push_warning("TriggerArea '%s' prompt text must be a String." % name)
+	if supplied.has("icon"):
+		if supplied["icon"] == null or supplied["icon"] is Texture2D:
+			resolved["icon"] = supplied["icon"]
+		else:
+			push_warning("TriggerArea '%s' prompt icon must be a Texture2D or null." % name)
+	return resolved
+
+func _call_context_hook(hook: Callable, actor: Node, interaction_context: Dictionary) -> Variant:
+	return hook.call(actor, interaction_context.duplicate(true)) if hook.get_argument_count() >= 2 else hook.call(actor)
 
 ## Override in a TriggerArea subclass for scene-specific eligibility.
 func is_interaction_eligible(_actor: Node) -> bool:
@@ -111,10 +154,10 @@ func handle_interaction(_actor: Node, interaction_context: Dictionary) -> Dictio
 
 ## Dispatch through the same accepted/rejected outcome path used by InteractionResolver.
 func interact(actor: Node = null, interaction_context: Dictionary = {}) -> Dictionary:
-	if not can_interact(actor):
-		return {"accepted": false, "event": &"", "payload": {}}
 	var context := ctx.duplicate(true)
 	context.merge(interaction_context, true)
+	if not can_interact(actor, context):
+		return {"accepted": false, "event": &"", "payload": {}}
 	var outcome: Variant = _interaction_handler.call(actor, context) if _interaction_handler.is_valid() else handle_interaction(actor, context)
 	if not outcome is Dictionary:
 		push_warning("TriggerArea '%s' handler must return a Dictionary." % name)

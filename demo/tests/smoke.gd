@@ -134,6 +134,44 @@ func _test_player_and_bump(stage: Stage, fired: Array[StringName]) -> bool:
 	resolver.refresh()
 	ok = _check("an available higher-priority trigger becomes selected again without leaving the range",
 		resolver.selected_trigger == farther and prompt_changes[-1] == "Far choice") and ok
+	var held_item := [&"permit"]
+	stage.bb.define(&"test_prompt_enabled", &"local", true)
+	resolver.set_context_provider(func(_actor: Node) -> Dictionary:
+		return {"held_item": held_item[0]})
+	farther.set_eligibility_hook(func(actor: Node, context: Dictionary) -> bool:
+		return actor == player and context.get("held_item") == &"permit" \
+			and stage.get_var(&"test_prompt_enabled"))
+	farther.set_prompt_provider(func(_actor: Node, context: Dictionary) -> Dictionary:
+		var text := "Hand over %s" % context.get("held_item", "item") \
+			if stage.get_var(&"test_prompt_enabled") else "Not accepting items"
+		return {"text": text, "icon": null})
+	resolver.refresh()
+	var held_prompt := resolver.selected_trigger == farther and resolver._prompt_text == "Hand over permit"
+	held_item[0] = &"hammer"
+	resolver.refresh()
+	var held_item_disables_option := resolver.selected_trigger == nearest
+	held_item[0] = &"permit"
+	stage.write_var(&"test_prompt_enabled", false)
+	resolver.refresh()
+	var blackboard_disables_option := resolver.selected_trigger == nearest
+	stage.write_var(&"test_prompt_enabled", true)
+	resolver.refresh()
+	var blackboard_updates_prompt := resolver.selected_trigger == farther \
+		and resolver._prompt_text == "Hand over permit"
+	farther.set_interaction_enabled(false)
+	var disabled_updates_immediately := resolver.selected_trigger == nearest \
+		and resolver._prompt_text == "Nearby choice"
+	farther.set_interaction_enabled(true)
+	var enabled_updates_immediately := resolver.selected_trigger == farther \
+		and resolver._prompt_text == "Hand over permit"
+	resolver.set_context_provider(Callable())
+	farther.set_prompt_provider(Callable())
+	farther.set_eligibility_hook(func(actor: Node) -> bool: return actor == player and far_available[0])
+	ok = _check("dynamic prompt and eligibility hooks read Blackboard and held-item context while in range",
+		held_prompt and held_item_disables_option and blackboard_disables_option
+		and blackboard_updates_prompt) and ok
+	ok = _check("set_interaction_enabled immediately refreshes the selected target and prompt",
+		disabled_updates_immediately and enabled_updates_immediately) and ok
 	far_available[0] = false
 	resolver.refresh()
 	var tie_paths: Array[String] = [String(nearest.get_path()), String(tie.get_path())]
