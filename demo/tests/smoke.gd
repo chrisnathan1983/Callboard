@@ -371,7 +371,12 @@ func _test_game_scene() -> bool:
 		return false
 	var game := packed.instantiate() as GameManager
 	root.add_child(game)
-	await process_frame
+	var deadline := Time.get_ticks_msec() + 5000
+	while game.stage == null and Time.get_ticks_msec() < deadline:
+		await process_frame
+	if not _check("the manager prewarms and activates the initial Stage", game.stage != null and game.stage.is_active):
+		game.queue_free()
+		return false
 	var hud := game.get_node("HUD") as GameHud
 	game.stage.scored.emit(25)
 	await process_frame

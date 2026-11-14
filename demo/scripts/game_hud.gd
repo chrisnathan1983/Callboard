@@ -119,6 +119,9 @@ func _ready() -> void:
 		_board_button = _button("Callboard · F1", _toggle_board)
 		_actions.add_child(_board_button)
 
+func set_stage_loading(message: String) -> void:
+	_objective_text.text = message
+
 func bind_stage(stage: Stage) -> void:
 	if board_panel:
 		board_panel.bind_stage(stage)

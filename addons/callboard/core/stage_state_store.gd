@@ -2,6 +2,11 @@
 class_name StageStateStore extends Resource
 ## Shared persistence for independently loaded Stage instances.
 
+## Elapsed resource load time, followed by main-thread instantiation and attachment.
+## Attachment includes the Stage's build and restoration callbacks.
+signal stage_load_profiled(instance_id: StringName, resource_usec: int,
+		instantiate_usec: int, attach_usec: int)
+
 @export var stage_states: Dictionary = {}
 @export var shared_values: Dictionary = {}
 ## Runtime-only state for the current session. It is intentionally not exported.
@@ -9,6 +14,7 @@ var session_values: Dictionary = {}
 
 var _shared_boards: Array[WeakRef] = []
 var _loaded_ids: Dictionary = {}
+var _pending_loads: Dictionary[StringName, RefCounted] = {}
 var _shared_write_queue: Array[Dictionary] = []
 var _dispatching_shared_writes := false
 var _cross_stage_dispatch_frame := -1
@@ -37,8 +43,8 @@ func attach(stage: Stage, instance_id: StringName) -> bool:
 	if stage.is_built or stage.bb != null or stage.engine != null:
 		push_warning("Cannot attach a StageStateStore after Stage runtime services have been initialized. Attach before build or adding the Stage to the tree.")
 		return false
-	if _loaded_ids.has(instance_id) and is_instance_valid(_loaded_ids[instance_id]):
-		push_warning("Stage instance ID '%s' is already loaded." % instance_id)
+	if _id_is_loaded_or_pending(instance_id):
+		push_warning("Stage instance ID '%s' is already loaded or pending." % instance_id)
 		return false
 	var state := state_for(instance_id)
 	if not stage.attach_state_store(self, instance_id, state["saved"], state["fired"], shared_values, session_values):
@@ -50,21 +56,138 @@ func attach(stage: Stage, instance_id: StringName) -> bool:
 func load_stage(scene: PackedScene, instance_id: StringName, parent: Node) -> Stage:
 	if scene == null or parent == null:
 		return null
-	var stage := scene.instantiate() as Stage
+	var stage := _instantiate_stage(scene)
 	if stage == null:
-		push_error("StageStateStore scene must have a Stage root.")
 		return null
+	return _mount_stage(stage, instance_id, parent)
+
+## Load a PackedScene without creating a Stage. Hold the returned resource
+## while it is useful, then pass it to load_stage() or release the reference.
+func prewarm_stage_scene(scene_path: String, tree: SceneTree) -> PackedScene:
+	if tree == null:
+		push_warning("StageStateStore prewarming requires a SceneTree.")
+		return null
+	await tree.process_frame
+	return await _read_stage_scene(scene_path, tree)
+
+## Reserve an instance ID, load its resource, then instantiate and attach on
+## the main thread. The host activates managed Stages after binding listeners.
+func load_stage_async(scene_path: String, instance_id: StringName, parent: Node) -> Stage:
+	if instance_id.is_empty() or not is_instance_valid(parent) or not parent.is_inside_tree() \
+			or parent.is_queued_for_deletion():
+		push_warning("StageStateStore asynchronous loading requires a stable ID and a live parent in the tree.")
+		return null
+	if _id_is_loaded_or_pending(instance_id):
+		push_warning("Stage instance ID '%s' is already loaded or pending." % instance_id)
+		return null
+
+	var request := RefCounted.new()
+	_pending_loads[instance_id] = request
+	var parent_ref := weakref(parent)
+	var tree := parent.get_tree()
+	await tree.process_frame
+	if _load_parent(instance_id, request, parent_ref, tree) == null:
+		return null
+
+	var resource_started := Time.get_ticks_usec()
+	var scene := await _read_stage_scene(scene_path, tree)
+	var resource_usec := Time.get_ticks_usec() - resource_started
+	if _load_parent(instance_id, request, parent_ref, tree) == null:
+		return null
+	if scene == null:
+		_pending_loads.erase(instance_id)
+		return null
+
+	# Separate resource loading from tree construction, especially on Web.
+	await tree.process_frame
+	if _load_parent(instance_id, request, parent_ref, tree) == null:
+		return null
+	var instantiate_started := Time.get_ticks_usec()
+	var stage := _instantiate_stage(scene)
+	var instantiate_usec := Time.get_ticks_usec() - instantiate_started
+	var mount_parent := _load_parent(instance_id, request, parent_ref, tree)
+	if mount_parent == null:
+		if stage != null:
+			stage.free()
+		return null
+	_pending_loads.erase(instance_id)
+	if stage == null:
+		return null
+
+	var attach_started := Time.get_ticks_usec()
+	stage = _mount_stage(stage, instance_id, mount_parent)
+	if stage != null:
+		stage_load_profiled.emit(instance_id, resource_usec, instantiate_usec,
+			Time.get_ticks_usec() - attach_started)
+	return stage
+
+## Release the reservation immediately. A native resource read already in
+## progress is collected when it finishes, but this request cannot mount it.
+func cancel_stage_load(instance_id: StringName) -> bool:
+	return _pending_loads.erase(instance_id)
+
+func _id_is_loaded_or_pending(instance_id: StringName) -> bool:
+	return _pending_loads.has(instance_id) or is_instance_valid(_loaded_ids.get(instance_id))
+
+func _load_parent(instance_id: StringName, request: RefCounted, parent_ref: WeakRef,
+		tree: SceneTree) -> Node:
+	if _pending_loads.get(instance_id) != request:
+		return null
+	var parent := parent_ref.get_ref() as Node
+	if parent == null or parent.is_queued_for_deletion() or not parent.is_inside_tree() \
+			or parent.get_tree() != tree:
+		_pending_loads.erase(instance_id)
+		return null
+	return parent
+
+func _read_stage_scene(scene_path: String, tree: SceneTree) -> PackedScene:
+	if scene_path.is_empty() or not ResourceLoader.exists(scene_path, "PackedScene"):
+		push_warning("StageStateStore could not find Stage scene '%s'." % scene_path)
+		return null
+	var scene: PackedScene
+	if OS.has_feature("web"):
+		# Stock single-threaded exports cannot move this work off the main thread.
+		scene = ResourceLoader.load(scene_path, "PackedScene") as PackedScene
+	else:
+		var error := ResourceLoader.load_threaded_request(scene_path, "PackedScene")
+		if error != OK:
+			push_warning("StageStateStore could not request '%s': %s." % [scene_path, error_string(error)])
+			return null
+		var status := ResourceLoader.load_threaded_get_status(scene_path)
+		while status == ResourceLoader.THREAD_LOAD_IN_PROGRESS:
+			await tree.process_frame
+			status = ResourceLoader.load_threaded_get_status(scene_path)
+		# Collect completed and failed requests so Godot releases its request token.
+		if status != ResourceLoader.THREAD_LOAD_INVALID_RESOURCE:
+			scene = ResourceLoader.load_threaded_get(scene_path) as PackedScene
+	if scene == null:
+		push_warning("StageStateStore could not load '%s' as a PackedScene." % scene_path)
+	return scene
+
+func _instantiate_stage(scene: PackedScene) -> Stage:
+	var node := scene.instantiate()
+	if node is Stage:
+		return node
+	if node != null:
+		node.free()
+	push_error("StageStateStore scene must have a Stage root.")
+	return null
+
+func _mount_stage(stage: Stage, instance_id: StringName, parent: Node) -> Stage:
 	if not attach(stage, instance_id):
 		stage.free()
 		return null
 	parent.add_child(stage)
+	if not is_instance_valid(stage) or stage.get_parent() != parent or stage.is_queued_for_deletion():
+		release_stage(stage if is_instance_valid(stage) else null)
+		return null
 	return stage
 
 func unload_stage(stage: Stage) -> void:
 	if stage == null or not is_instance_valid(stage):
 		return
 	stage.deactivate()
-	_loaded_ids.erase(stage.stage_instance_id)
+	release_stage(stage)
 	if stage.get_parent():
 		stage.get_parent().remove_child(stage)
 	stage.queue_free()

@@ -4,12 +4,13 @@ class_name GameManager extends Node3D
 const MAIN_OFFICE := &"city_hall"
 const ANNEX := &"annex"
 
-@export var stage_scene: PackedScene
+@export_file("*.tscn") var stage_scene_path: String
 
 var state_store := StageStateStore.new()
 var stage: Stage
 var office_id := MAIN_OFFICE
 var score := 0
+var _stage_scene: PackedScene
 var _offices: Dictionary[StringName, Stage] = {}
 @onready var hud: GameHud = $HUD
 @onready var _player: Player = $WorldManager/Player
@@ -17,6 +18,16 @@ var _offices: Dictionary[StringName, Stage] = {}
 func _ready() -> void:
 	hud.manager = self
 	hud.bind_player(_player)
+	hud.set_stage_loading("Loading City Hall…")
+	# Load only the resource here. Retaining it lets both offices reuse it
+	# for swaps and reloads. On Web, prewarming yields before the resource
+	# read, which still runs on the main thread.
+	_stage_scene = await state_store.prewarm_stage_scene(stage_scene_path, get_tree())
+	if is_queued_for_deletion() or not is_inside_tree():
+		return
+	if _stage_scene == null:
+		hud.set_stage_loading("City Hall could not be loaded.")
+		return
 	_open_office()
 
 func _get_office(id: StringName) -> Stage:
@@ -25,7 +36,7 @@ func _get_office(id: StringName) -> Stage:
 	# Use a stable ID for each logical office even though both use the same scene.
 	# The store attaches the saved Blackboard values and rule latches before
 	# _ready() builds the graph and applies the StageDefinition's restoration bindings.
-	var loaded := state_store.load_stage(stage_scene, id, self)
+	var loaded := state_store.load_stage(_stage_scene, id, self)
 	if loaded == null:
 		return null
 	loaded.hide()
@@ -60,6 +71,8 @@ func office_name() -> String:
 	return "City Hall" if office_id == MAIN_OFFICE else "City Hall Annex"
 
 func clear_stage(reset: bool) -> void:
+	if stage == null:
+		return
 	# Reload exercises scene restoration. Start fresh clears both offices so
 	# the shared total and the sum of the saved delivery counters stay in sync.
 	if reset:

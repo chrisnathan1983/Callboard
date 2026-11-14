@@ -613,6 +613,7 @@ func _initialize() -> void:
 	ok = _test_retriggered_light() and ok
 	ok = await _test_light_from_restarted_run() and ok
 	ok = await _test_managed_stages_and_restoration() and ok
+	ok = await _test_async_stage_loading() and ok
 	print("UNIT: ", "PASS" if ok else "FAIL")
 	quit(0 if ok else 1)
 
@@ -2482,6 +2483,66 @@ func _test_core_verb_branch_factories() -> bool:
 			idle_sequence_ok) \
 		and _check("script-created random branches remain cancellable with their owning rule",
 			cancelled_branch_work.is_empty())
+
+func _test_async_stage_loading() -> bool:
+	const SCENE := "res://addons/callboard/tests/fixtures/assigned_prop_stage.tscn"
+	var store := StageStateStore.new()
+	var parent := Node.new()
+	root.add_child(parent)
+	var timings: Dictionary = {}
+	store.stage_load_profiled.connect(func(id: StringName, resource: int, instantiate: int, attach: int) -> void:
+		timings[id] = [resource, instantiate, attach])
+	store.state_for(&"first")["saved"][&"marker"] = 17
+
+	var cancelled: Array[Stage] = []
+	var start_cancelled := func() -> void:
+		cancelled.append(await store.load_stage_async(SCENE, &"first", parent))
+	start_cancelled.call()
+	var duplicate := await store.load_stage_async(SCENE, &"first", parent)
+	var ok := _check("pending Stage loads reserve the stable ID before yielding",
+		duplicate == null and parent.get_child_count() == 0
+		and store.cancel_stage_load(&"first") and not store.cancel_stage_load(&"first"))
+
+	# Retry the cancelled ID immediately and share one path with another instance.
+	var concurrent: Array[Stage] = []
+	var start_neighbor := func() -> void:
+		concurrent.append(await store.load_stage_async(SCENE, &"neighbor", parent))
+	start_neighbor.call()
+	var stage := await store.load_stage_async(SCENE, &"first", parent)
+	var deadline := Time.get_ticks_msec() + 5000
+	while concurrent.is_empty() and Time.get_ticks_msec() < deadline:
+		await process_frame
+	ok = _check("cancellation leaves the replacement and concurrent same-path load intact",
+		cancelled == [null] and concurrent.size() == 1 and concurrent[0] != null
+		and stage != null and stage != concurrent[0] and parent.get_child_count() == 2) and ok
+	ok = _check("asynchronous attachment injects state and reports each phase",
+		stage != null and stage.is_built and stage.saved_vars.get(&"marker") == 17
+		and timings.has(&"first") and timings.has(&"neighbor")) and ok
+	var loaded_duplicate := await store.load_stage_async(SCENE, &"first", parent)
+	ok = _check("an already loaded Stage ID is rejected", loaded_duplicate == null) and ok
+
+	var missing := await store.load_stage_async("res://nonexistent.tscn", &"retry", parent)
+	var prewarmed := await store.prewarm_stage_scene(SCENE, self)
+	ok = _check("a missing scene creates no state, and prewarming creates no instance",
+		missing == null and not store.stage_states.has(&"retry")
+		and prewarmed != null and parent.get_child_count() == 2) and ok
+	var retry := store.load_stage(prewarmed, &"retry", parent)
+	ok = _check("a failed request releases its ID for a prewarmed load", retry != null) and ok
+
+	var departing := Node.new()
+	root.add_child(departing)
+	var abandoned: Array[Stage] = []
+	var start_abandoned := func() -> void:
+		abandoned.append(await store.load_stage_async(SCENE, &"departing", departing))
+	start_abandoned.call()
+	departing.free()
+	await process_frame
+	ok = _check("a freed parent cancels mounting and releases the reservation",
+		abandoned == [null] and not store.stage_states.has(&"departing")
+		and not store.cancel_stage_load(&"departing")) and ok
+	parent.queue_free()
+	await process_frame
+	return ok
 
 func _check(label: String, condition: bool) -> bool:
 	print(("  ok   " if condition else "  FAIL ") + label)

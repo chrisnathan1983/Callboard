@@ -141,9 +141,9 @@ The first five items retain the high priority assigned in `TODO.md`.
   - [x] Add light energy and color bindings, Boolean audio playback bindings for AudioStreamPlayer, AudioStreamPlayer2D, and AudioStreamPlayer3D, and continuous particle-emitting bindings. Audio playback is stopped by default during restoration; explicit replay is available for stateful audio. One-shot particle systems are rejected.
   - [x] Validate key scope and type, target compatibility, and required audio streams; preserve binding settings through serialization. Restoration rebuilds continuous state and avoids replaying transient audio or particle cues by default.
 
-- [ ] **Support asynchronous Stage loading and prewarming.** See [`StageStateStore.load_stage()`](addons/callboard/core/stage_state_store.gd).
-  - [ ] Add threaded resource loading and a prewarm path while keeping scene instantiation, attachment, and tree changes on the main thread. The existing API takes a `PackedScene` and instantiates and parents it synchronously.
-  - [ ] Define cancellation, duplicate requests, error reporting, and activation handoff. Measure loading and instantiation separately so prewarming addresses the work that actually causes a frame hitch.
+- [x] **Support asynchronous Stage loading and prewarming.** See [`StageStateStore`](addons/callboard/core/stage_state_store.gd).
+  - [x] Add path-based loading and prewarming. Native builds use threaded resource loading. Single-threaded Web builds yield before reading the resource on the main thread. Scene instantiation and attachment run on the main thread.
+  - [x] Reserve stable IDs for pending requests, release them on cancellation or failure, and return successfully attached Stages dormant for host-controlled activation. Report resource load, instantiation, and attachment timings separately.
 
 ## 4. Interactions, host integration, and staging
 
