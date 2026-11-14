@@ -103,12 +103,12 @@ The first five items retain the high priority assigned in `TODO.md`.
   - [x] Validate conditional guards, default paths, and supported operand types. Show branch conditions in board tooltips and selected outcomes in the live trace.
   - [x] Expose `CoreVerbs.branch_if()` and `CoreVerbs.choose_random()` as script-facing entry points backed by `Step.conditional()` and `Step.random_choice()`. Preserve branch order, cancellation, and seeded selection. Cover conditional dialogue responses and repeatable selection across a pool of eight idle animations.
 
-- [ ] **Expand guard expressions.** See [GuardExpression](addons/callboard/core/guard_expression.gd) and [RuleValidator](addons/callboard/core/rule_validator.gd).
+- [x] **Expand guard expressions.** See [GuardExpression](addons/callboard/core/guard_expression.gd) and [RuleValidator](addons/callboard/core/rule_validator.gd).
   - [x] Existing guards support Blackboard truthiness and numeric comparisons with literals, plus typed payload comparisons and `has()`/`missing()` checks.
-  - [ ] Add OR and grouping to the guard parser with `any(sensor_active, override_enabled)`.
-  - [ ] Support key-to-key comparisons such as `completed_count >= required_count`, resolving both keys through the Blackboard schema and applying the operand type rules from §1.
-  - [ ] Support `String` and `StringName` Blackboard equality and inequality for named states, such as `operating_mode == "standby"`. Blackboard storage already accepts string defaults.
-  - [ ] Keep parsing, type checking, rename/reference tracking, overlap analysis, and the guard editor in sync. Use the numeric and unknown-type rules from §1.
+  - [x] Add OR and grouping to the guard parser with `any(sensor_active, override_enabled)`, `and`/`or` operators, and parentheses.
+  - [x] Support key-to-key comparisons such as `completed_count >= required_count`, resolving both keys through the Blackboard schema and applying the operand type rules from §1.
+  - [x] Support `String` and `StringName` Blackboard equality and inequality for named states, such as `operating_mode == "standby"`. Blackboard storage already accepts string defaults.
+  - [x] Keep parsing, type checking, rename/reference tracking, overlap analysis, and the guard editor in sync. Use the numeric and unknown-type rules from §1. Compound formulas remain conservative in overlap analysis when exclusivity cannot be proved.
 
 - [ ] **Add typed `toggle_var` and `reset_var`.** See [CoreVerbs](addons/callboard/core/core_verbs.gd) and [Blackboard](addons/callboard/core/blackboard.gd).
   - [x] `set_var` and `add_var` handle declared keys; the Blackboard schema retains their declared defaults.

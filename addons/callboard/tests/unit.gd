@@ -353,8 +353,63 @@ func _initialize() -> void:
 	var float_semantics := (GuardExpression.evaluate(integer_guards, &"float_value == 1.0000001")
 		and GuardExpression.evaluate(integer_guards, &"float_value == 1")
 		and GuardExpression.evaluate(integer_guards, &"float_value < 2"))
+	var extended_guards := Blackboard.new()
+	extended_guards.define(&"sensor_active", &"local", false)
+	extended_guards.define(&"override_enabled", &"local", true)
+	extended_guards.define(&"completed_count", &"local", 5)
+	extended_guards.define(&"required_count", &"local", 5)
+	extended_guards.define(&"other_count", &"local", 6)
+	extended_guards.define(&"named_mode", &"local", &"standby")
+	extended_guards.define(&"text_mode", &"local", "standby")
+	var grouped_guard := &"(sensor_active or override_enabled) and completed_count >= required_count"
+	var extended_runtime := GuardExpression.evaluate(extended_guards, &"any(sensor_active, override_enabled)") \
+		and GuardExpression.evaluate(extended_guards, grouped_guard) \
+		and not GuardExpression.evaluate(extended_guards, &"(sensor_active or override_enabled) and completed_count > required_count") \
+		and GuardExpression.evaluate(extended_guards, &"completed_count != other_count") \
+		and GuardExpression.evaluate(extended_guards, &"named_mode == \"standby\"") \
+		and GuardExpression.evaluate(extended_guards, &"named_mode == &\"standby\"") \
+		and GuardExpression.evaluate(extended_guards, &"text_mode == named_mode") \
+		and not GuardExpression.evaluate(extended_guards, &"named_mode > \"standby\"")
+	var renamed_guard := GuardExpression.rename_key(String(grouped_guard), "required_count", "quota_required")
+	var guard_refs := GuardExpression.referenced_keys(grouped_guard)
+	var renamed_refs := GuardExpression.referenced_keys(StringName(renamed_guard))
+	var grouped_wait := CoreVerbs.new(StepContext.new(extended_guards, null, null, Callable())).wait_until(grouped_guard)
+	var rename_draft := GraphDraft.new()
+	var rename_variable := VariableData.new()
+	rename_variable.key = &"required_count"
+	rename_variable.default_value = 5
+	var rename_rule := RuleData.new()
+	rename_rule.id = &"renamed_group_guard"
+	rename_rule.requires = PackedStringArray([String(grouped_guard)])
+	rename_draft.variables = [rename_variable]
+	rename_draft.rules = [rename_rule]
+	AuthoredData.rename_key(rename_draft, "required_count", "quota_required")
 	ok = _check("integer payload and Blackboard comparisons preserve exact integer values", exact_ints) and ok
 	ok = _check("float equality remains approximate and mixed numeric guards compare numerically", float_semantics) and ok
+	ok = _check("guard expressions support any(), boolean grouping, key-to-key comparisons, and String/StringName equality",
+		extended_runtime) and ok
+	ok = _check("guard reference discovery and Blackboard renames traverse grouped and key-to-key expressions",
+		guard_refs == [&"sensor_active", &"override_enabled", &"completed_count", &"required_count"]
+		and renamed_refs == [&"sensor_active", &"override_enabled", &"completed_count", &"quota_required"]
+		and GuardExpression.referenced_payload_fields(&"any(payload.action == \"confirm\", has(payload.count))") == [&"action", &"count"]
+		and grouped_wait.reads == guard_refs
+		and rename_variable.key == &"quota_required"
+		and GuardExpression.referenced_keys(rename_rule.requires[0]).has(&"quota_required")) and ok
+	var extended_rule := Rule.new(&"extended_guard_types", &"guard_check")
+	extended_rule.requires = [grouped_guard, &"named_mode == \"standby\"", &"text_mode == named_mode"]
+	extended_rule.steps = [Step.new(func(_c: Dictionary) -> void: pass)]
+	var extended_type_validation := RuleValidator.check([extended_rule], extended_guards,
+		[&"guard_check"], [&"sensor_active", &"override_enabled", &"completed_count",
+		&"required_count", &"named_mode", &"text_mode"], {})
+	var invalid_key_type_rule := Rule.new(&"invalid_key_operand", &"guard_check")
+	invalid_key_type_rule.requires = [&"completed_count > text_mode"]
+	invalid_key_type_rule.steps = [Step.new(func(_c: Dictionary) -> void: pass)]
+	var invalid_key_type_problems := RuleValidator.check([invalid_key_type_rule], extended_guards,
+		[&"guard_check"], [&"completed_count", &"text_mode"], {})
+	ok = _check("guard validator accepts typed key-to-key and String/StringName comparisons",
+		extended_type_validation.is_empty()) and ok
+	ok = _check("guard validator rejects incompatible key-to-key operand types",
+		invalid_key_type_problems.any(func(problem: String) -> bool: return "numeric Blackboard key" in problem)) and ok
 	ok = _check("missing and incompatible payload values fail both equality and inequality",
 		not GuardExpression.evaluate(route_bb, &"payload.action != \"confirm\"", {}, &"route", payload_schema)
 		and not GuardExpression.evaluate(route_bb, &"payload.count != 3", {"count": "3"}, &"route", payload_schema)

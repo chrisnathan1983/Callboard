@@ -10,6 +10,7 @@ func _initialize() -> void:
 	ok = _test_add_var_editor() and ok
 	ok = _test_parallel_group_authoring() and ok
 	ok = _test_conditional_group_authoring() and ok
+	ok = _test_guard_expression_authoring() and ok
 	ok = _test_random_group_authoring() and ok
 	ok = _test_staging_verb_catalog_and_validation() and ok
 	ok = await _test_overlapping_flash_restores_surface_colors() and ok
@@ -251,6 +252,54 @@ func _test_random_group_authoring() -> bool:
 	inspector.free()
 	return _check("random group inspector exposes weighted mode, an authored seed, and branch weights",
 		has_seed and has_selection and weight_count == 2)
+
+func _test_guard_expression_authoring() -> bool:
+	var draft := GraphDraft.new()
+	draft.catalog = VerbCatalog.from_factory(CoreVerbs.new(
+		StepContext.new(Blackboard.new(), null, null, Callable())))
+	draft.external_calls = [&"start"]
+	for spec in [[&"sensor_active", false], [&"override_enabled", false],
+		[&"completed_count", 0], [&"required_count", 0], [&"named_mode", &"standby"]]:
+		var variable := VariableData.new()
+		variable.key = spec[0]
+		variable.default_value = spec[1]
+		draft.variables.append(variable)
+	var rule := RuleData.new()
+	rule.id = &"guard_authoring"
+	rule.trigger = &"start"
+	rule.requires = PackedStringArray(["any(sensor_active, override_enabled)",
+		"(completed_count >= required_count) and named_mode == &\"standby\""])
+	var step := StepData.new()
+	step.verb = &"score"
+	step.args = PackedStringArray(["1"])
+	rule.steps = [step]
+	draft.rules = [rule]
+	RuleGraphReader.validate_resources(draft)
+	var inspector := RuleInspector.new()
+	inspector._data = draft
+	inspector._rule = rule
+	var valid_key_pair := inspector._guard_expression_issue("completed_count >= required_count").is_empty()
+	var valid_string_name := inspector._guard_expression_issue("named_mode == &\"standby\"").is_empty()
+	var rejects_bad_order := not inspector._guard_expression_issue("named_mode > \"standby\"").is_empty()
+	var menu := inspector._guard_menu("requires")
+	var edit: LineEdit
+	var add: Button
+	for control: Node in menu.find_children("*", "LineEdit", true, false):
+		edit = control as LineEdit
+	for control: Node in menu.find_children("*", "Button", true, false):
+		var button := control as Button
+		if button.text == "Add":
+			add = button
+			break
+	if edit != null and add != null:
+		edit.text = "(sensor_active or override_enabled) and completed_count >= required_count"
+		add.pressed.emit()
+	var added_group := rule.requires.has("(sensor_active or override_enabled) and completed_count >= required_count")
+	var resource_accepts := draft.errors.is_empty() and draft.warnings.is_empty()
+	menu.free()
+	inspector.free()
+	return _check("guard editor accepts grouped formulas and typed key comparisons while rejecting invalid operators",
+		valid_key_pair and valid_string_name and rejects_bad_order and added_group and resource_accepts)
 
 func _test_staging_verb_catalog_and_validation() -> bool:
 	var bb := Blackboard.new()

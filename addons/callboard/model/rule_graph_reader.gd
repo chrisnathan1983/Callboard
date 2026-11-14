@@ -115,15 +115,7 @@ static func validate_resources(data: GraphDraft) -> void:
 		if not rule.emit.is_empty():
 			emitted[StringName("relay:" + String(rule.emit))] = true
 		for guard: StringName in rule.requires + rule.forbids + rule.cancel_if:
-			var parsed := GuardExpression.parse(String(guard))
-			if not parsed["ok"]:
-				data.errors.append("rule '%s' has an invalid guard '%s'" % [rule.id, guard])
-			elif parsed["payload"] and payloads.has(rule.trigger):
-				if not parsed.get("presence", "").is_empty() or parsed["comparison"]:
-					if not payloads[rule.trigger].has(parsed["key"]):
-						data.errors.append("rule '%s' checks undeclared payload field '%s' for trigger '%s'" % [rule.id, parsed["key"], rule.trigger])
-			elif not parsed["payload"] and not keys.has(parsed["key"]):
-				data.warnings.append("rule '%s' checks key '%s', which is not declared in the StageDefinition; scene analysis will check script-defined keys" % [rule.id, parsed["key"]])
+			_validate_resource_guard(rule, String(guard), payloads, keys, data.errors, data.warnings)
 		for step: StepData in rule.steps:
 			_validate_step_groups(rule, step, payloads, keys, data.errors, data.warnings)
 		for step: StepData in _flatten_steps(rule.steps):
@@ -199,24 +191,51 @@ static func _validate_conditional_data(rule: RuleData, step: StepData,
 		if expression.is_empty() or not parsed.get("ok", false):
 			errors.append("rule '%s' conditional branch %d has an invalid guard '%s'" % [rule.id, index + 1, expression])
 			continue
-		var key: StringName = parsed.get("key", &"")
-		if parsed.get("payload", false):
-			if payloads.has(rule.trigger):
-				var schema: Dictionary = payloads[rule.trigger]
-				if not schema.has(key):
-					errors.append("rule '%s' conditional branch %d checks undeclared payload field '%s'" % [rule.id, index + 1, key])
-				elif parsed.get("comparison", false):
-					var declared_type: int = schema[key]
-					var literal_type: int = parsed["value_type"]
-					if declared_type in [TYPE_INT, TYPE_FLOAT] and literal_type not in [TYPE_INT, TYPE_FLOAT] \
-							or declared_type not in [TYPE_INT, TYPE_FLOAT] and declared_type != literal_type:
-						errors.append("rule '%s' conditional branch %d has an incompatible payload comparison" % [rule.id, index + 1])
-		elif not keys.has(key):
-			warnings.append("rule '%s' conditional branch %d checks undeclared Blackboard key '%s'" % [rule.id, index + 1, key])
-		elif parsed.get("comparison", false):
-			var value: Variant = keys[key]
-			if value != null and typeof(value) not in [TYPE_INT, TYPE_FLOAT]:
-				errors.append("rule '%s' conditional branch %d compares non-numeric Blackboard key '%s'" % [rule.id, index + 1, key])
+		_validate_resource_guard(rule, String(expression), payloads, keys, errors, warnings,
+			"conditional branch %d" % (index + 1))
+
+static func _validate_resource_guard(rule: RuleData, expression: String, payloads: Dictionary,
+		keys: Dictionary, errors: Array[String], warnings: Array[String],
+		context := "guard") -> void:
+	var parsed := GuardExpression.parse(expression)
+	if not parsed.get("ok", false):
+		errors.append("rule '%s' has an invalid %s '%s'" % [rule.id, context, expression])
+		return
+	var schema: Dictionary = payloads.get(rule.trigger, {})
+	for term: Dictionary in GuardExpression.terms(expression):
+		var left_type: int = TYPE_NIL
+		if term.get("payload", false):
+			if payloads.has(rule.trigger) and not schema.has(term["key"]):
+				errors.append("rule '%s' checks undeclared payload field '%s' for trigger '%s'" % [rule.id, term["key"], rule.trigger])
+				continue
+			left_type = schema.get(term["key"], TYPE_NIL)
+		else:
+			var key: StringName = term["key"]
+			if not keys.has(key):
+				warnings.append("rule '%s' checks key '%s', which is not declared in the StageDefinition; scene analysis will check script-defined keys" % [rule.id, key])
+				continue
+			if keys[key] != null:
+				left_type = typeof(keys[key])
+		if not term.get("comparison", false):
+			continue
+		var right_type: int = TYPE_NIL
+		if term.has("rhs_key"):
+			if term.get("rhs_payload", false):
+				if payloads.has(rule.trigger) and not schema.has(term["rhs_key"]):
+					errors.append("rule '%s' checks undeclared payload field '%s' for trigger '%s'" % [rule.id, term["rhs_key"], rule.trigger])
+					continue
+				right_type = schema.get(term["rhs_key"], TYPE_NIL)
+			else:
+				var rhs_key: StringName = term["rhs_key"]
+				if not keys.has(rhs_key):
+					warnings.append("rule '%s' checks key '%s', which is not declared in the StageDefinition; scene analysis will check script-defined keys" % [rule.id, rhs_key])
+					continue
+				if keys[rhs_key] != null:
+					right_type = typeof(keys[rhs_key])
+		else:
+			right_type = term.get("value_type", TYPE_NIL)
+		if not RuleValidator._operand_types_compatible(left_type, right_type, term["operator"]):
+			errors.append("rule '%s' compares an operand with an incompatible type or operator in %s" % [rule.id, context])
 
 static func _validate_step_groups(rule: RuleData, step: StepData, payloads: Dictionary,
 		keys: Dictionary, errors: Array[String], warnings: Array[String]) -> void:

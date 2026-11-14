@@ -304,8 +304,7 @@ func _payload_schema_panel() -> Control:
 		section.add_child(empty)
 	var referenced := {}
 	for guard in _rule.requires + _rule.forbids + _rule.cancel_if:
-		var field_key := GuardExpression.referenced_payload_field(guard)
-		if not field_key.is_empty():
+		for field_key in GuardExpression.referenced_payload_fields(guard):
 			referenced[field_key] = true
 	var reference_names: Array[String] = []
 	for field_key in referenced:
@@ -409,8 +408,8 @@ func _guard_menu(field: String) -> Control:
 	var comparison_row := HBoxContainer.new()
 	var comparison_edit := LineEdit.new()
 	comparison_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	comparison_edit.placeholder_text = "score >= 10 or payload.action == \"confirm\""
-	comparison_edit.tooltip_text = "Blackboard numeric comparisons and typed payload comparisons. Use has(payload.name) or missing(payload.name) to test presence."
+	comparison_edit.placeholder_text = "any(sensor_active, override_enabled) or count >= required"
+	comparison_edit.tooltip_text = "Use parentheses, and/or, any(...), comparisons, and has(payload.name) / missing(payload.name). String and StringName keys support == and !=."
 	comparison_edit.editable = not _read_only
 	comparison_row.add_child(comparison_edit)
 	var add_comparison := Button.new()
@@ -418,32 +417,13 @@ func _guard_menu(field: String) -> Control:
 	add_comparison.disabled = _read_only
 	add_comparison.pressed.connect(func() -> void:
 		var parsed := GuardExpression.parse(comparison_edit.text)
-		if not parsed["ok"] or (not parsed["comparison"] and parsed.get("presence", "").is_empty()):
-			comparison_edit.tooltip_text = "Enter a comparison or has(payload.name) / missing(payload.name)."
+		if not parsed["ok"]:
+			comparison_edit.tooltip_text = "Enter a valid guard expression using terms, any(...), and/or, or parentheses."
 			return
-		if not parsed["payload"] and parsed["comparison"]:
-			var variable: VariableData
-			for item in _data.variables:
-				if item.key == String(parsed["key"]):
-					variable = item
-					break
-			if variable == null or typeof(variable.default_value) not in [TYPE_INT, TYPE_FLOAT]:
-				comparison_edit.tooltip_text = "Blackboard comparisons require a declared int or float key."
-				return
-		if parsed["payload"] and parsed["comparison"]:
-			var declared: PayloadFieldData
-			for item: PayloadFieldData in _data.payload_fields:
-				if item.event_id == StringName(_rule.trigger) and item.key == parsed["key"]:
-					declared = item
-					break
-			if declared != null:
-				var field_type := declared.value_type()
-				var literal_type: int = parsed["value_type"]
-				var compatible := field_type in [TYPE_INT, TYPE_FLOAT] and literal_type in [TYPE_INT, TYPE_FLOAT]
-				compatible = compatible or (field_type in [TYPE_BOOL, TYPE_STRING] and literal_type == field_type and parsed["operator"] in ["==", "!="])
-				if not compatible:
-					comparison_edit.tooltip_text = "The literal or operator does not match the declared payload field type."
-					return
+		var issue := _guard_expression_issue(comparison_edit.text)
+		if not issue.is_empty():
+			comparison_edit.tooltip_text = issue
+			return
 		var expression := comparison_edit.text.strip_edges()
 		var guards: PackedStringArray = _rule.get(field)
 		if not guards.has(expression):
@@ -454,11 +434,48 @@ func _guard_menu(field: String) -> Control:
 			popup.set_item_checked(keys.size() - 1, true)
 		refresh_text.call()
 		comparison_edit.clear()
-		comparison_edit.tooltip_text = "Add an int/float comparison; operators: >, >=, <, <=, ==, !="
+		comparison_edit.tooltip_text = "Add a guard using comparisons, any(...), and/or, or parentheses."
 		changed.emit(_rule.id))
 	comparison_row.add_child(add_comparison)
 	section.add_child(comparison_row)
 	return section
+
+func _guard_expression_issue(expression: String) -> String:
+	var has_payload_schema := _data.payload_fields.any(func(field: PayloadFieldData) -> bool:
+		return field.event_id == StringName(_rule.trigger))
+	var payload_types := {}
+	for field: PayloadFieldData in _data.payload_fields:
+		if field.event_id == StringName(_rule.trigger):
+			payload_types[field.key] = field.value_type()
+	for term: Dictionary in GuardExpression.terms(expression):
+		var left_type: int = TYPE_NIL
+		if term.get("payload", false):
+			if has_payload_schema and not payload_types.has(term["key"]):
+				return "Payload field '%s' is not declared for '%s'." % [term["key"], _rule.trigger]
+			left_type = payload_types.get(term["key"], TYPE_NIL)
+		else:
+			left_type = _guard_blackboard_type(term["key"])
+		if not term.get("comparison", false):
+			continue
+		var right_type: int = TYPE_NIL
+		if term.has("rhs_key"):
+			if term.get("rhs_payload", false):
+				if has_payload_schema and not payload_types.has(term["rhs_key"]):
+					return "Payload field '%s' is not declared for '%s'." % [term["rhs_key"], _rule.trigger]
+				right_type = payload_types.get(term["rhs_key"], TYPE_NIL)
+			else:
+				right_type = _guard_blackboard_type(term["rhs_key"])
+		else:
+			right_type = term.get("value_type", TYPE_NIL)
+		if not RuleValidator._operand_types_compatible(left_type, right_type, term["operator"]):
+			return "This comparison has incompatible operand types or uses an ordering operator on non-numeric values."
+	return ""
+
+func _guard_blackboard_type(key: StringName) -> int:
+	for variable: VariableData in _data.variables:
+		if variable.key == key or variable.aliases.has(key):
+			return typeof(variable.default_value) if variable.default_value != null else TYPE_NIL
+	return TYPE_NIL
 
 # --- Steps ------------------------------------------------------------------------
 

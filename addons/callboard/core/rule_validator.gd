@@ -49,24 +49,12 @@ static func check(rules: Array[Rule], bb: Blackboard,
 				waited[s.wait_event] = true
 				var filter := StringName(s.args[1]) if s.args.size() > 1 else &""
 				if not filter.is_empty():
-					var field := GuardExpression.referenced_payload_field(filter)
-					if payload_names.has(s.wait_event) and not payload_names[s.wait_event].has(field):
-						problems.append("rule '%s' waits for undeclared payload field '%s' on '%s'" % [r.id, field, s.wait_event])
-					elif payload_names.has(s.wait_event):
-						var guard := GuardExpression.parse(String(filter))
-						if guard.get("comparison", false) and not _payload_comparison_is_compatible(payload_names[s.wait_event][field], guard):
-							problems.append("rule '%s' wait payload guard for '%s' uses an incompatible literal or operator" % [r.id, field])
+					var wait_rule := Rule.new(r.id, s.wait_event)
+					problems.append_array(_validate_guard_expression(wait_rule, String(filter), bb,
+						payload_names, {}, false))
 			if s.verb == &"wait_until" and not s.args.is_empty():
-				var guard := GuardExpression.parse(String(s.args[0]))
-				var key: StringName = guard.get("key", &"")
-				if guard.get("payload", false) and payload_names.has(r.trigger):
-					if not payload_names[r.trigger].has(key):
-						problems.append("rule '%s' wait condition checks undeclared payload field '%s'" % [r.id, key])
-					elif guard["comparison"] and not _payload_comparison_is_compatible(payload_names[r.trigger][key], guard):
-						problems.append("rule '%s' wait condition for payload field '%s' uses an incompatible literal or operator" % [r.id, key])
-				elif not guard.get("payload", false) and guard.get("comparison", false) and bb.has(key):
-					if bb.schema[bb.resolve_key(key)]["type"] not in [TYPE_INT, TYPE_FLOAT] or guard["value_type"] not in [TYPE_INT, TYPE_FLOAT]:
-						problems.append("rule '%s' wait condition for '%s' requires a numeric key and literal" % [r.id, key])
+				problems.append_array(_validate_guard_expression(r, String(s.args[0]), bb,
+					payload_names, {}, false))
 			for k in s.reads:
 				if not bb.has(k):
 					problems.append("rule '%s' reads '%s' which is not declared on the Blackboard" % [r.id, k])
@@ -120,50 +108,19 @@ static func check(rules: Array[Rule], bb: Blackboard,
 		if r.trigger == &"on_change":
 			var listened_keys := {}
 			for guard in r.requires:
-				var change_guard := GuardExpression.parse(String(guard))
-				if not change_guard.get("payload", false) or change_guard.get("key") != &"key" or not change_guard.get("comparison", false) or change_guard.get("operator") != "==" or change_guard.get("value_type", TYPE_NIL) != TYPE_STRING:
-					continue
-				var listened_key := StringName(change_guard["value"])
-				if listened_keys.has(listened_key):
-					continue
-				listened_keys[listened_key] = true
-				if not bb.has(listened_key):
-					problems.append("rule '%s' listens for on_change key '%s', which is not declared on the Blackboard" % [r.id, listened_key])
-				elif not settable.has(bb.resolve_key(listened_key)):
-					problems.append("rule '%s' listens for on_change key '%s' but no writer is declared" % [r.id, listened_key])
+				for change_guard in GuardExpression.terms(String(guard)):
+					if not change_guard.get("payload", false) or change_guard.get("key") != &"key" or not change_guard.get("comparison", false) or change_guard.get("operator") != "==" or change_guard.get("value_type", TYPE_NIL) != TYPE_STRING:
+						continue
+					var listened_key := StringName(change_guard["value"])
+					if listened_keys.has(listened_key):
+						continue
+					listened_keys[listened_key] = true
+					if not bb.has(listened_key):
+						problems.append("rule '%s' listens for on_change key '%s', which is not declared on the Blackboard" % [r.id, listened_key])
+					elif not settable.has(bb.resolve_key(listened_key)):
+						problems.append("rule '%s' listens for on_change key '%s' but no writer is declared" % [r.id, listened_key])
 		for guard in r.requires + r.forbids + r.cancel_if:
-			var parsed := GuardExpression.parse(String(guard))
-			if not parsed["ok"]:
-				problems.append("rule '%s' has an invalid guard '%s'" % [r.id, guard])
-				continue
-			if parsed["payload"]:
-				var trigger_schema: Dictionary = payload_names.get(r.trigger, {})
-				var field_key: StringName = parsed["key"]
-				if parsed.get("presence", "") != "":
-					if payload_names.has(r.trigger) and not trigger_schema.has(field_key):
-						problems.append("rule '%s' checks undeclared payload field '%s' for trigger '%s'" % [r.id, field_key, r.trigger])
-					continue
-				if parsed["comparison"]:
-					if payload_names.has(r.trigger) and not trigger_schema.has(field_key):
-						problems.append("rule '%s' checks undeclared payload field '%s' for trigger '%s'" % [r.id, field_key, r.trigger])
-						continue
-					# An event without any schema is intentionally dynamic: runtime checks
-					# the actual Variant type. A declared schema is strict, including when
-					# only some of an event's fields are listed.
-					if not payload_names.has(r.trigger):
-						continue
-					var field_type: int = trigger_schema.get(field_key, TYPE_NIL)
-					if not _payload_comparison_is_compatible(field_type, parsed):
-						problems.append("rule '%s' compares payload field '%s' with an incompatible literal or operator" % [r.id, field_key])
-				continue
-			var key: StringName = bb.resolve_key(parsed["key"])
-			if not bb.schema.has(key):
-				problems.append("rule '%s' checks key '%s' which is not declared on the Blackboard" % [r.id, key])
-				continue
-			if parsed["comparison"] and bb.schema[key].get("type") not in [TYPE_INT, TYPE_FLOAT]:
-				problems.append("rule '%s' compares '%s', which is not an int or float Blackboard key" % [r.id, key])
-			if not settable.has(key):
-				problems.append("rule '%s' checks key '%s' but nothing sets it" % [r.id, key])
+			problems.append_array(_validate_guard_expression(r, String(guard), bb, payload_names, settable))
 		for s: Step in _flatten_steps(r.steps):
 			if s.args.has(null):
 				problems.append("rule '%s' has a '%s' step with an unset prop" % [r.id, s.verb])
@@ -176,13 +133,74 @@ static func check(rules: Array[Rule], bb: Blackboard,
 	problems.append_array(_find_shared_trigger_conflicts(rules))
 	return problems
 
+static func _validate_guard_expression(rule: Rule, expression: String, bb: Blackboard,
+		payload_names: Dictionary, settable: Dictionary,
+		check_producers := true) -> Array[String]:
+	var problems: Array[String] = []
+	var parsed := GuardExpression.parse(expression)
+	if not parsed.get("ok", false):
+		problems.append("rule '%s' has an invalid guard '%s'" % [rule.id, expression])
+		return problems
+	var schema: Dictionary = payload_names.get(rule.trigger, {})
+	for term: Dictionary in GuardExpression.terms(expression):
+		var left_type: int = TYPE_NIL
+		if term.get("payload", false):
+			var field_key: StringName = term["key"]
+			if payload_names.has(rule.trigger) and not schema.has(field_key):
+				problems.append("rule '%s' checks undeclared payload field '%s' for trigger '%s'" % [rule.id, field_key, rule.trigger])
+				continue
+			left_type = schema.get(field_key, TYPE_NIL)
+		else:
+			var key: StringName = bb.resolve_key(term["key"])
+			if not bb.schema.has(key):
+				problems.append("rule '%s' checks key '%s' which is not declared on the Blackboard" % [rule.id, key])
+				continue
+			left_type = bb.schema[key].get("type", TYPE_NIL)
+			if check_producers and not settable.has(key):
+				problems.append("rule '%s' checks key '%s' but nothing sets it" % [rule.id, key])
+		if term.get("presence", "") != "" or not term.get("comparison", false):
+			continue
+		var right_type: int = TYPE_NIL
+		if term.has("rhs_key"):
+			if term.get("rhs_payload", false):
+				var rhs_key: StringName = term["rhs_key"]
+				if payload_names.has(rule.trigger) and not schema.has(rhs_key):
+					problems.append("rule '%s' checks undeclared payload field '%s' for trigger '%s'" % [rule.id, rhs_key, rule.trigger])
+					continue
+				right_type = schema.get(rhs_key, TYPE_NIL)
+			else:
+				var rhs_key: StringName = bb.resolve_key(term["rhs_key"])
+				if not bb.schema.has(rhs_key):
+					problems.append("rule '%s' checks key '%s' which is not declared on the Blackboard" % [rule.id, rhs_key])
+					continue
+				right_type = bb.schema[rhs_key].get("type", TYPE_NIL)
+				if check_producers and not settable.has(rhs_key):
+					problems.append("rule '%s' checks key '%s' but nothing sets it" % [rule.id, rhs_key])
+		else:
+			right_type = term.get("value_type", TYPE_NIL)
+		if not _operand_types_compatible(left_type, right_type, term["operator"]):
+			if term.get("payload", false):
+				problems.append("rule '%s' compares payload field '%s' with an incompatible literal or operator" % [rule.id, term["key"]])
+			elif left_type in [TYPE_INT, TYPE_FLOAT] or right_type in [TYPE_INT, TYPE_FLOAT]:
+				problems.append("rule '%s' requires numeric Blackboard key and literal or key operands for '%s'" % [rule.id, term["key"]])
+			else:
+				problems.append("rule '%s' compares Blackboard key '%s' with an incompatible operand type or operator" % [rule.id, term["key"]])
+	return problems
+
+static func _operand_types_compatible(left_type: int, right_type: int, operator: String) -> bool:
+	if left_type == TYPE_NIL or right_type == TYPE_NIL:
+		return true # Unschematized values are checked against their runtime Variants.
+	if left_type in [TYPE_INT, TYPE_FLOAT] and right_type in [TYPE_INT, TYPE_FLOAT]:
+		return true
+	if operator not in ["==", "!="]:
+		return false
+	if left_type in [TYPE_STRING, TYPE_STRING_NAME] and right_type in [TYPE_STRING, TYPE_STRING_NAME]:
+		return true
+	return left_type == right_type and left_type == TYPE_BOOL
+
 static func _payload_comparison_is_compatible(field_type: int, guard: Dictionary) -> bool:
-	if field_type == TYPE_NIL:
-		return true # Dynamic Variant fields, including on_change values.
-	var literal_type: int = guard["value_type"]
-	if field_type in [TYPE_INT, TYPE_FLOAT]:
-		return literal_type in [TYPE_INT, TYPE_FLOAT]
-	return field_type in [TYPE_BOOL, TYPE_STRING] and literal_type == field_type and guard["operator"] in ["==", "!="]
+	var right_type: int = guard.get("value_type", TYPE_NIL)
+	return _operand_types_compatible(field_type, right_type, guard.get("operator", ""))
 
 static func _validate_conditional_group(rule: Rule, step: Step, bb: Blackboard,
 		payload_names: Dictionary) -> Array[String]:
@@ -202,20 +220,8 @@ static func _validate_conditional_group(rule: Rule, step: Step, bb: Blackboard,
 		if expression.is_empty() or not parsed.get("ok", false):
 			problems.append("rule '%s' conditional branch %d has an invalid guard '%s'" % [rule.id, index + 1, expression])
 			continue
-		var key: StringName = parsed.get("key", &"")
-		if parsed.get("payload", false):
-			if payload_names.has(rule.trigger):
-				var schema: Dictionary = payload_names[rule.trigger]
-				if not schema.has(key):
-					problems.append("rule '%s' conditional branch %d checks undeclared payload field '%s'" % [rule.id, index + 1, key])
-				elif parsed.get("comparison", false) and not _payload_comparison_is_compatible(schema[key], parsed):
-					problems.append("rule '%s' conditional branch %d has an incompatible payload comparison" % [rule.id, index + 1])
-		elif not bb.has(key):
-			problems.append("rule '%s' conditional branch %d checks undeclared Blackboard key '%s'" % [rule.id, index + 1, key])
-		elif parsed.get("comparison", false) and (
-				bb.schema[bb.resolve_key(key)].get("type") not in [TYPE_INT, TYPE_FLOAT]
-				or parsed.get("value_type") not in [TYPE_INT, TYPE_FLOAT]):
-			problems.append("rule '%s' conditional branch %d requires numeric Blackboard key and literal for '%s'" % [rule.id, index + 1, key])
+		problems.append_array(_validate_guard_expression(rule, String(expression), bb,
+			payload_names, {}, false))
 	return problems
 
 static func _validate_random_group(rule: Rule, step: Step) -> Array[String]:

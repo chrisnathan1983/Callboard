@@ -201,9 +201,7 @@ func wait_until(condition: StringName, timeout: float = 0.0, timeout_relay: Stri
 			engine = null
 			if not completion.is_null():
 				await completion)
-	var key := GuardExpression.referenced_key(condition)
-	if not key.is_empty():
-		step.reads.append(key)
+	step.reads.append_array(GuardExpression.referenced_keys(condition))
 	step.emits = timeout_relay
 	step.emit_arg = 2
 	return step
