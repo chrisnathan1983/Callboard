@@ -91,7 +91,9 @@ The first five items retain the high priority assigned in `TODO.md`.
 
 - [ ] **Add sequential and parallel step groups.** See [`RuleEngine._run()`](addons/callboard/core/rule_engine.gd).
   - [x] The engine awaits a rule's steps in order. Independent rules can already overlap, and some verbs support non-blocking playback.
-  - [ ] Add an authored `fork` or parallel group with an optional join. Specify child order, how outcomes propagate at a join, and ownership of unjoined work. Apply run cancellation and teardown to every branch and expose branch progress in diagnostics.
+  - [x] Add the runtime `Step.parallel()` group with ordered child sequences and an optional join. Joined groups wait for every branch; unjoined groups let the parent continue while the branches remain owned by its run. Restart, **Cancel If**, and Stage teardown cancel branch work; branch lifecycle is traced.
+  - [x] Serialize nested `StepData` branches recursively with join mode, and compile authored groups into runtime `Step.parallel()` steps.
+  - [ ] Add Rule Inspector authoring for nested branches, including branch add/remove/reorder, per-branch step editing, and visible branch progress.
 
 - [ ] **Add conditional branches and deterministic random choices inside a rule.** See [RuleData](addons/callboard/core/rule_data.gd), [StepData](addons/callboard/core/step_data.gd), and [RuleValidator](addons/callboard/core/rule_validator.gd).
   - [x] Separate rules can route by guards, with overlap diagnostics and an explicit allowance for intentional overlap.

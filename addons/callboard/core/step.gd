@@ -12,6 +12,19 @@ var emit_arg := -1                     # argument index the Callboard can edit t
 var sets: Array[StringName] = []       # blackboard keys this step writes (validator bookkeeping)
 var verb: StringName = &""             # e.g. &"say"
 var args: Array = []                   # the arguments the verb was called with
+var parallel_branches: Array[Array] = [] # authored child sequences for a parallel group.
+var join_parallel := true              # wait for every branch before the parent continues.
+
+## Construct a parallel group. Branch order is authored order; all branches start
+## in that order during the same dispatch and then run concurrently. A joined
+## group resumes after every branch completes. An unjoined group lets the parent
+## continue while its branches remain owned by the parent rule run.
+static func parallel(branches: Array[Array], join := true) -> Step:
+	var step := Step.new()
+	step.verb = &"parallel"
+	step.parallel_branches = branches
+	step.join_parallel = join
+	return step
 
 func _init(f: Callable = Callable()) -> void:
 	fn = f

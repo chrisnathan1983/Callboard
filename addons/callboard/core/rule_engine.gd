@@ -12,6 +12,7 @@ signal _event_received(event: StringName, payload: Dictionary)
 class AwaitedSignal extends RefCounted:
 	signal completed
 	signal cancelled
+	var is_complete := false
 
 var rules: Array[Rule] = []
 var fired: Dictionary                 # injected, latches one-shot rules
@@ -144,8 +145,11 @@ func _dispatch(r: Rule, event: StringName, payload: Dictionary, gen: int, depth:
 		var next_payload: Dictionary = next["payload"]
 		if passes(r, next_payload, event) and alive(r, gen, next_payload):
 			await _run(r, event, next_payload, gen, int(next["depth"]), next["context"])
-	if gen == _gen:
-		_active.erase(r)
+	if gen == _gen and _active.has(r):
+		var remaining: Dictionary = _active[r]
+		var completed_run: Dictionary = remaining.get("run", {})
+		if int(completed_run.get("background_branches", 0)) == 0:
+			_active.erase(r)
 
 func _run(rule: Rule, event: StringName, payload: Dictionary, generation: int, depth: int,
 		context: Dictionary) -> void:
@@ -176,37 +180,116 @@ func _run(rule: Rule, event: StringName, payload: Dictionary, generation: int, d
 	var step_payload := payload.duplicate(true)
 	step_payload["payload"] = payload.duplicate(true)
 	step_payload["_callboard"] = {"rule": rule, "run": run}
-	for step_index in rule.steps.size():
-		var step := rule.steps[step_index]
-		if step.delay > 0.0:
-			_emit_trace("delay_started", rule.id, event, step_index, step, "%0.2fs" % step.delay)
-			await interruptible(wait_tracked(step.delay, rule.id, "step delay"), Callable(),
-				[(run["cancel_signal"] as AwaitedSignal).cancelled], run, true)
-			if not alive(rule, generation, payload):
-				_cancel_run(run, rule.id, event, step_index, step)
-				return
-		_emit_trace("step_started", rule.id, event, step_index, step)
-		await step.fn.call(step_payload)
-		if not alive(rule, generation, payload):
-			_cancel_run(run, rule.id, event, step_index, step)
+	var outcome: Dictionary = await _run_steps(rule.steps, rule, event, payload,
+		generation, context, step_payload, run, 0, true)
+	if not outcome.get("completed", false):
+		if outcome.get("timed_out", false):
+			_finish_main_run(rule, run)
+			var timeout_step: Step = outcome.get("step")
+			if timeout_step != null and not timeout_step.emits.is_empty():
+				_fire("relay:" + timeout_step.emits, payload, context)
 			return
-		var wait_outcome: String = run.get("wait_outcome", "")
-		run.erase("wait_outcome")
-		if not wait_outcome.is_empty():
-			_emit_trace("wait_" + wait_outcome, rule.id, event, step_index, step)
-			if not alive(rule, generation, payload):
-				_cancel_run(run, rule.id, event, step_index, step)
-				return
-			if wait_outcome == "timed_out":
-				_release_cancel_if(run)
-				if not step.emits.is_empty():
-					_fire("relay:" + step.emits, payload, context)
-				return
-		_emit_trace("step_completed", rule.id, event, step_index, step)
+		var failed_step: Step = outcome.get("step")
+		_cancel_run(run, rule.id, event, int(outcome.get("index", -1)), failed_step)
+		_finish_main_run(rule, run)
+		return
 	if not rule.emits.is_empty():
 		_fire("relay:" + rule.emits, payload, context)
 	_emit_trace("rule_completed", rule.id, event)
-	_release_cancel_if(run)
+	_finish_main_run(rule, run)
+
+## Runs a sequential list. Parallel child sequences share the parent's run token,
+## payload and cancellation signal, so Restart, Cancel If and Stage teardown own
+## every branch uniformly.
+func _run_steps(steps: Array, rule: Rule, event: StringName, payload: Dictionary,
+		generation: int, context: Dictionary, step_payload: Dictionary, run: Dictionary,
+		branch_id: int, is_main: bool) -> Dictionary:
+	for step_index in steps.size():
+		var step: Step = steps[step_index]
+		if not alive(rule, generation, payload):
+			return {"completed": false, "index": step_index, "step": step}
+		if step.delay > 0.0:
+			_emit_branch_trace("delay_started", rule, event, step_index, step, branch_id, is_main,
+				"%0.2fs" % step.delay)
+			await interruptible(wait_tracked(step.delay, rule.id, "step delay"), Callable(),
+				[(run["cancel_signal"] as AwaitedSignal).cancelled], run, true)
+			if not alive(rule, generation, payload):
+				return {"completed": false, "index": step_index, "step": step}
+		if step.verb == &"parallel":
+			var branch_signals: Array[AwaitedSignal] = []
+			for child_index in step.parallel_branches.size():
+				var finished := AwaitedSignal.new()
+				branch_signals.append(finished)
+				if not step.join_parallel:
+					run["background_branches"] = int(run.get("background_branches", 0)) + 1
+				_emit_trace("branch_started", rule.id, event, step_index, step,
+					"branch=%d/%d; join=%s" % [child_index + 1, step.parallel_branches.size(), step.join_parallel])
+				_run_parallel_branch(step.parallel_branches[child_index], rule, event, payload,
+					generation, context, step_payload, run, step_index, child_index,
+					finished, not step.join_parallel)
+			if step.join_parallel:
+				for branch_finished: AwaitedSignal in branch_signals:
+					if not branch_finished.is_complete:
+						await interruptible(branch_finished.completed, Callable(),
+							[(run["cancel_signal"] as AwaitedSignal).cancelled], run, true)
+				if not alive(rule, generation, payload):
+					return {"completed": false, "index": step_index, "step": step}
+			continue
+		_emit_branch_trace("step_started", rule, event, step_index, step, branch_id, is_main)
+		await step.fn.call(step_payload)
+		if not alive(rule, generation, payload):
+			return {"completed": false, "index": step_index, "step": step}
+		var wait_outcome: String = run.get("wait_outcome", "")
+		if not wait_outcome.is_empty():
+			run.erase("wait_outcome")
+			_emit_branch_trace("wait_" + wait_outcome, rule, event, step_index, step, branch_id, is_main)
+			if not alive(rule, generation, payload):
+				return {"completed": false, "index": step_index, "step": step}
+			if wait_outcome == "timed_out":
+				return {"completed": false, "timed_out": true, "index": step_index, "step": step}
+		_emit_branch_trace("step_completed", rule, event, step_index, step, branch_id, is_main)
+	return {"completed": true}
+
+func _run_parallel_branch(steps: Array, rule: Rule, event: StringName, payload: Dictionary,
+		generation: int, context: Dictionary, step_payload: Dictionary, run: Dictionary,
+		group_index: int, branch_index: int, finished: AwaitedSignal, background: bool) -> void:
+	var branch_id := branch_index + 1
+	var branch_context := step_payload.duplicate(false)
+	# Wait results are branch-local; sharing the parent run dictionary would let
+	# one branch's timeout accidentally end a sibling's sequence.
+	var branch_run := run.duplicate(false)
+	branch_run.erase("wait_outcome")
+	var callboard_context: Dictionary = branch_context.get("_callboard", {}).duplicate(false)
+	callboard_context["run"] = branch_run
+	branch_context["_callboard"] = callboard_context
+	var outcome: Dictionary = await _run_steps(steps, rule, event, payload, generation,
+		context, branch_context, branch_run, branch_id, false)
+	var detail := "branch=%d; %s" % [branch_id, "completed" if outcome.get("completed", false) else "cancelled"]
+	_emit_trace("branch_completed" if outcome.get("completed", false) else "branch_cancelled",
+		rule.id, event, group_index, null, detail)
+	finished.is_complete = true
+	finished.completed.emit()
+	if background:
+		run["background_branches"] = maxi(0, int(run.get("background_branches", 1)) - 1)
+		_finish_run_if_idle(rule, run)
+
+func _finish_main_run(rule: Rule, run: Dictionary) -> void:
+	run["main_done"] = true
+	_finish_run_if_idle(rule, run)
+
+func _finish_run_if_idle(rule: Rule, run: Dictionary) -> void:
+	if run.get("main_done", false) and int(run.get("background_branches", 0)) == 0:
+		_release_cancel_if(run)
+		var active: Dictionary = _active.get(rule, {})
+		if active.get("run") == run and active.get("pending", []).is_empty():
+			_active.erase(rule)
+
+func _emit_branch_trace(kind: String, rule: Rule, event: StringName, step_index: int,
+		step: Step, branch_id: int, is_main: bool, detail := "") -> void:
+	var resolved := detail
+	if not is_main:
+		resolved = ("branch=%d" % branch_id) + ("; " + detail if not detail.is_empty() else "")
+	_emit_trace(kind, rule.id, event, step_index, step, resolved)
 
 func _cancel_run(run: Dictionary, rule_id: StringName, event: StringName,
 		step_index := -1, step: Step = null) -> void:

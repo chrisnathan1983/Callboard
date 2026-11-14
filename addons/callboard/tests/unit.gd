@@ -523,7 +523,7 @@ func _initialize() -> void:
 	ok = _check("deactivation cancels an outstanding delay", not state["step_ran"]) and ok
 
 	ok = await _test_restart() and ok
-	ok = _test_queue() and ok
+	ok = await _test_queue() and ok
 	ok = _test_signal_callbacks_accept_arguments() and ok
 	ok = await _test_playback_wait_exits() and ok
 	ok = await _test_cancel_if_interrupts_a_wait() and ok
@@ -1636,6 +1636,65 @@ func _test_queue() -> bool:
 	payload_engine.fire(&"start", {"stop": true})
 	clock_tick.emit()
 	ok = _check("queued run cancellation uses that queued event's payload", payload_runs == [false]) and ok
+
+	var parallel_engine := RuleEngine.new(Blackboard.new(), {}, func(_seconds: float) -> Signal: return clock_tick)
+	var serialized_group := StepData.new()
+	serialized_group.verb = &"parallel"
+	serialized_group.join_parallel = false
+	var serialized_child := StepData.new()
+	serialized_child.verb = &"say"
+	serialized_child.args = PackedStringArray(["prop", "\"hello\""])
+	var nested_group := StepData.new()
+	nested_group.verb = &"parallel"
+	var nested_child := StepData.new()
+	nested_child.verb = &"score"
+	nested_group.parallel_branches.append([nested_child])
+	serialized_group.parallel_branches = [[serialized_child, nested_group], []]
+	var restored_group := StepData.from_dictionary(serialized_group.to_dictionary())
+	ok = _check("parallel StepData serializes join mode and recursively restores ordered branches",
+		not restored_group.join_parallel and restored_group.parallel_branches.size() == 2
+		and restored_group.parallel_branches[0].size() == 2
+		and restored_group.parallel_branches[0][0].verb == &"say"
+		and restored_group.parallel_branches[0][1].parallel_branches[0][0].verb == &"score"
+		and restored_group.parallel_branches[1].is_empty()) and ok
+	var parallel_order: Array[String] = []
+	var parallel_rule := Rule.new(&"parallel_join", &"parallel_start")
+	var slow_branch: Array[Step] = [Step.new(func(_c: Dictionary) -> void:
+		parallel_order.append("slow-start")),
+		Step.new(func(_c: Dictionary) -> void: parallel_order.append("slow-end")).after(1.0)]
+	var fast_branch: Array[Step] = [Step.new(func(_c: Dictionary) -> void:
+		parallel_order.append("fast"))]
+	parallel_rule.steps = [Step.parallel([slow_branch, fast_branch]),
+		Step.new(func(_c: Dictionary) -> void: parallel_order.append("parent"))]
+	parallel_engine.rules.append(parallel_rule)
+	parallel_engine.fire(&"parallel_start")
+	await process_frame
+	var parallel_started_concurrently := parallel_order == ["slow-start", "fast"]
+	clock_tick.emit()
+	await process_frame
+	await process_frame
+	ok = _check("joined parallel branches start in authored order and parent resumes after all finish",
+		parallel_started_concurrently and parallel_order == ["slow-start", "fast", "slow-end", "parent"]
+		) and ok
+
+	var detached_engine := RuleEngine.new(Blackboard.new(), {}, func(_seconds: float) -> Signal: return clock_tick)
+	var detached_order: Array[String] = []
+	var detached_rule := Rule.new(&"parallel_detached", &"detached_start")
+	var detached_branch: Array[Step] = [Step.new(func(_c: Dictionary) -> void:
+		detached_order.append("started")),
+		Step.new(func(_c: Dictionary) -> void: detached_order.append("cancelled-work-ran")).after(1.0)]
+	detached_rule.steps = [Step.parallel([detached_branch], false),
+		Step.new(func(_c: Dictionary) -> void: detached_order.append("parent"))]
+	detached_engine.rules.append(detached_rule)
+	detached_engine.fire(&"detached_start")
+	await process_frame
+	var parent_did_not_join := detached_order == ["started", "parent"]
+	detached_engine.cancel_all()
+	clock_tick.emit()
+	await process_frame
+	ok = _check("unjoined branch remains run-owned and deactivation cancels its later steps",
+		parent_did_not_join and detached_order == ["started", "parent"]
+		) and ok
 
 	bb.write(&"enabled", true)
 	engine.fire(&"start", {"id": 6})

@@ -218,6 +218,22 @@ func apply_graph(stage: Stage) -> Array[String]:
 
 func _build_step(stage: Stage, event: StringName, factory: CoreVerbs, spec: StepData,
 		catalog: Array, inputs: Dictionary) -> Step:
+	if spec.verb == &"parallel":
+		var branches: Array[Array] = []
+		for branch_data: Array in spec.parallel_branches:
+			var branch: Array[Step] = []
+			for child: StepData in branch_data:
+				var child_step := _build_step(stage, event, factory, child, catalog, inputs)
+				if child_step == null:
+					return null
+				branch.append(child_step)
+			branches.append(branch)
+		var group := Step.parallel(branches, spec.join_parallel)
+		var group_delay := _evaluate_step_delay(spec.delay, inputs, factory)
+		if group_delay == null or float(group_delay) < 0.0:
+			return null
+		group.delay = float(group_delay)
+		return group
 	var verb := String(spec.verb)
 	var signature := RuntimeVerbCatalog.find(catalog, verb)
 	if signature.is_empty():
@@ -306,6 +322,17 @@ func _build_step(stage: Stage, event: StringName, factory: CoreVerbs, spec: Step
 	if not delay.is_empty():
 		step.after(float(values[1]))
 	return step
+
+func _evaluate_step_delay(source: String, inputs: Dictionary, base: Object) -> Variant:
+	if source.is_empty():
+		return 0.0
+	var expression := Expression.new()
+	if expression.parse(source, PackedStringArray(inputs.keys())) != OK:
+		return null
+	var value: Variant = expression.execute(inputs.values(), base, false)
+	if expression.has_execute_failed() or not (value is int or value is float):
+		return null
+	return value
 
 func _supports_runtime_input(verb: String, index: int) -> bool:
 	return ((verb in ["set_var", "add_var", "say"] and index == 1)
