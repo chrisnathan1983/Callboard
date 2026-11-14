@@ -147,11 +147,11 @@ The first five items retain the high priority assigned in `TODO.md`.
 
 ## 4. Interactions, host integration, and staging
 
-- [ ] **Make contact triggers game-agnostic.** See [TriggerArea](addons/callboard/core/trigger_area.gd).
+- [x] **Make contact triggers game-agnostic.** See [TriggerArea](addons/callboard/core/trigger_area.gd).
   - [x] `TriggerArea` supports Enter and Interact. Interactions already expose host eligibility/handling hooks, accepted and rejected Calls, and payloads.
   - [x] Expose `TriggerArea.trigger_groups` for optional filtering by Godot body group. Cover matching and nonmatching bodies, including movable props, projectiles, and vehicles. Preserve the existing `Player` and `Companion` defaults; an empty list accepts any body group.
-  - [ ] Honor the scene-configured collision layer and mask and expose an optional `collision_mask_override`. Define compatibility for scenes relying on the current collision defaults.
-  - [ ] Support arbitrary body/prop contacts and an Exit Call or mode. Specify which body information is available in the payload and how managed/dormant Stages handle entry and exit.
+  - [x] Honor scene-configured collision layers and masks, and expose `collision_mask_override`. Keep `TRIGGER` and `PLAYER | COMPANION` as defaults; `-1` preserves the scene mask, while any nonnegative override replaces it (including `0`).
+  - [x] Support arbitrary body/prop contacts and an optional `exit_event`. Include body name, current path, runtime instance ID, and groups in `payload.body` without retaining the Node. Filter both entry and exit by `trigger_groups`; only send paired exit Calls when entry occurred while the Stage accepted Calls, and do not queue dormant entry/exit events.
 
 - [ ] **Provide a generic item interaction and delivery contract.** The source proposals differ on whether inventory should be core. The existing addon delegates policy to the host. Confirm the scope of any optional reusable inventory component.
   - [x] `TriggerArea` provides `set_eligibility_hook()`, `set_interaction_handler()`, override points, and accepted/rejected outcome payloads. [InteractionResolver](addons/callboard/core/interaction_resolver.gd) selects one eligible target.

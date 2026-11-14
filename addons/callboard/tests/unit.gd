@@ -615,6 +615,8 @@ func _initialize() -> void:
 	ok = await _test_managed_stages_and_restoration() and ok
 	ok = await _test_async_stage_loading() and ok
 	ok = _test_trigger_groups() and ok
+	ok = await _test_trigger_collision_settings() and ok
+	ok = await _test_trigger_contact_events() and ok
 	print("UNIT: ", "PASS" if ok else "FAIL")
 	quit(0 if ok else 1)
 
@@ -706,6 +708,92 @@ func _test_trigger_groups() -> bool:
 	return _check("TriggerArea ENTER filters configurable body groups, preserves Player/Companion defaults, and accepts all groups when unfiltered",
 		default_groups_match and defaults_preserved and configured_groups_match
 		and unrelated_rejected and empty_filter_accepts_all)
+
+func _test_trigger_collision_settings() -> bool:
+	var defaults := TriggerArea.new()
+	var default_values_preserved := (
+		defaults.collision_layer == StageCollisionLayers.TRIGGER
+		and defaults.collision_mask == (StageCollisionLayers.PLAYER | StageCollisionLayers.COMPANION)
+	)
+	root.add_child(defaults)
+	var authored := TriggerArea.new()
+	authored.collision_layer = 1 << 5
+	authored.collision_mask = 1 << 6
+	root.add_child(authored)
+	var overridden := TriggerArea.new()
+	overridden.collision_layer = 1 << 7
+	overridden.collision_mask = 1 << 8
+	overridden.collision_mask_override = 0
+	root.add_child(overridden)
+	await process_frame
+	var scene_settings_preserved := (
+		authored.collision_layer == (1 << 5)
+		and authored.collision_mask == (1 << 6)
+	)
+	var explicit_zero_override_applied := (
+		overridden.collision_layer == (1 << 7)
+		and overridden.collision_mask == 0
+	)
+	defaults.free()
+	authored.free()
+	overridden.free()
+	return _check("TriggerArea keeps legacy defaults, honors scene collision settings, and applies an explicit zero mask override",
+		default_values_preserved and scene_settings_preserved and explicit_zero_override_applied)
+
+func _test_trigger_contact_events() -> bool:
+	var definition := StageDefinition.new()
+	definition.managed_lifecycle = true
+	definition.external_calls = PackedStringArray(["arrive", "entered", "exited"])
+	var stage := Stage.new()
+	stage.definition = definition
+	root.add_child(stage)
+	await process_frame
+	var received: Array[Dictionary] = []
+	var enter_rule := Rule.new(&"capture_enter", &"entered")
+	enter_rule.steps.append(Step.new(func(context: Dictionary) -> void:
+		received.append({"event": "entered", "payload": context.get("payload", {}).duplicate(true)})
+	))
+	var exit_rule := Rule.new(&"capture_exit", &"exited")
+	exit_rule.steps.append(Step.new(func(context: Dictionary) -> void:
+		received.append({"event": "exited", "payload": context.get("payload", {}).duplicate(true)})
+	))
+	stage.engine.rules.append_array([enter_rule, exit_rule])
+	var trigger := TriggerArea.new()
+	trigger.event = &"entered"
+	trigger.exit_event = &"exited"
+	trigger.trigger_groups.clear()
+	trigger.ctx["body"] = {"forged": true}
+	stage.add_child(trigger)
+	var body := Node3D.new()
+	body.name = "DeliveryCart"
+	body.add_to_group(&"Vehicle")
+	root.add_child(body)
+	stage.activate()
+	trigger._on_body_entered(body)
+	trigger._on_body_exited(body)
+	await process_frame
+	var body_data: Dictionary = received[0].get("payload", {}).get("body", {}) if received.size() >= 2 else {}
+	var paired_events_include_body_metadata: bool = (
+		received.size() == 2
+		and received[0].get("event") == "entered"
+		and received[1].get("event") == "exited"
+		and body_data.get("name") == "DeliveryCart"
+		and body_data.get("path") == String(body.get_path())
+		and body_data.get("instance_id") == body.get_instance_id()
+		and body_data.get("groups", []).has(&"Vehicle")
+		and not body_data.has("forged")
+	)
+	stage.deactivate()
+	trigger._on_body_entered(body)
+	stage.activate()
+	trigger._on_body_exited(body)
+	await process_frame
+	var dormant_contact_not_replayed := received.size() == 2
+	stage.queue_free()
+	body.queue_free()
+	await process_frame
+	return _check("TriggerArea sends body metadata with paired enter/exit Calls and does not replay a dormant contact on exit",
+		paired_events_include_body_metadata and dormant_contact_not_replayed)
 
 func _test_session_scope_reset() -> bool:
 	var definition := StageDefinition.new()

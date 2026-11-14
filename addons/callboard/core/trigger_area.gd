@@ -12,7 +12,12 @@ const LAYER_TRIGGER := StageCollisionLayers.TRIGGER
 const LAYER_PLAYER := StageCollisionLayers.PLAYER
 const LAYER_COMPANION := StageCollisionLayers.COMPANION
 
+## Replaces the scene's collision_mask at runtime. -1 leaves its configured mask intact.
+@export var collision_mask_override: int = -1
+
 @export var event: StringName
+## Optional Call fired when a body that entered while the Stage accepted Calls exits.
+@export var exit_event: StringName
 @export var rejected_event: StringName
 @export var mode: Mode = Mode.ENTER
 ## Bodies in any listed group can activate ENTER. An empty list accepts every body.
@@ -25,19 +30,51 @@ const LAYER_COMPANION := StageCollisionLayers.COMPANION
 var _stage: Stage
 var _eligibility_hook: Callable
 var _interaction_handler: Callable
+var _active_contact_ids: Dictionary = {}
+
+func _init() -> void:
+	# Preserve the original runtime defaults while allowing scene-authored values to override them.
+	collision_layer = LAYER_TRIGGER
+	collision_mask = LAYER_PLAYER | LAYER_COMPANION
 
 func _ready() -> void:
 	if Engine.is_editor_hint():
 		return
-	collision_layer = LAYER_TRIGGER
-	collision_mask = LAYER_PLAYER | LAYER_COMPANION
+	if collision_mask_override >= 0:
+		collision_mask = collision_mask_override
 	_stage = _find_stage()
 	if mode == Mode.ENTER:
 		body_entered.connect(_on_body_entered)
+		if not exit_event.is_empty():
+			body_exited.connect(_on_body_exited)
 
 func _on_body_entered(body: Node3D) -> void:
+	if not _matches_trigger_groups(body):
+		return
+	if not exit_event.is_empty() and is_instance_valid(_stage) and _stage.accepts_calls():
+		_active_contact_ids[body.get_instance_id()] = true
+	_fire(event, _contact_payload(body))
+
+func _on_body_exited(body: Node3D) -> void:
+	var body_id := body.get_instance_id()
+	if not _active_contact_ids.erase(body_id):
+		return
 	if _matches_trigger_groups(body):
-		_fire()
+		_fire(exit_event, _contact_payload(body))
+
+func _contact_payload(body: Node3D) -> Dictionary:
+	var groups: Array[StringName] = []
+	for group_name in body.get_groups():
+		groups.append(group_name)
+	var body_info := {
+		"name": String(body.name),
+		"path": String(body.get_path()) if body.is_inside_tree() else "",
+		"instance_id": body.get_instance_id(),
+		"groups": groups,
+	}
+	var payload := ctx.duplicate(true)
+	payload["body"] = body_info
+	return payload
 
 func _matches_trigger_groups(body: Node) -> bool:
 	if trigger_groups.is_empty():
@@ -94,9 +131,9 @@ func interact(actor: Node = null, interaction_context: Dictionary = {}) -> Dicti
 	interaction_completed.emit(actor, result)
 	return result
 
-func _fire() -> void:
-	if is_instance_valid(_stage):
-		_stage.fire(event, ctx.duplicate())
+func _fire(call_event: StringName, payload: Dictionary) -> void:
+	if not call_event.is_empty() and is_instance_valid(_stage):
+		_stage.fire(call_event, payload)
 
 func _find_stage() -> Stage:
 	var node := get_parent()
