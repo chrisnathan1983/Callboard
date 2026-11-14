@@ -1,5 +1,5 @@
 class_name Player extends CharacterBody3D
-## Minimal player: WASD / arrows to move, E to interact with nearby TriggerAreas.
+## Minimal player: WASD / arrows to move, E to use the shared interaction resolver.
 
 const SPEED := 6.0
 const LAYER_PLAYER := StageCollisionLayers.PLAYER
@@ -8,6 +8,7 @@ const LAYER_TRIGGER := StageCollisionLayers.TRIGGER
 var stunned := false
 var _stun_timer: SceneTreeTimer
 var _reach: Area3D
+var interaction_resolver: InteractionResolver
 var _mat := StandardMaterial3D.new()
 
 func _ready() -> void:
@@ -37,6 +38,10 @@ func _ready() -> void:
 	reach_shape.shape = sphere
 	_reach.add_child(reach_shape)
 	add_child(_reach)
+	interaction_resolver = InteractionResolver.new()
+	interaction_resolver.name = "InteractionResolver"
+	add_child(interaction_resolver)
+	interaction_resolver.configure(self, _reach)
 
 func _physics_process(_delta: float) -> void:
 	var dir := Vector3.ZERO
@@ -50,22 +55,10 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed(&"interact"):
 		interact()
 
-func interact() -> void:
-	if stunned or _reach == null:
-		return
-	var nearest: Area3D
-	var nearest_distance := INF
-	for area in _reach.get_overlapping_areas():
-		if not area.has_method(&"interact"):
-			continue
-		if area is TriggerArea and area.mode != TriggerArea.Mode.INTERACT:
-			continue
-		var distance := global_position.distance_squared_to(area.global_position)
-		if distance < nearest_distance:
-			nearest = area
-			nearest_distance = distance
-	if nearest:
-		nearest.interact()
+func interact(context: Dictionary = {}) -> Dictionary:
+	if stunned or interaction_resolver == null:
+		return {"accepted": false, "event": &"", "payload": {}}
+	return interaction_resolver.interact(context)
 
 func stun(seconds: float) -> void:
 	if _stun_timer:

@@ -76,12 +76,22 @@ func _test_player_and_bump(stage: Stage, fired: Array[StringName]) -> bool:
 	var nearest := Props.trigger_box(stage, Vector3.ONE, Vector3(0.5, 1, 4), &"near")
 	var farther := Props.trigger_box(stage, Vector3.ONE, Vector3(1, 1, 4), &"far")
 	var enter_only := Props.trigger_box(stage, Vector3.ONE, Vector3(0, 1, 4), &"enter_only")
+	nearest.name = "NearArea"
+	farther.name = "FarArea"
+	nearest.prompt_text = "Nearby choice"
+	farther.prompt_text = "Far choice"
 	enter_only.mode = TriggerArea.Mode.ENTER
+	var tie := Props.trigger_box(stage, Vector3.ONE, Vector3(0.5, 1, 4), &"tie")
+	tie.name = "TieArea"
+	tie.prompt_text = "Tie choice"
 	var interactions: Array[StringName] = []
 	for event in [&"near", &"far"]:
 		var rule := Rule.new(event, event)
 		rule.steps.append(Step.new(func(_ctx: Dictionary) -> void: interactions.append(event)))
 		stage.engine.rules.append(rule)
+	var prompt_changes: Array[String] = []
+	player.interaction_resolver.prompt_changed.connect(func(text: String, _icon: Texture2D, _priority: int) -> void:
+		prompt_changes.append(text))
 	for frame in range(3):
 		await physics_frame
 	ok = _check("all test areas overlap the player",
@@ -95,6 +105,49 @@ func _test_player_and_bump(stage: Stage, fired: Array[StringName]) -> bool:
 	interact_key.echo = true
 	player._unhandled_input(interact_key)
 	ok = _check("interaction ignores held-key repeats", interactions.size() == 1) and ok
+	var resolver := player.interaction_resolver
+	farther.interaction_priority = 5
+	resolver.refresh()
+	ok = _check("higher priority selects its trigger and updates the prompt",
+		resolver.selected_trigger == farther and resolver._prompt_text == "Far choice") and ok
+	var far_available := [true]
+	farther.set_eligibility_hook(func(actor: Node) -> bool: return actor == player and far_available[0])
+	far_available[0] = false
+	resolver.refresh()
+	ok = _check("eligibility changes replace the selected prompt while the actor remains in range",
+		resolver.selected_trigger == nearest and resolver._prompt_text == "Nearby choice") and ok
+	far_available[0] = true
+	resolver.refresh()
+	ok = _check("an available higher-priority trigger becomes selected again without leaving the range",
+		resolver.selected_trigger == farther and prompt_changes[-1] == "Far choice") and ok
+	far_available[0] = false
+	resolver.refresh()
+	var tie_paths: Array[String] = [String(nearest.get_path()), String(tie.get_path())]
+	tie_paths.sort()
+	ok = _check("equal-priority, equal-distance triggers use a stable node-path tie-break",
+		resolver.selected_trigger == (nearest if tie_paths[0] == String(nearest.get_path()) else tie)) and ok
+	farther.interaction_priority = 0
+	resolver.refresh()
+	ok = _check("one prompt is exposed for the selected trigger", resolver.selected_trigger == nearest
+		and resolver._prompt_text == "Nearby choice") and ok
+	var accepted_result := resolver.interact({"tool": "permit"})
+	await process_frame
+	ok = _check("accepted interactions dispatch the trigger Call with their context payload",
+		accepted_result.get("accepted", false) and accepted_result["event"] == &"near"
+		and accepted_result["payload"].get("tool") == "permit" and interactions == [&"near", &"near"]) and ok
+	var rejection_payloads: Array[Dictionary] = []
+	var rejected_rule := Rule.new(&"near_rejected", &"near_rejected")
+	rejected_rule.steps.append(Step.new(func(c: Dictionary) -> void:
+		rejection_payloads.append(c["payload"].duplicate(true))))
+	stage.engine.rules.append(rejected_rule)
+	nearest.rejected_event = &"near_rejected"
+	nearest.set_interaction_handler(func(actor: Node, context: Dictionary) -> Dictionary:
+		return {"accepted": false, "payload": {"reason": "missing_tool", "tool": context.get("tool", ""), "actor": actor == player}})
+	var rejected_result := resolver.interact({"tool": "permit"})
+	await process_frame
+	ok = _check("interaction handlers can reject and route their context payload to a separate Call",
+		not rejected_result.get("accepted", true) and rejected_result["event"] == &"near_rejected"
+		and rejection_payloads == [{"reason": "missing_tool", "tool": "permit", "actor": true}]) and ok
 
 	player.stun(1.0)
 	var timer := player._stun_timer
@@ -103,7 +156,7 @@ func _test_player_and_bump(stage: Stage, fired: Array[StringName]) -> bool:
 	player.interact()
 	ok = _check("overlapping stuns keep the longest remaining duration and block interaction",
 		player.stunned and player._stun_timer == timer and timer.time_left == 5.0
-		and interactions.size() == 1) and ok
+		and interactions.size() == 2) and ok
 	var stage_wait := stage._wait(0.05)
 	var stage_timer := stage_wait.get_object() as SceneTreeTimer
 	var stage_timeouts: Array[bool] = []

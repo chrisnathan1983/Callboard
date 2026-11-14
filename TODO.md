@@ -20,10 +20,10 @@ Keep the readme in sync with the code.
 
 ## 3. Contextual interactions
 
-- [ ] Add prompt text, an optional icon, and priority to interactable triggers. Include an eligibility hook that receives the interacting actor and can query the host game's current state.
-- [ ] Provide a resolver that selects one eligible trigger for an actor from overlapping candidates. Use a deterministic tie-break, update the selected prompt when availability changes, and dispatch only to the selected trigger. Let any input action or UI subscribe to the selected prompt and invoke the same interaction API.
-- [ ] Pass an interaction context to the handler and let the handler produce the outcome and payload for Callboard. Projects supply inventory, item consumption, and interaction policy through this integration point.
-- **Done when** overlapping triggers yield one prompt and one dispatch, eligibility can change while the actor stays in range, and accepted and rejected attempts can drive different rules.
+- [x] Add prompt text, an optional icon, and priority to interactable triggers. Include an eligibility hook that receives the interacting actor and can query the host game's current state.
+- [x] Provide a resolver that selects one eligible trigger for an actor from overlapping candidates. Use a deterministic tie-break, update the selected prompt when availability changes, and dispatch only to the selected trigger. Let any input action or UI subscribe to the selected prompt and invoke the same interaction API.
+- [x] Pass an interaction context to the handler and let the handler produce the outcome and payload for Callboard. Projects supply inventory, item consumption, and interaction policy through this integration point.
+- **Done when** overlapping triggers yield one prompt and one dispatch, eligibility can change while the actor stays in range, and accepted and rejected attempts can drive different rules. **Complete:** `InteractionResolver` picks by priority, distance, then node path, publishes prompt/selection changes, and dispatches through the same API. Runtime coverage checks dynamic eligibility, deterministic ties, accepted and rejected Calls, and context payloads.
 
 ## 4. Staging verbs and gameplay integration
 

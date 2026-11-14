@@ -206,6 +206,7 @@ collision_mask = 10
 script = ExtResource("3_trigger")
 event = &"file:permit"
 mode = 1
+prompt_text = "Get squeak permit"
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="PermitArea"]
 shape = SubResource("BoxShape3D_PermitArea")
@@ -217,6 +218,7 @@ collision_mask = 10
 script = ExtResource("3_trigger")
 event = &"give:duck"
 mode = 1
+prompt_text = "Deliver the duck"
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="DeliveryArea"]
 shape = SubResource("BoxShape3D_DeliveryArea")
@@ -228,6 +230,7 @@ collision_mask = 10
 script = ExtResource("3_trigger")
 event = &"give:decoy"
 mode = 1
+prompt_text = "Offer decoy"
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="DecoyArea"]
 shape = SubResource("BoxShape3D_DecoyArea")

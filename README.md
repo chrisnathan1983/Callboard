@@ -74,6 +74,25 @@ func on_door_interacted(stage: Stage) -> void:
 
 Add a `show_node` or `move_to` step to make a scene prop respond. Step arguments can reference typed Stage props and script constants. The API reference includes [a custom verb you can add to the picker](docs/api.md#custom-verbs).
 
+### Contextual interactions
+
+Use `InteractionResolver` to choose one prompt and one interactable trigger from an actor's overlapping `TriggerArea`s. Set each INTERACT area's `prompt_text`, optional `prompt_icon`, and `interaction_priority`. The resolver selects by priority, distance, then node path, and refreshes as the actor or host state changes.
+
+```gdscript
+resolver.prompt_changed.connect(_show_prompt) # text, icon, priority
+resolver.interact({"source": "inventory_ui"})
+
+trigger.set_eligibility_hook(func(actor: Node) -> bool:
+    return inventory.has("permit")
+)
+trigger.set_interaction_handler(func(actor: Node, context: Dictionary) -> Dictionary:
+    inventory.erase("permit")
+    return {"accepted": true, "payload": {"accepted": true}}
+)
+```
+
+The host's eligibility hook decides whether an option is offered. Its interaction handler decides acceptance, performs any inventory policy, and supplies the Call payload. Accepted outcomes dispatch `event`; rejected outcomes can dispatch `rejected_event`. See the [TriggerArea and InteractionResolver API](docs/api.md#triggerarea) for setup and signals.
+
 <details>
 <summary>See the Blackboard and Rule settings</summary>
 

@@ -117,9 +117,33 @@ The `changed(key, value)` signal is forwarded as `Stage.var_changed`. Use the wr
 [`TriggerArea`](../addons/callboard/core/trigger_area.gd) extends `Area3D`. Place it under a Stage, add a `CollisionShape3D`, and set `event` and optional `ctx`. It locates the closest Stage ancestor.
 
 - **ENTER** dispatches when a body in the `Player` or `Companion` group enters. Its mask uses physics layers 2 and 4, respectively.
-- **INTERACT** dispatches when your controller calls `interact()`. The demo [player](../demo/scripts/actors/player.gd) finds a nearby area using the trigger layer, physics layer 3.
+- **INTERACT** is selected by an [`InteractionResolver`](../addons/callboard/core/interaction_resolver.gd) from the actor's overlapping trigger areas. The demo [player](../demo/scripts/actors/player.gd) creates a reach area and resolver; any input action or UI can call `player.interact(context)`.
 
 `TriggerArea` assigns its collision layer and mask on startup. Use [`StageCollisionLayers`](../addons/callboard/core/collision_layers.gd) for the bit masks, or call `stage.fire()` directly from your own interaction system.
+
+Interactable triggers expose `prompt_text`, optional `prompt_icon`, and `interaction_priority`. The resolver chooses the eligible trigger with the highest priority, then the shortest distance from the actor, then the lexicographically first node path. It polls while the actor remains in range, so host state can enable or disable an interaction without an area exit/re-entry.
+
+```gdscript
+var resolver := InteractionResolver.new()
+add_child(resolver)
+resolver.configure(actor, reach_area)
+resolver.prompt_changed.connect(_show_prompt) # (text, icon, priority)
+resolver.selected_trigger_changed.connect(_refresh_selection)
+
+# For example, a host-owned inventory rule can decide whether this trigger is available.
+trigger.set_eligibility_hook(func(interacting_actor: Node) -> bool:
+    return inventory.has("permit")
+)
+trigger.set_interaction_handler(func(interacting_actor: Node, context: Dictionary) -> Dictionary:
+    inventory.erase("permit")
+    return {"accepted": true, "payload": {"accepted": true, "item": "permit"}}
+)
+var result: Dictionary = resolver.interact({"source": "door_ui"})
+```
+
+`set_eligibility_hook()` receives the interacting actor. It controls whether the trigger is offered. Override `is_interaction_eligible(actor)` for a reusable trigger subtype. The prompt signal carries the displayed text, icon, and priority; read `resolver.selected_trigger` when the subscriber needs the trigger itself. `selected_trigger_changed` has no arguments and fires when selection changes.
+
+The interaction context begins as a deep copy of the trigger's `ctx`, then caller context values override matching keys. `set_interaction_handler()` or an override of `handle_interaction(actor, context)` returns `{accepted: bool, payload: Dictionary}`. Accepted results dispatch the trigger's `event`; rejected results dispatch `rejected_event` if configured. The returned result dictionary includes `accepted`, dispatched `event`, and `payload`. `interaction_completed(actor, result)` on the trigger and `interaction_completed(trigger, result)` on the resolver report the result. Inventory checks, item consumption, and other game policy stay in the host handler.
 
 ## Built-in verbs
 

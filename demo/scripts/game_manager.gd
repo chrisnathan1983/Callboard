@@ -12,6 +12,7 @@ var score := 0
 
 func _ready() -> void:
 	hud.manager = self
+	hud.bind_player($WorldManager/Player as Player)
 	load_stage()
 
 func load_stage() -> void:
