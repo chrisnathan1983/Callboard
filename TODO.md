@@ -14,9 +14,9 @@ Keep the readme in sync with the code.
 
 ## 2. Numeric Blackboard updates
 
-- [ ] Add an `add_var(key, delta)` core verb. Read the current value when the step executes and write the result through the Blackboard. Allow negative deltas and preserve the declared numeric type.
-- [ ] Register the target as both a read and a write. Offer numeric keys in the step editor and flag invalid operands, including fractional deltas for integer keys.
-- **Done when** repeated Calls update the same counter, a later step sees the new value, and saved counters continue from their restored value.
+- [x] Add an `add_var(key, delta)` core verb. Read the current value when the step executes and write the result through the Blackboard. Allow negative deltas and preserve the declared numeric type.
+- [x] Register the target as both a read and a write. Offer numeric keys in the step editor and flag invalid operands, including fractional deltas for integer keys.
+- **Done when** repeated Calls update the same counter, a later step sees the new value, and saved counters continue from their restored value. **Complete:** Unit coverage checks repeated updates, subsequent reads, restored saved values, integer/float type preservation, negative deltas, target type validation, and fractional integer rejection. Editor coverage checks numeric-key filtering and per-key delta precision.
 
 ## 3. Contextual interactions
 

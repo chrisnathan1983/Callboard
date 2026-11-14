@@ -108,6 +108,8 @@ To declare payload fields, select a rule and add fields under **Payload fields f
 
 Use expressions such as `payload.action == "confirm"`, `payload.accepted == true`, or `payload.count >= 3` in Requires, Forbids, and Cancel If. Use `has(payload.item)` or `missing(payload.item)` when a rule should handle an absent field. Missing or type-incompatible values fail comparisons, including `!=`. Bare names such as `door_open` continue to refer to Blackboard keys. The inspector lists trigger fields and guard payload references separately; validation checks field names and operand types against the selected trigger's schema.
 
+Use the built-in `add_var` step to update numeric Blackboard counters. It reads the current value when it runs, so multiple Calls accumulate and later steps see the new value. Integer keys accept whole-number positive or negative deltas; float keys accept fractional deltas. Saved counters continue from the values in your Stage's injected save dictionary.
+
 To add a Blackboard numeric guard, enter a comparison such as `score >= 10` below Requires, Forbids, or Cancel If and press **Add**. Supported operators are `>`, `>=`, `<`, `<=`, `==`, and `!=`.
 
 ## Live debugging

@@ -7,6 +7,7 @@ const ExportFilter := preload("res://addons/callboard/editor/export_plugin.gd")
 func _initialize() -> void:
 	await process_frame
 	var ok := _test_scene_assigned_props()
+	ok = _test_add_var_editor() and ok
 	ok = _test_layer_export_filter() and ok
 	ok = _test_factory() and ok
 	ok = _test_debug_panel() and ok
@@ -49,6 +50,41 @@ func _test_scene_assigned_props() -> bool:
 			and board._data.errors.is_empty() and board._data.warnings.is_empty()) and ok
 	board.free()
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(TMP_PATH))
+	return ok
+
+func _test_add_var_editor() -> bool:
+	var bb := Blackboard.new()
+	bb.define(&"counter", &"local", 0)
+	bb.define(&"ratio", &"local", 0.0)
+	bb.define(&"enabled", &"local", false)
+	var factory := CoreVerbs.new(StepContext.new(bb, null, null, Callable()))
+	var draft := GraphDraft.new()
+	draft.variables = [
+		VariableData.new(), VariableData.new(), VariableData.new(),
+	]
+	draft.variables[0].key = &"counter"
+	draft.variables[0].default_value = 0
+	draft.variables[1].key = &"ratio"
+	draft.variables[1].default_value = 0.0
+	draft.variables[2].key = &"enabled"
+	draft.variables[2].default_value = false
+	draft.catalog = VerbCatalog.from_factory(factory)
+	var inspector := RuleInspector.new()
+	inspector._data = draft
+	var entry := VerbCatalog.find(draft.catalog, "add_var")
+	var step := StepData.new()
+	step.verb = &"add_var"
+	step.args = PackedStringArray(['&"counter"', "1.0"])
+	var key_picker := inspector._arg_widget(step, 0, entry["args"][0]) as OptionButton
+	var integer_delta := inspector._arg_widget(step, 1, entry["args"][1]) as SpinBox
+	step.args[0] = '&"ratio"'
+	var float_delta := inspector._arg_widget(step, 1, entry["args"][1]) as SpinBox
+	var ok := _check("add_var step editor offers only numeric keys and matches delta precision to the selected key",
+		key_picker != null and key_picker.item_count == 2
+		and key_picker.get_item_text(0) == "counter" and key_picker.get_item_text(1) == "ratio"
+		and integer_delta != null and integer_delta.step == 1.0
+		and float_delta != null and float_delta.step == 0.05)
+	inspector.free()
 	return ok
 
 func _test_layer_export_filter() -> bool:

@@ -128,6 +128,7 @@ The default factory is [`StagingVerbs`](../addons/callboard/core/staging_verbs.g
 | Factory | Verb | Effect |
 | --- | --- | --- |
 | Core | `set_var(key, value = true)` | Write a Blackboard value. |
+| Core | `add_var(key, delta)` | Add a positive or negative numeric delta to an `int` or `float` Blackboard value when the step executes. Integer keys require a whole-number delta. |
 | Core | `score(points)` | Emit a score delta. |
 | Core | `repeat_emit(interval, tick)` | Emit `relay:<tick>` every interval in seconds until the rule is cancelled. This step occupies the rule while it runs. |
 | Staging | `show_node(n, should_be_visible = true)` | Set a `Node3D`'s visibility. |
@@ -144,7 +145,7 @@ The engine checks **Cancel If** before the first step and after each step or del
 
 | Verb | Effect after cancellation |
 | --- | --- |
-| `set_var`, `score`, `show_node` | Completed writes, score changes, and visibility changes stay applied. |
+| `set_var`, `add_var`, `score`, `show_node` | Completed writes, score changes, and visibility changes stay applied. |
 | `repeat_emit` | Checks before each tick and stops emitting when cancelled. Deactivation releases its timer wait immediately. |
 | `pop`, `bounce`, `move_to` | The tween finishes while the Stage remains in the tree. Deactivation immediately releases the rule's wait. |
 | `flash`, `jump` | The animation finishes while the Stage remains in the tree. The current tint restores its base color and the current jump returns to its base height. Deactivation immediately releases the rule's wait. |
@@ -184,7 +185,7 @@ func _make_verbs(context: StepContext) -> CoreVerbs:
 
 Declare a Boolean Blackboard key `door_open` and assign a typed `Node3D` property named `door` on the Stage. In the step picker, select `unlock_door` with arguments `door` and `&"door_open"`.
 
-- `Step.sets` lists Blackboard keys written by the step. `Step.emits` names a relay the callable sends. These fields describe the step for validation and graph display.
+- `Step.reads` and `Step.sets` list Blackboard keys read and written by the step. `Step.emits` names a relay the callable sends. These fields describe the step for validation and graph display.
 - A step sends a relay by dispatching `relay:<name>` through the engine. Set `Step.emit_arg` to the zero-based argument index when that argument supplies the name so Callboard can rewrite it during a relay rename.
 - A step callable accepts a context dictionary and can await work or return a signal. Read event fields from `context["payload"]` (or from their top-level compatibility aliases). `Step.after(seconds)` adds a delay before execution.
 - For a custom step that awaits internally, capture `engine.token()` on entry and check `engine.alive(context["_callboard"]["rule"], token)` after each await before applying more effects. Wrap a signal with `engine.interruptible(signal)` to resume the wait on deactivation, then perform the same cancellation check. Resolve the engine through `context.engine_ref` and release the strong reference before awaiting. See [`repeat_emit`](../addons/callboard/core/core_verbs.gd) for the pattern.

@@ -13,6 +13,28 @@ func set_var(key: StringName, value: Variant = true) -> Step:
 	step.sets = [key]
 	return step
 
+## Add to a declared numeric Blackboard value when this step executes.
+func add_var(key: StringName, delta: float) -> Step:
+	var bb := context.bb
+	var step := Step.new(func(_c: Dictionary) -> void:
+		var resolved := bb.resolve_key(key)
+		if not bb.schema.has(resolved):
+			push_warning("Callboard add_var skipped: Blackboard key '%s' is not declared." % key)
+			return
+		var key_type: int = bb.schema[resolved].get("type", TYPE_NIL)
+		if key_type == TYPE_INT:
+			if not is_equal_approx(delta, roundf(delta)):
+				push_warning("Callboard add_var skipped: fractional delta for integer key '%s'." % key)
+				return
+			bb.write(key, int(bb.get_var(key)) + int(delta))
+		elif key_type == TYPE_FLOAT:
+			bb.write(key, float(bb.get_var(key)) + delta)
+		else:
+			push_warning("Callboard add_var skipped: Blackboard key '%s' must be int or float." % key))
+	step.reads = [key]
+	step.sets = [key]
+	return step
+
 func score(points: int) -> Step:
 	var emit_score := context.score
 	return Step.new(func(_c: Dictionary) -> void: emit_score.call(points))

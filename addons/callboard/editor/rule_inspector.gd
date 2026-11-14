@@ -542,6 +542,17 @@ func _set_arg(step: StepData, i: int, expr: String, spin: SpinBox = null) -> voi
 	else:
 		changed.emit(_rule.id)
 
+func _selected_add_var_target(step: StepData) -> VariableData:
+	if step.args.is_empty():
+		return null
+	var target_literal := ExprText.parse_literal(step.args[0])
+	if not target_literal["ok"] or typeof(target_literal["value"]) != TYPE_STRING_NAME:
+		return null
+	for variable: VariableData in _data.variables:
+		if variable.key == target_literal["value"]:
+			return variable
+	return null
+
 func _arg_widget(step: StepData, i: int, param: Dictionary) -> Control:
 	var cur := _current(step, i, param)
 	var lit := ExprText.parse_literal(cur)
@@ -570,11 +581,14 @@ func _arg_widget(step: StepData, i: int, param: Dictionary) -> Control:
 				var s := SpinBox.new()
 				s.allow_greater = true
 				s.allow_lesser = true
-				s.step = 1.0 if param["type"] == TYPE_INT else 0.05
+				var integer_delta: bool = param["type"] == TYPE_INT
+				if step.verb == &"add_var" and param["name"] == "delta":
+					var target := _selected_add_var_target(step)
+					integer_delta = target != null and typeof(target.default_value) == TYPE_INT
+				s.step = 1.0 if integer_delta else 0.05
 				s.value = float(lit["value"])
-				var is_int: bool = param["type"] == TYPE_INT
 				s.value_changed.connect(func(v: float) -> void:
-					_set_arg(step, i, str(int(v)) if is_int else ExprText.format_literal(snappedf(v, 0.001)), s))
+					_set_arg(step, i, str(int(v)) if integer_delta else ExprText.format_literal(snappedf(v, 0.001)), s))
 				return s
 		TYPE_STRING:
 			if lit["ok"] and typeof(lit["value"]) == TYPE_STRING:
@@ -582,7 +596,11 @@ func _arg_widget(step: StepData, i: int, param: Dictionary) -> Control:
 		TYPE_STRING_NAME:
 			if param["name"] == "key":
 				var ob := OptionButton.new()
-				var keys: Array = _data.variables.map(func(v: VariableData) -> String: return String(v.key))
+				var keys: Array[String] = []
+				for variable: VariableData in _data.variables:
+					if step.verb == &"add_var" and typeof(variable.default_value) not in [TYPE_INT, TYPE_FLOAT]:
+						continue
+					keys.append(String(variable.key))
 				var cur_key: String = String(lit["value"]) if lit["ok"] else ""
 				if not keys.has(cur_key):
 					keys.append(cur_key)

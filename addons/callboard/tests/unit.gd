@@ -44,6 +44,77 @@ func _initialize() -> void:
 		typeof(bb.saved[&"speed"]) == TYPE_FLOAT and bb.saved[&"speed"] == 1.0
 		and speed_changes.size() == 1 and typeof(speed_changes[0]) == TYPE_FLOAT) and ok
 
+	var counter_saved := {&"counter": 4}
+	var counter_bb := Blackboard.new(counter_saved)
+	counter_bb.define(&"counter", &"saved", 0)
+	counter_bb.define(&"fractional", &"local", 1.5)
+	counter_bb.define(&"enabled", &"local", false)
+	var counter_factory := CoreVerbs.new(StepContext.new(counter_bb, null, null, Callable()))
+	var decrement := counter_factory.add_var(&"counter", -1.0)
+	var observed_counters: Array[int] = []
+	var observe_step := Step.new(func(_context: Dictionary) -> void:
+		observed_counters.append(counter_bb.get_var(&"counter")))
+	var counter_rule := Rule.new(&"counter_update", &"increment")
+	decrement.verb = &"add_var"
+	decrement.args = [&"counter", -1.0]
+	counter_rule.steps.append_array([decrement, observe_step])
+	var counter_engine := RuleEngine.new(counter_bb, {}, Callable())
+	counter_engine.rules.append(counter_rule)
+	counter_engine.fire(&"increment")
+	await process_frame
+	counter_engine.fire(&"increment")
+	await process_frame
+	ok = _check("add_var applies negative deltas at execution and later steps read the updated counter",
+		observed_counters == [3, 2] and counter_saved[&"counter"] == 2
+		and decrement.reads == [&"counter"] and decrement.sets == [&"counter"]) and ok
+	var restored_counter_bb := Blackboard.new(counter_saved)
+	restored_counter_bb.define(&"counter", &"saved", 0)
+	var restored_step := CoreVerbs.new(StepContext.new(restored_counter_bb, null, null, Callable())).add_var(&"counter", 3.0)
+	restored_step.fn.call({})
+	ok = _check("add_var resumes from the restored saved counter and preserves its integer type",
+		restored_counter_bb.get_var(&"counter") == 5 and typeof(counter_saved[&"counter"]) == TYPE_INT
+		and typeof(restored_counter_bb.get_var(&"counter")) == TYPE_INT) and ok
+	var float_update := counter_factory.add_var(&"fractional", -0.25)
+	float_update.fn.call({})
+	ok = _check("add_var preserves float values and accepts fractional negative deltas",
+		counter_bb.get_var(&"fractional") == 1.25
+		and typeof(counter_bb.get_var(&"fractional")) == TYPE_FLOAT) and ok
+	var bad_add := counter_factory.add_var(&"counter", 0.5)
+	bad_add.verb = &"add_var"
+	bad_add.args = [&"counter", 0.5]
+	var numeric_rule := Rule.new(&"numeric_check", &"increment")
+	numeric_rule.steps.append(bad_add)
+	var numeric_problems := RuleValidator.check([numeric_rule], counter_bb, [&"increment"], [])
+	ok = _check("validator flags fractional deltas for integer Blackboard keys",
+		numeric_problems.any(func(problem: String) -> bool: return "whole number" in problem)) and ok
+	var invalid_target := counter_factory.add_var(&"enabled", 1.0)
+	invalid_target.verb = &"add_var"
+	invalid_target.args = [&"enabled", 1.0]
+	numeric_rule.steps = [invalid_target]
+	numeric_problems = RuleValidator.check([numeric_rule], counter_bb, [&"increment"], [])
+	ok = _check("validator requires add_var targets to be numeric Blackboard keys",
+		numeric_problems.any(func(problem: String) -> bool: return "must be int or float" in problem)) and ok
+	var compiled_saved := {&"counter": 6}
+	var compiled_stage := Stage.new()
+	compiled_stage.saved_vars = compiled_saved
+	compiled_stage.build()
+	compiled_stage.define_saved(&"counter", 0)
+	var compile_definition := StageDefinition.new()
+	var compile_rule := RuleData.new()
+	compile_rule.id = &"compiled_increment"
+	compile_rule.trigger = &"increment"
+	var compile_step := StepData.new()
+	compile_step.verb = &"add_var"
+	compile_step.args = PackedStringArray(['&"counter"', "2.0"])
+	compile_rule.steps.append(compile_step)
+	compile_definition.rules = [compile_rule]
+	var compile_problems := compile_definition.apply_graph(compiled_stage)
+	if compile_problems.is_empty():
+		compiled_stage.engine.rules[0].steps[0].fn.call({})
+	ok = _check("add_var compiles from authored step data and uses the restored Blackboard value",
+		compile_problems.is_empty() and compiled_saved[&"counter"] == 8) and ok
+	compiled_stage.free()
+
 	var relay_stage := Stage.new()
 	relay_stage.build()
 	relay_stage.define_local(&"wrong_latch_type", 0)

@@ -6,6 +6,7 @@ class_name Step extends RefCounted
 var fn: Callable                       # func(ctx: Dictionary), may await or return a Signal
 var delay := 0.0                       # deliberate beat before this step runs
 var emits: StringName = &""            # relay this step fires itself (validator bookkeeping)
+var reads: Array[StringName] = []       # Blackboard keys read by the step
 var emit_arg := -1                     # argument index the Callboard can edit to change the relay
 var sets: Array[StringName] = []       # blackboard keys this step writes (validator bookkeeping)
 var verb: StringName = &""             # e.g. &"say"

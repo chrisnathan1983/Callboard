@@ -22,12 +22,33 @@ static func check(rules: Array[Rule], bb: Blackboard,
 		if r.emits != &"":
 			emitted["relay:" + r.emits] = true
 		for s in r.steps:
+			for k in s.reads:
+				if not bb.has(k):
+					problems.append("rule '%s' reads '%s' which is not declared on the Blackboard" % [r.id, k])
 			if s.emits != &"":
 				emitted["relay:" + s.emits] = true
 			for k in s.sets:
 				settable[bb.resolve_key(k)] = true
 				if not bb.has(k):
 					problems.append("rule '%s' writes '%s' which is not declared on the Blackboard" % [r.id, k])
+			if s.verb == &"add_var":
+				if s.args.size() < 2:
+					problems.append("rule '%s' has an add_var step without a key and delta" % r.id)
+				else:
+					var target: Variant = s.args[0]
+					var delta: Variant = s.args[1]
+					if not target is StringName:
+						problems.append("rule '%s' add_var target must be a Blackboard key" % r.id)
+					elif not bb.has(target):
+						problems.append("rule '%s' add_var target '%s' is not declared on the Blackboard" % [r.id, target])
+					else:
+						var target_type: int = bb.schema[bb.resolve_key(target)].get("type", TYPE_NIL)
+						if target_type not in [TYPE_INT, TYPE_FLOAT]:
+							problems.append("rule '%s' add_var target '%s' must be int or float" % [r.id, target])
+						if not (delta is int or delta is float):
+							problems.append("rule '%s' add_var delta must be numeric" % r.id)
+						elif target_type == TYPE_INT and delta is float and not is_equal_approx(delta, roundf(delta)):
+							problems.append("rule '%s' add_var delta for integer key '%s' must be a whole number" % [r.id, target])
 	for r in rules:
 		if r.one_shot and r.reentry != Rule.ReentryPolicy.IGNORE:
 			problems.append("rule '%s' is one-shot and must use Ignore re-entry" % r.id)
