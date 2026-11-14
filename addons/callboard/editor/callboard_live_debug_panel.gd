@@ -222,6 +222,8 @@ func _format_trace(entry: Dictionary) -> String:
 	var label := kind.replace("_", " ").capitalize()
 	if kind == "event_fired":
 		label += " - " + event
+	elif kind == "cross_stage_sent":
+		label += " - " + event
 	elif not rule.is_empty():
 		label += " - " + rule
 		if step > 0:

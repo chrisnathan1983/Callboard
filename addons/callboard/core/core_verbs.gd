@@ -135,6 +135,26 @@ func score(points: int) -> Step:
 	var emit_score := context.score
 	return Step.new(func(_c: Dictionary) -> void: emit_score.call(points))
 
+## Deliver an event to a loaded Stage through the shared state store. An empty
+## target broadcasts to all active, loaded Stages that declare or listen for it.
+func emit_cross_stage(event_id: StringName, arguments: Dictionary = {},
+		target_instance_id: StringName = &"") -> Step:
+	var source_stage := context.host as Stage
+	return Step.new(func(c: Dictionary) -> void:
+		if not is_instance_valid(source_stage):
+			return
+		if source_stage.state_store == null:
+			push_warning("Callboard emit_cross_stage skipped: the source Stage has no StageStateStore.")
+			return
+		var delivered := source_stage.state_store.broadcast_event(event_id, arguments,
+			target_instance_id, _dispatch_context(c))
+		var callboard: Dictionary = c.get("_callboard", {})
+		var rule: Rule = callboard.get("rule") as Rule
+		var engine := context.engine_ref.get_ref() as RuleEngine
+		if engine != null:
+			engine.trace_cross_stage_dispatch(event_id, rule.id if rule != null else &"",
+				target_instance_id, delivered))
+
 ## Immediately emit a relay from this point in the sequence. An empty field_map
 ## forwards the full input payload; otherwise each {output_name: input_name}
 ## pair selects or renames one incoming field.

@@ -9,6 +9,9 @@ var _shared_boards: Array[WeakRef] = []
 var _loaded_ids: Dictionary = {}
 var _shared_write_queue: Array[Dictionary] = []
 var _dispatching_shared_writes := false
+var _cross_stage_dispatch_frame := -1
+var _cross_stage_dispatches_this_frame := 0
+const MAX_CROSS_STAGE_DISPATCHES_PER_FRAME := 256
 
 func state_for(instance_id: StringName) -> Dictionary:
 	if instance_id.is_empty():
@@ -69,6 +72,47 @@ func release_stage(stage: Stage) -> void:
 		return
 	if _loaded_ids.get(stage.stage_instance_id) == stage:
 		_loaded_ids.erase(stage.stage_instance_id)
+
+## Deliver an event to one loaded Stage, or to every eligible loaded Stage when
+## target_instance_id is empty. Dormant, unloaded, invalid, and schema-incompatible
+## recipients are skipped; delivery is live-only and is never queued for replay.
+func broadcast_event(event_id: StringName, arguments: Dictionary = {},
+		target_instance_id: StringName = &"", dispatch_context: Dictionary = {}) -> int:
+	if event_id.is_empty() or event_id == &"on_change":
+		push_warning("StageStateStore cannot broadcast an empty event or the built-in 'on_change' event.")
+		return 0
+	var instance_ids: Array[StringName] = []
+	if not target_instance_id.is_empty():
+		if _loaded_ids.has(target_instance_id):
+			instance_ids.append(target_instance_id)
+		else:
+			push_warning("StageStateStore cannot deliver '%s': target Stage '%s' is not loaded." % [event_id, target_instance_id])
+			return 0
+	else:
+		for instance_id: Variant in _loaded_ids:
+			instance_ids.append(StringName(instance_id))
+	instance_ids.sort()
+	var frame := Engine.get_process_frames()
+	if frame != _cross_stage_dispatch_frame:
+		_cross_stage_dispatch_frame = frame
+		_cross_stage_dispatches_this_frame = 0
+	var delivered := 0
+	for instance_id: StringName in instance_ids:
+		var stage := _loaded_ids.get(instance_id) as Stage
+		if stage == null or not is_instance_valid(stage) or not stage.accepts_calls():
+			continue
+		if not stage._event_is_known(event_id):
+			if not target_instance_id.is_empty():
+				push_warning("StageStateStore cannot deliver '%s': Stage '%s' has not declared or authored that event." % [event_id, instance_id])
+				return 0
+			continue
+		if _cross_stage_dispatches_this_frame >= MAX_CROSS_STAGE_DISPATCHES_PER_FRAME:
+			push_warning("StageStateStore stopped cross-Stage delivery after reaching its per-frame dispatch limit.")
+			break
+		_cross_stage_dispatches_this_frame += 1
+		if stage.receive_cross_stage_event(event_id, arguments, dispatch_context):
+			delivered += 1
+	return delivered
 
 func register_blackboard(board: Blackboard) -> void:
 	if board == null:

@@ -390,7 +390,7 @@ func _test_staging_verb_catalog_and_validation() -> bool:
 	bb.define(&"wrong_type", &"local", 0)
 	var factory := StagingVerbs.new(StepContext.new(bb, null, null, Callable()))
 	var catalog := VerbCatalog.from_factory(factory)
-	var expected_verbs := ["light", "play_audio", "rotate_to", "play_animation", "pose_animation", "gameplay_event"]
+	var expected_verbs := ["light", "play_audio", "rotate_to", "play_animation", "pose_animation", "gameplay_event", "emit_cross_stage"]
 	var listed := expected_verbs.all(func(name: String) -> bool: return not VerbCatalog.find(catalog, name).is_empty())
 	var target := Node3D.new()
 	var light := factory.light(target, true, 1.0, &"light_on")

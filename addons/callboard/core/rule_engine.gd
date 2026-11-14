@@ -631,6 +631,13 @@ func _emit_trace(kind: String, rule_id: StringName, event: StringName,
 		"detail": detail,
 	})
 
+## Record the result of a store-mediated event send on the source Stage's trace.
+func trace_cross_stage_dispatch(event_id: StringName, rule_id: StringName,
+		target_instance_id: StringName, delivered_count: int) -> void:
+	var route := "broadcast" if target_instance_id.is_empty() else "target=" + String(target_instance_id)
+	_emit_trace("cross_stage_sent", rule_id, event_id, -1, null,
+		"%s; recipients=%d" % [route, delivered_count])
+
 func _consume_dispatch_budget(context: Dictionary) -> bool:
 	var frame := Engine.get_process_frames()
 	if frame != _dispatch_frame:

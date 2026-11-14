@@ -276,6 +276,36 @@ func fire(event: StringName, payload := {}) -> void:
 		push_warning("Stage '%s' fired unknown event '%s'. Declare gameplay events in external_calls." % [name, event])
 	engine.fire(event, payload)
 
+## Receive a typed event from this Stage's shared store. The store owns routing;
+## the Stage keeps the normal lifecycle, event, and payload checks.
+func receive_cross_stage_event(event_id: StringName, arguments: Dictionary,
+		dispatch_context: Dictionary = {}) -> bool:
+	if not _can_dispatch("receive cross-Stage event '%s'" % event_id):
+		return false
+	if event_id.is_empty() or event_id == &"on_change" or not _event_is_known(event_id):
+		return false
+	var payload := arguments.duplicate(true)
+	var schema: Dictionary = payload_schema.get(event_id, {})
+	if not schema.is_empty():
+		for field: Variant in payload:
+			if not (field is String or field is StringName):
+				push_warning("Stage '%s' rejected cross-Stage event '%s': payload field names must be String or StringName." % [name, event_id])
+				return false
+			var field_name := StringName(String(field))
+			if not field_name.is_valid_identifier() or not schema.has(field_name):
+				push_warning("Stage '%s' rejected cross-Stage event '%s': field '%s' is not declared." % [name, event_id, field_name])
+				return false
+			var expected_type: int = schema[field_name]
+			var actual_type := typeof(payload[field])
+			if expected_type == TYPE_FLOAT and actual_type == TYPE_INT:
+				payload[field] = float(payload[field])
+			elif expected_type != TYPE_NIL and actual_type != expected_type:
+				push_warning("Stage '%s' rejected cross-Stage event '%s': field '%s' has type %s, expected %s." % [
+					name, event_id, field_name, type_string(actual_type), type_string(expected_type)])
+				return false
+	engine.fire_from_context(event_id, payload, dispatch_context.duplicate(true))
+	return true
+
 ## Publish a typed request for host gameplay code. The Stage does not interpret event IDs.
 func publish_gameplay_event(event_id: StringName, arguments: Dictionary = {}) -> void:
 	if not _can_dispatch("publish gameplay event '%s'" % event_id):

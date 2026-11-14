@@ -348,7 +348,7 @@ func _evaluate_step_delay(source: String, inputs: Dictionary, base: Object) -> V
 func _supports_runtime_input(verb: String, index: int) -> bool:
 	return ((verb in ["set_var", "add_var", "say"] and index == 1)
 		or (verb == "score" and index == 0)
-		or (verb in ["gameplay_event", "emit_relay"] and index == 1))
+		or (verb in ["gameplay_event", "emit_relay", "emit_cross_stage"] and index == 1))
 
 func _collect_runtime_blackboard_reads(value: Variant, reads: Array[StringName]) -> void:
 	if value is RuntimeInputRefScript:

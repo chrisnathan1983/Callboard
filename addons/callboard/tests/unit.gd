@@ -605,6 +605,7 @@ func _initialize() -> void:
 	ok = _test_on_change_triggers() and ok
 	ok = await _test_dispatch_limits_and_ancestry() and ok
 	ok = _test_stage_dispatch_policy() and ok
+	ok = _test_cross_stage_event_bus() and ok
 	ok = _test_retriggered_light() and ok
 	ok = await _test_light_from_restarted_run() and ok
 	ok = await _test_managed_stages_and_restoration() and ok
@@ -1689,6 +1690,103 @@ func _test_managed_stages_and_restoration() -> bool:
 		and all_gifts_restored.get_var(&"gifts_delivered") == 2) and ok
 	store.unload_stage(all_gifts_restored)
 	await process_frame
+	return ok
+
+func _test_cross_stage_event_bus() -> bool:
+	var store := StageStateStore.new()
+	var received: Dictionary = {&"stage_a": [], &"stage_b": [], &"stage_dormant": []}
+	var received_paths: Dictionary = {&"stage_a": [], &"stage_b": [], &"stage_dormant": []}
+	var delivery_order: Array[StringName] = []
+	var stages: Dictionary = {}
+	for instance_id: StringName in [&"stage_b", &"stage_a", &"stage_dormant"]:
+		var definition := StageDefinition.new()
+		definition.managed_lifecycle = true
+		definition.external_calls = PackedStringArray(["sensor:activated", "system_overload"])
+		definition.payload_fields = [
+			PayloadFieldData.from_dictionary({"event_id": "sensor:activated", "key": "sensor_id", "type": "String"}),
+			PayloadFieldData.from_dictionary({"event_id": "system_overload", "key": "severity", "type": "int"}),
+		]
+		if instance_id == &"stage_a":
+			definition.external_calls.append(&"launch")
+			definition.payload_fields.append(PayloadFieldData.from_dictionary({
+				"event_id": "launch", "key": "sensor_id", "type": "String"}))
+			var route_rule := RuleData.new()
+			route_rule.id = &"route_sensor_activation"
+			route_rule.trigger = &"launch"
+			var route_step := StepData.new()
+			route_step.verb = &"emit_cross_stage"
+			route_step.args = PackedStringArray([
+				'&"sensor:activated"',
+				'{"sensor_id": callboard_payload(&"sensor_id")}',
+				'&"stage_b"',
+			])
+			route_rule.steps.append(route_step)
+			definition.rules = [route_rule]
+		var stage := Stage.new()
+		stage.definition = definition
+		if not store.attach(stage, instance_id):
+			return _check("cross-Stage events can be tested with attached Stages", false)
+		stage.build()
+		stage.is_active = instance_id != &"stage_dormant"
+		for event_id: StringName in [&"sensor:activated", &"system_overload"]:
+			var listener := Rule.new(StringName("listen_" + String(instance_id) + "_" + String(event_id)), event_id)
+			listener.steps.append(Step.new(func(context: Dictionary) -> void:
+				received[instance_id].append(context.get("payload", {}).duplicate(true))
+				received_paths[instance_id].append(context["_callboard"]["run"]["context"]["path"].duplicate())
+				delivery_order.append(instance_id)))
+			stage.engine.rules.append(listener)
+		stages[instance_id] = stage
+	var stage_a: Stage = stages[&"stage_a"]
+	var stage_b: Stage = stages[&"stage_b"]
+	var target_delivery_count := store.broadcast_event(&"sensor:activated",
+		{"sensor_id": "west"}, &"stage_b")
+	var targeted_delivery: bool = target_delivery_count == 1 \
+		and received[&"stage_a"].is_empty() \
+		and received[&"stage_b"] == [{"sensor_id": "west"}] \
+		and received[&"stage_dormant"].is_empty()
+	var broadcast_count := store.broadcast_event(&"system_overload", {"severity": 3})
+	var broadcast_delivery: bool = broadcast_count == 2 \
+		and received[&"stage_a"] == [{"severity": 3}] \
+		and received[&"stage_b"].size() == 2 \
+		and received[&"stage_b"][1] == {"severity": 3} \
+		and received[&"stage_dormant"].is_empty()
+	var wrong_type_count := store.broadcast_event(&"system_overload", {"severity": "high"}, &"stage_b")
+	var bad_payload_rejected: bool = wrong_type_count == 0 and received[&"stage_b"].size() == 2
+	var cross_stage_traces: Array[Dictionary] = []
+	stage_a.engine.trace_event.connect(func(entry: Dictionary) -> void:
+		if entry.get("kind") == "cross_stage_sent":
+			cross_stage_traces.append(entry))
+	stage_a.fire(&"launch", {"sensor_id": "east"})
+	var authored_verb_delivered: bool = received[&"stage_b"].size() == 3 \
+		and received[&"stage_b"][2] == {"sensor_id": "east"} \
+		and received_paths[&"stage_b"][2] == ["launch", "sensor:activated"] \
+		and cross_stage_traces.size() == 1 \
+		and cross_stage_traces[0].get("detail", "").contains("target=stage_b; recipients=1")
+	store._cross_stage_dispatch_frame = Engine.get_process_frames()
+	store._cross_stage_dispatches_this_frame = StageStateStore.MAX_CROSS_STAGE_DISPATCHES_PER_FRAME
+	var budget_rejected: bool = store.broadcast_event(&"sensor:activated",
+		{"sensor_id": "over_budget"}, &"stage_b") == 0 and received[&"stage_b"].size() == 3
+	store.release_stage(stage_b)
+	var unloaded_is_not_queued: bool = store.broadcast_event(&"sensor:activated",
+		{"sensor_id": "late"}, &"stage_b") == 0 and received[&"stage_b"].size() == 3
+	var ok := _check("store routes a typed event to its requested loaded Stage and skips dormant recipients",
+		targeted_delivery) \
+		and _check("store broadcasts in stable ID order to active Stages only",
+			broadcast_delivery and received[&"stage_a"][0] == {"severity": 3}
+			and delivery_order[1] == &"stage_a" and delivery_order[2] == &"stage_b") \
+		and _check("cross-Stage delivery rejects fields that violate the recipient payload contract",
+			bad_payload_rejected) \
+		and _check("emit_cross_stage sends its payload through the source Stage's store",
+			authored_verb_delivered) \
+		and _check("store cross-Stage delivery obeys its per-frame dispatch budget",
+			budget_rejected) \
+		and _check("unloaded recipients do not receive or queue cross-Stage events",
+			unloaded_is_not_queued)
+	for instance_id: StringName in stages:
+		var stage: Stage = stages[instance_id]
+		store.unregister_blackboard(stage.bb)
+		store.release_stage(stage)
+		stage.free()
 	return ok
 
 func _test_retriggered_light() -> bool:

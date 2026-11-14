@@ -123,10 +123,11 @@ The first five items retain the high priority assigned in `TODO.md`.
 
 - [ ] **Add a store-level cross-Stage event bus.** See [StageStateStore](addons/callboard/core/stage_state_store.gd) and [Stage](addons/callboard/core/stage.gd).
   - [x] The store maintains stable Stage instance IDs and shares values. Managed Stages can load dormant and ignore ordinary Calls until activation.
-  - [ ] Add `StageStateStore.broadcast_event()` for typed, live delivery to one or more active, loaded Stage instances. Cover both a targeted `sensor:activated` event and a `system_overload` event routed to multiple Stages.
-  - [ ] Add `CoreVerbs.emit_cross_stage()` so an authored rule can send the same events with a payload through the store.
-  - [ ] Define a policy for dormant and unloaded recipients, such as bounded delivery upon activation or recording a durable state change. Specify routing, ordering, replay/deduplication, and when messages expire or survive a save.
-  - [ ] Validate declared targets and payload contracts across Stage definitions. Include cross-Stage routes in the dispatch budget and traces.
+  - [x] Add `StageStateStore.broadcast_event()` for typed, live delivery to one or more active, loaded Stage instances. Tests cover a targeted `sensor:activated` event and a broadcast `system_overload` event.
+  - [x] Add `CoreVerbs.emit_cross_stage()` so authored rules can send the same events with constants or typed runtime payload references.
+  - [x] Define live-only delivery: skip dormant/unloaded recipients, preserve stable instance-ID order, include an eligible source Stage, deliver repeated sends without deduplication, and never queue, replay, or persist messages.
+  - [x] Validate the loaded target, event declaration/listener, and each recipient's declared payload fields and types at delivery. Cross-Stage sends consume a per-frame store budget, preserve the RuleEngine ancestry/depth budget, and appear in source and recipient traces.
+  - [ ] Add authoring-time validation across unloaded Stage definitions. Runtime instance IDs are host-assigned, so a project-wide scan needs an authored route or Stage identity registry before it can resolve targets statically.
 
 - [ ] **Add Session scope and reset rules.** See [Blackboard](addons/callboard/core/blackboard.gd), [StageStateStore](addons/callboard/core/stage_state_store.gd), and [BlackboardPanel](addons/callboard/editor/blackboard_panel.gd).
   - [x] Local, Saved, and Shared scopes exist. Store-backed Saved values and latches persist by Stage instance ID.
