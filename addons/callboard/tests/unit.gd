@@ -3,6 +3,7 @@ extends SceneTree
 
 signal clock_tick
 signal two_argument_tick(value: int, label: String)
+signal animation_finished_tick(animation_name: StringName)
 
 func _initialize() -> void:
 	var ok := true
@@ -431,11 +432,11 @@ func _initialize() -> void:
 	clock_tick.emit()
 	ok = _check("deactivation cancels an outstanding delay", not state["step_ran"]) and ok
 
-	ok = _test_restart() and ok
+	ok = await _test_restart() and ok
 	ok = _test_queue() and ok
 	ok = _test_signal_callbacks_accept_arguments() and ok
 	ok = _test_retriggered_light() and ok
-	ok = _test_light_from_restarted_run() and ok
+	ok = await _test_light_from_restarted_run() and ok
 	ok = await _test_managed_stages_and_restoration() and ok
 	print("UNIT: ", "PASS" if ok else "FAIL")
 	quit(0 if ok else 1)
@@ -452,6 +453,36 @@ func _test_signal_callbacks_accept_arguments() -> bool:
 		pending_before_emit and completion_seen[0] and engine._awaited_signals.is_empty()
 		and engine.pending_snapshot().is_empty() and two_argument_tick.get_connections().is_empty())
 	engine.cancel_all()
+	var filtered_engine := RuleEngine.new(Blackboard.new(), {}, Callable())
+	var expected_completion_seen := [false]
+	var expected_completion := filtered_engine.interruptible(animation_finished_tick,
+		func(animation_name: StringName) -> bool: return animation_name == &"requested")
+	expected_completion.connect(func() -> void: expected_completion_seen[0] = true)
+	animation_finished_tick.emit(&"replacement")
+	var replacement_was_ignored: bool = not expected_completion_seen[0]
+	animation_finished_tick.emit(&"requested")
+	ok = _check("a playback wait ignores completion from a different animation",
+		replacement_was_ignored and expected_completion_seen[0]
+		and filtered_engine._awaited_signals.is_empty()
+		and animation_finished_tick.get_connections().is_empty()) and ok
+	filtered_engine.cancel_all()
+	var ticket_engine := RuleEngine.new(Blackboard.new(), {}, Callable())
+	var ticket_factory := StagingVerbs.new(StepContext.new(Blackboard.new(), ticket_engine, null, Callable()))
+	var animation_player := AnimationPlayer.new()
+	var first_ticket := ticket_factory._supersede_animation_playback(animation_player)
+	var ticket_run := {"cancelled": false}
+	var ticket_wait := ticket_engine.interruptible(animation_finished_tick,
+		func(animation_name: StringName) -> bool: return animation_name == &"requested",
+		[first_ticket.superseded], ticket_run)
+	var ticket_wait_resumed := [false]
+	ticket_wait.connect(func() -> void: ticket_wait_resumed[0] = true)
+	ticket_factory._supersede_animation_playback(animation_player)
+	ok = _check("replaying an animation supersedes and cancels its earlier wait",
+		ticket_run["cancelled"] and ticket_wait_resumed[0]
+		and ticket_engine._awaited_signals.is_empty()
+		and animation_finished_tick.get_connections().is_empty()) and ok
+	animation_player.free()
+	ticket_engine.cancel_all()
 	var cancelled_engine := RuleEngine.new(Blackboard.new(), {}, Callable())
 	cancelled_engine.interruptible(two_argument_tick)
 	cancelled_engine.track_signal(two_argument_tick, &"signal_arity", "cancelled two-argument signal")
@@ -754,6 +785,9 @@ func _test_light_from_restarted_run() -> bool:
 	var rule := Rule.new(&"timed_light", &"light")
 	rule.reentry = Rule.ReentryPolicy.RESTART
 	var starts: Array[bool] = []
+	var run_trace: Array[String] = []
+	engine.trace_event.connect(func(entry: Dictionary) -> void:
+		run_trace.append("%s:%s:%s" % [entry["kind"], entry["rule"], entry["event"]]))
 	rule.steps.append(Step.new(func(ctx: Dictionary) -> void:
 		starts.append(ctx["turn_on"])
 		if ctx["turn_on"]:
@@ -763,9 +797,13 @@ func _test_light_from_restarted_run() -> bool:
 	engine.fire(&"light", {"turn_on": true})
 	var light_started := lamp.visible and bb.is_set(&"lamp_on")
 	engine.fire(&"light", {"turn_on": false})
+	await process_frame
+	var replacement_started_without_clock := starts == [true, false]
 	clock_tick.emit()
-	var ok := _check("restarting a rule turns off its timed light before the replacement skips light",
-		light_started and starts == [true, false] and not lamp.visible and not bb.is_set(&"lamp_on"))
+	var light_restart_succeeded := (light_started and starts == [true, false]
+		and replacement_started_without_clock and not lamp.visible and not bb.is_set(&"lamp_on"))
+	var ok := _check("restart wakes the timed-light run before its replacement skips the light (starts=%s, replacement_started=%s, trace=%s)" % [
+		starts, replacement_started_without_clock, run_trace], light_restart_succeeded)
 	var lamp_writes: Array[bool] = []
 	bb.changed.connect(func(key: StringName, value: Variant) -> void:
 		if key == &"lamp_on":
@@ -796,12 +834,11 @@ func _test_restart() -> bool:
 	engine.fire(&"start", {"id": 1})
 	engine.fire(&"start", {"id": 2})
 	engine.fire(&"start", {"id": 3})
-	var ok := _check("restart waits for the running step's cancellation check", starts == [1])
+	await process_frame
+	var ok := _check("restart releases the old wait and starts the latest run immediately",
+		starts == [1, 3] and engine.pending_snapshot().size() == 1)
 	clock_tick.emit()
-	ok = _check("restart uses the latest payload and suppresses the old tick",
-		starts == [1, 3] and ticks.is_empty()) and ok
-	clock_tick.emit()
-	ok = _check("only the replacement repeat emits", ticks == [3]) and ok
+	ok = _check("the replacement repeat emits only its own tick", ticks == [3]) and ok
 	bb.write(&"stop", true)
 	clock_tick.emit()
 	return ok

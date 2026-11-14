@@ -56,7 +56,11 @@ func repeat_emit(interval: float, tick: StringName) -> Step:
 			return
 		var gen := engine.token()
 		while engine.alive(rule, gen):
-			var timeout := engine.interruptible(engine.wait_tracked(interval, rule.id, "repeat_emit loop"))
+			var run_state: Dictionary = callboard["run"]
+			var cancellation: RuleEngine.AwaitedSignal = run_state["cancel_signal"]
+			var timeout := engine.interruptible(
+				engine.wait_tracked(interval, rule.id, "repeat_emit loop"), Callable(),
+				[cancellation.cancelled], run_state, true)
 			engine = null
 			await timeout
 			engine = ctx.engine_ref.get_ref() as RuleEngine

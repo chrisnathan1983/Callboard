@@ -17,11 +17,15 @@
 The first five items retain the high priority assigned in `TODO.md`.
 
 - [ ] **Give playback and waits per-run ownership.** See [StagingVerbs](addons/callboard/core/staging_verbs.gd), [RuleEngine](addons/callboard/core/rule_engine.gd), and [CoreVerbs](addons/callboard/core/core_verbs.gd).
-  - [x] Stage deactivation releases registered interruptible waits. Delays and `repeat_emit` use the engine's injected clock. Restart records cancellation on the active run, with existing tests covering replacement at the next cancellation check.
-  - [ ] Match completion to the requested playback instance. A prior probe resumed an animation wait when a replacement clip finished. `play_animation` currently awaits the player's `animation_finished` signal without checking its animation name or playback ownership. `play_audio` similarly waits on the player's shared `finished` signal.
-  - [ ] Define and test what each playback wait does on stop, replacement (including replay of the same clip), looping playback, target removal, timeout, `Cancel If`, Restart, and Stage deactivation. A prior probe stalled after stop and left Restart pending on a loop. Restart currently marks the run cancelled while its source signal can remain outstanding.
-  - [ ] Make `interruptible()` handle supported signal arities and clean up both source connections and pending diagnostics on every exit. The current callback accepts zero or one argument and the prior two-argument probe failed. `track_signal()` also uses a zero-argument callback.
-  - [ ] Preserve the existing visual behavior of non-blocking effects that finish after a successful rule run. Verify that a cancelled or superseded run cannot resume its remaining steps.
+  - [x] Stage deactivation releases registered interruptible waits. Delays and `repeat_emit` use the engine's injected clock. Restart cancels the active run and starts only the latest same-frame replacement; unit tests cover replacement and repeat behavior.
+  - [x] Match completion to the requested playback instance. `play_animation` checks the emitted animation name and a per-player playback ticket; `play_audio` captures and checks its `AudioStreamPlayback` instance. A later built-in playback supersedes the earlier wait, including replay of the same animation. Runtime unit tests pass for name filtering and replacement cancellation.
+  - [ ] Define and test all playback exit cases:
+    - [x] Replacement, including replay of the same clip, cancels the earlier wait; Restart and Stage deactivation release run-owned waits.
+    - [ ] Stop and target removal must release the wait with defined behavior. Add tests for both audio and animation targets.
+    - [ ] Define looping behavior and an optional timeout; add tests for a loop that never emits completion and for timeout cleanup.
+    - [ ] Verify `Cancel If` releases playback waits and prevents the cancelled run from continuing.
+  - [x] Make `interruptible()` accept supported signal arities and clean up source connections and pending diagnostics on completion, cancellation, and deactivation. Regression tests cover two-argument signals and cleanup.
+  - [x] Preserve non-blocking visual effects after successful rule completion, while preventing a cancelled or superseded run from resuming its remaining steps. Unit tests cover Restart, timed-light ownership, and replacement cancellation.
 
 - [ ] **Make Shared Blackboard writes atomic and ordered.** See [Blackboard](addons/callboard/core/blackboard.gd) and [StageStateStore](addons/callboard/core/stage_state_store.gd).
   - [x] A store supplies shared state across loaded Stages, validates writes against their declared types, and exposes writer attribution and change notifications.

@@ -5,11 +5,16 @@ class_name StagingVerbs extends CoreVerbs
 const COLOR_TWEEN_META := &"_callboard_color_tween"
 const BASE_COLOR_META := &"_callboard_base_color"
 const ISOLATED_MATERIAL_META := &"_callboard_isolated_effect_material"
+const ANIMATION_PLAYBACK_META := &"_callboard_animation_playback_ticket"
+const AUDIO_PLAYBACK_META := &"_callboard_audio_playback_ticket"
 const LIGHT_ACTIVATION_META := &"_callboard_light_activation"
 const SPEECH_LABEL_NAME := &"CallboardSpeech"
 const SPEECH_TWEEN_META := &"_callboard_speech_tween"
 const POSITION_TWEEN_META := &"_callboard_position_tween"
 const BASE_Y_META := &"_callboard_base_y"
+
+class PlaybackTicket extends RefCounted:
+	signal superseded
 
 func show_node(n: Node3D, should_be_visible := true) -> Step:
 	return Step.new(func(_c: Dictionary) -> void: n.visible = should_be_visible)
@@ -35,10 +40,23 @@ func play_audio(player: Node, wait_for_completion := false) -> Step:
 		if player.get("stream") == null:
 			push_warning("Callboard play_audio skipped: the target has no AudioStream assigned.")
 			return null
+		var previous_ticket: PlaybackTicket = player.get_meta(AUDIO_PLAYBACK_META) as PlaybackTicket if player.has_meta(AUDIO_PLAYBACK_META) else null
+		if previous_ticket != null:
+			previous_ticket.superseded.emit()
+		var ticket := PlaybackTicket.new()
+		player.set_meta(AUDIO_PLAYBACK_META, ticket)
 		player.call("play")
 		if wait_for_completion:
+			var playback := player.call("get_stream_playback") as AudioStreamPlayback
+			var playback_id := playback.get_instance_id() if playback != null else 0
+			var playback_matches := func() -> bool:
+				if playback_id == 0 or not is_instance_valid(player):
+					return false
+				var current := player.call("get_stream_playback") as AudioStreamPlayback
+				return (current != null and current.get_instance_id() == playback_id
+					and player.get_meta(AUDIO_PLAYBACK_META, null) == ticket)
 			var finished := _audio_finished_signal(player)
-			return _animation_completion(payload, finished)
+			return _animation_completion(payload, finished, playback_matches, [ticket.superseded])
 		return null
 	return Step.new(f)
 
@@ -66,10 +84,16 @@ func play_animation(player: AnimationPlayer, animation: StringName,
 			push_warning("Callboard play_animation skipped: animation '%s' is missing from its AnimationPlayer." % animation)
 			return null
 		if not wait_for_completion:
+			_supersede_animation_playback(player)
 			player.play(animation)
 			return null
+		var ticket := _supersede_animation_playback(player)
 		player.play(animation)
-		return _animation_completion(payload, player.animation_finished)
+		var playback_matches := func(finished_animation: StringName) -> bool:
+			return (finished_animation == animation and is_instance_valid(player)
+				and player.get_meta(ANIMATION_PLAYBACK_META, null) == ticket)
+		return _animation_completion(payload, player.animation_finished, playback_matches,
+			[ticket.superseded])
 	return Step.new(f)
 
 ## Pose an AnimationPlayer at a time without starting a playback wait.
@@ -248,12 +272,26 @@ func jump(m: MeshInstance3D) -> Step:
 		return _animation_completion(payload, hop.finished)
 	return Step.new(f)
 
-func _animation_completion(payload: Dictionary, finished: Signal) -> Signal:
+func _animation_completion(payload: Dictionary, finished: Signal,
+		completion_if := Callable(), cancel_on: Array[Signal] = []) -> Signal:
 	if payload.has("_callboard"):
 		var engine := context.engine_ref.get_ref() as RuleEngine
 		if engine != null:
-			return engine.interruptible(finished)
+			var run: Dictionary = payload["_callboard"].get("run", {})
+			var cancellation: RuleEngine.AwaitedSignal = run.get("cancel_signal") as RuleEngine.AwaitedSignal
+			if cancellation != null:
+				cancel_on.append(cancellation.cancelled)
+				return engine.interruptible(finished, completion_if, cancel_on, run)
+			return engine.interruptible(finished, completion_if)
 	return finished
+
+func _supersede_animation_playback(player: AnimationPlayer) -> PlaybackTicket:
+	var previous: PlaybackTicket = player.get_meta(ANIMATION_PLAYBACK_META) as PlaybackTicket if player.has_meta(ANIMATION_PLAYBACK_META) else null
+	if previous != null:
+		previous.superseded.emit()
+	var ticket := PlaybackTicket.new()
+	player.set_meta(ANIMATION_PLAYBACK_META, ticket)
+	return ticket
 
 ## The newest tween controls position. Earlier tweens still finish so their rules resume.
 func _position_setter(node: Node3D, tween: Tween, property: NodePath) -> Callable:

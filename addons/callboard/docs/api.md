@@ -193,9 +193,9 @@ The default factory is [`StagingVerbs`](../core/staging_verbs.gd), which inherit
 | Staging | `pop(n)`, `bounce(n)` | Play a scale animation. |
 | Staging | `say(n, text, seconds = 1.0)` | Show temporary text at a node. |
 | Staging | `move_to(n, dest, offset = Vector3.ZERO, duration = 0.7)` | Tween a node to a target with an offset. |
-| Staging | `play_audio(player, wait_for_completion = false)` | Play an `AudioStreamPlayer`, `AudioStreamPlayer2D`, or `AudioStreamPlayer3D`. Waiting holds the rule until the stream finishes. |
+| Staging | `play_audio(player, wait_for_completion = false)` | Play an `AudioStreamPlayer`, `AudioStreamPlayer2D`, or `AudioStreamPlayer3D`. Waiting holds the rule for the playback instance started by this step. |
 | Staging | `rotate_to(n, target_rotation, duration = 0.25, wait_for_completion = true)` | Rotate a `Node3D` to Euler angles in radians. Set duration to zero for an immediate change or disable waiting to let the tween continue in the background. |
-| Staging | `play_animation(player, animation, wait_for_completion = true)` | Play a named `AnimationPlayer` clip. Waiting releases on clip completion or Stage deactivation. |
+| Staging | `play_animation(player, animation, wait_for_completion = true)` | Play a named `AnimationPlayer` clip. Waiting checks the completed clip name and the Callboard playback token. |
 | Staging | `pose_animation(player, animation, time = 0.0)` | Seek to a time in a named clip and pause there. |
 | Staging | `gameplay_event(event_id, arguments = {})` | Emit `Stage.gameplay_event` for host-owned behavior such as doors, quests, or inventory. |
 | Staging | `flash(m)`, `jump(m)` | Tint compatible `BaseMaterial3D` overrides or mesh surfaces. Materials are duplicated for the target instance; `jump` still performs its hop when no tintable material exists. |
@@ -204,7 +204,7 @@ When `move_to` and `jump` overlap on the same node, the latest step controls its
 
 `light` writes the supplied key only when it is non-empty. A timed turn-on writes `true`, then writes `false` when it turns off. A newer activation owns the node, so an older timeout cannot turn off a newer light state. The editor reports missing targets, missing/non-Boolean light keys, absent audio streams, and missing animation clips before Stage activation.
 
-The wait options on `play_audio`, `rotate_to`, and `play_animation` are explicit. A waiting rule resumes when the source finishes; use a non-looping clip or stream when waiting for playback completion. Stage deactivation releases its wait. Non-waiting tween/audio/animation actions continue according to their Godot node's lifetime and process mode.
+The wait options on `play_audio`, `rotate_to`, and `play_animation` are explicit. Audio and animation waits check completion against the playback started by the step, so a different clip or replacement audio instance cannot satisfy the wait. A later built-in playback on the same node supersedes the earlier wait and cancels that run. Use a non-looping clip or stream when waiting for playback completion. Stage deactivation or Restart releases a run-owned wait. Non-waiting tween/audio/animation actions continue according to their Godot node's lifetime and process mode.
 
 ### Built-in cancellation behavior
 
@@ -214,9 +214,9 @@ The engine checks **Cancel If** before the first step and after each step or del
 | --- | --- |
 | `set_var`, `add_var`, `score`, `show_node` | Completed writes, score changes, and visibility changes stay applied. |
 | `repeat_emit` | Checks before each tick and stops emitting when cancelled. Deactivation releases its timer wait immediately. |
-| `pop`, `bounce`, `move_to`, waiting `rotate_to` | The tween finishes while the Stage remains in the tree. Deactivation immediately releases the rule's wait. |
-| `flash`, `jump` | The tint restores the target instance's base colors and the hop returns to its base height. Deactivation immediately releases the rule's wait. |
-| Waiting `play_audio`, `play_animation` | The rule waits for playback to finish. Stage deactivation immediately releases the wait. |
+| `pop`, `bounce`, `move_to`, waiting `rotate_to` | The tween finishes while the Stage remains in the tree. Restart or deactivation immediately releases the rule's wait; the tween continues. |
+| `flash`, `jump` | The tint restores the target instance's base colors and the hop returns to its base height. Restart or deactivation immediately releases the rule's wait; the visual effect continues. |
+| Waiting `play_audio`, `play_animation` | The rule waits for its playback instance to finish. Restart, replacement by a later built-in playback, or Stage deactivation immediately releases the wait. |
 | `say` | The label expires on its own timer. A later `say` on the same node replaces it and starts a new timer. |
 | `light` | A timed activation turns off on timeout, cancellation of its run, or Stage deactivation. A newer activation owns the light. Untimed visibility and Blackboard changes stay applied. |
 
@@ -267,7 +267,7 @@ Declare a Boolean Blackboard key `door_open` and assign a typed `Node3D` propert
 | API | Purpose |
 | --- | --- |
 | `token()`, `alive(rule, token)` | Check whether a run can continue after asynchronous work. |
-| `interruptible(source)` | Return a signal that completes when the source emits or the engine deactivates. The caller checks cancellation before continuing its work. |
+| `interruptible(source, completion_if = Callable(), cancel_on = [], run = {}, defer_cancel = false)` | Return a signal that completes when the source passes the optional predicate, any supplied cancellation signal emits, or the engine deactivates. `defer_cancel` coalesces same-frame Restart triggers before the replacement run begins. The caller checks cancellation before continuing its work. |
 | `wait_tracked(seconds, rule_id, label)` | Use the configured clock and surface the wait in the live debugger. Returns the wait signal. |
 | `track_signal(signal_to_track, rule_id, label, seconds = -1.0)` | Show a pending operation until its signal fires. A negative duration means the remaining time is unknown. |
 | `active_snapshot()`, `pending_snapshot()` | Read active rules and queued counts, or pending waits and their remaining times. |
