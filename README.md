@@ -73,6 +73,8 @@ trigger.set_interaction_handler(func(actor: Node, context: Dictionary) -> Dictio
 
 The host's eligibility hook decides whether an option is offered. Its interaction handler decides acceptance, performs any inventory policy, and supplies the Call payload. Accepted outcomes dispatch `event`; rejected outcomes can dispatch `rejected_event`. See the [TriggerArea and InteractionResolver API](addons/callboard/docs/api.md#triggerarea) for setup and signals.
 
+For reusable item handoffs, `DeliveryTarget` accepts host inventory callbacks for reading, atomically consuming, and returning a held item. It tracks target capacity and reports accepted or rejected outcomes without storing inventory itself. Hosts can expose inventory facts to rules through typed Boolean Blackboard variables. See the [DeliveryTarget API](addons/callboard/docs/api.md#deliverytarget).
+
 <details>
 <summary>See the Blackboard and Rule settings</summary>
 

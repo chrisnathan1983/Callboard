@@ -249,6 +249,24 @@ var result: Dictionary = resolver.interact({"source": "door_ui"})
 
 The interaction context begins as a deep copy of the trigger's `ctx`, then caller context values override matching keys. `set_interaction_handler()` or an override of `handle_interaction(actor, context)` returns `{accepted: bool, payload: Dictionary}`. Accepted results dispatch the trigger's `event`; rejected results dispatch `rejected_event` if configured. The returned result dictionary includes `accepted`, dispatched `event`, and `payload`. `interaction_completed(actor, result)` on the trigger and `interaction_completed(trigger, result)` on the resolver report the result. Inventory checks, item consumption, and other game policy stay in the host handler.
 
+### DeliveryTarget
+
+`DeliveryTarget` is an optional `TriggerArea` subtype for item handoffs. It does not own an inventory. The host supplies three synchronous callbacks: a held-item provider, an atomic consume-if-still-held callback, and an optional return-to-inventory callback. The consume callback must verify and remove the exact item in one operation; it is called only after the target accepts the item ID and has capacity. This makes a wrong item, a missing item, a full target, or a stale inventory snapshot leave the item unconsumed.
+
+Set `accepted_item_ids` to restrict accepted IDs; an empty list accepts any nonempty held item. `capacity = -1` allows unlimited deliveries, `0` disables the target, and a positive value limits the runtime `delivered_count`. A full target stops being eligible. Rejected attempts return a `reason` such as `wrong_item`, `no_item_held`, or `item_changed` and dispatch `rejected_event` when configured. Accepted payloads contain `item_id`, a runtime-only `delivery_id`, `delivered_count`, and `capacity`.
+
+```gdscript
+target.set_inventory_adapter(
+    func(actor: Node) -> StringName: return inventory.held_item_id(actor),
+    func(actor: Node, item_id: StringName) -> bool:
+        return inventory.consume_if_held(actor, item_id),
+    func(actor: Node, item_id: StringName) -> bool:
+        return inventory.try_add(actor, item_id)
+)
+```
+
+If later host work rolls back a delivery, call `return_delivery(delivery_id, actor)`. It releases capacity only when the return callback succeeds; the host can retry after making room in the inventory. Delivery IDs and capacity counters belong to the live target instance. Persist progression in Saved Blackboard variables, update the saved count after accepts and returns, and restore `delivered_count` with a typed property restoration binding when needed. Rules that need inventory state declare a Boolean Blackboard key such as `has_access_card` and have host code update it when inventory changes; there is no built-in `has_item()` guard or inventory model.
+
 ## Built-in verbs
 
 The default factory is [`StagingVerbs`](../core/staging_verbs.gd), which inherits [`CoreVerbs`](../core/core_verbs.gd). Each method returns a `Step`. Optional arguments are shown with their defaults.

@@ -2,6 +2,7 @@ extends SceneTree
 ## Deterministic validator, router and clock-injection tests.
 
 const CrossStageValidator := preload("res://addons/callboard/model/cross_stage_event_validator.gd")
+const DeliveryTargetScript := preload("res://addons/callboard/core/delivery_target.gd")
 
 signal clock_tick
 signal two_argument_tick(value: int, label: String)
@@ -617,6 +618,7 @@ func _initialize() -> void:
 	ok = _test_trigger_groups() and ok
 	ok = await _test_trigger_collision_settings() and ok
 	ok = await _test_trigger_contact_events() and ok
+	ok = _test_delivery_target() and ok
 	print("UNIT: ", "PASS" if ok else "FAIL")
 	quit(0 if ok else 1)
 
@@ -794,6 +796,69 @@ func _test_trigger_contact_events() -> bool:
 	await process_frame
 	return _check("TriggerArea sends body metadata with paired enter/exit Calls and does not replay a dormant contact on exit",
 		paired_events_include_body_metadata and dormant_contact_not_replayed)
+
+func _test_delivery_target() -> bool:
+	var target = DeliveryTargetScript.new()
+	target.mode = TriggerArea.Mode.INTERACT
+	target.event = &"item_delivered"
+	target.rejected_event = &"item_rejected"
+	var accepted_item_ids: Array[StringName] = [&"blue_crystal"]
+	target.accepted_item_ids = accepted_item_ids
+	target.capacity = 1
+	var actor := Node3D.new()
+	actor.name = "Carrier"
+	var inventory := {"held": &"red_token", "consumed": 0}
+	var provider := func(_actor: Node) -> Variant: return inventory["held"]
+	var consume := func(_actor: Node, item_id: StringName) -> bool:
+		if inventory["held"] != item_id:
+			return false
+		inventory["consumed"] += 1
+		inventory["held"] = &""
+		return true
+	var return_item := func(_actor: Node, item_id: StringName) -> bool:
+		if not StringName(inventory["held"]).is_empty():
+			return false
+		inventory["held"] = item_id
+		return true
+	target.set_inventory_adapter(provider, consume, return_item)
+	root.add_child(actor)
+	root.add_child(target)
+	var wrong_item := target.interact(actor)
+	var wrong_item_rejected: bool = not wrong_item.get("accepted", true) \
+		and wrong_item.get("event") == &"item_rejected" \
+		and wrong_item.get("payload", {}).get("reason") == "wrong_item" \
+		and inventory["held"] == &"red_token" and inventory["consumed"] == 0
+	inventory["held"] = &"blue_crystal"
+	var accepted_delivery := target.interact(actor)
+	var delivery_id := int(accepted_delivery.get("payload", {}).get("delivery_id", -1))
+	var accepted_once: bool = accepted_delivery.get("accepted", false) \
+		and accepted_delivery.get("event") == &"item_delivered" \
+		and accepted_delivery.get("payload", {}).get("item_id") == "blue_crystal" \
+		and delivery_id > 0 and inventory["held"].is_empty() \
+		and inventory["consumed"] == 1 and target.delivered_count == 1
+	inventory["held"] = &"blue_crystal"
+	var full_rejected: bool = not target.interact(actor).get("accepted", true) \
+		and inventory["consumed"] == 1 and target.delivered_count == 1
+	var blocked_return_preserves_delivery: bool = not target.return_delivery(delivery_id, actor) \
+		and target.delivered_count == 1
+	inventory["held"] = &""
+	var returned := target.return_delivery(delivery_id, actor)
+	var return_released_capacity: bool = returned and inventory["held"] == &"blue_crystal" \
+		and target.delivered_count == 0
+	var second_delivery := target.interact(actor)
+	var exactly_once_per_attempt: bool = second_delivery.get("accepted", false) \
+		and inventory["consumed"] == 2 and target.delivered_count == 1
+	actor.free()
+	target.free()
+	var ok := _check("DeliveryTarget rejects a wrong item without consuming it", wrong_item_rejected)
+	ok = _check("DeliveryTarget accepts and consumes the configured held item once", accepted_once) and ok
+	ok = _check("DeliveryTarget rejects repeated attempts after capacity is reached without consuming again",
+		full_rejected) and ok
+	ok = _check("DeliveryTarget retains the delivery reservation when the host cannot return the item yet",
+		blocked_return_preserves_delivery) and ok
+	ok = _check("DeliveryTarget can return an accepted item and release its capacity", return_released_capacity) and ok
+	return _check("DeliveryTarget accepts a new delivery after a successful return",
+		exactly_once_per_attempt) and ok
 
 func _test_session_scope_reset() -> bool:
 	var definition := StageDefinition.new()
