@@ -6,6 +6,8 @@ const DeliveryTargetScript := preload("res://addons/callboard/core/delivery_targ
 const CallboardLocalizationScript := preload("res://addons/callboard/core/callboard_localization.gd")
 const TriggerRoutingData = preload("res://addons/callboard/core/trigger_routing_data.gd")
 const CallboardHistoryScript = preload("res://addons/callboard/editor/callboard_history.gd")
+const ScenarioClockScript = preload("res://addons/callboard/tests/scenario_clock.gd")
+const ScenarioRunnerScript = preload("res://addons/callboard/tests/scenario_runner.gd")
 
 signal clock_tick
 signal two_argument_tick(value: int, label: String)
@@ -798,8 +800,45 @@ func _initialize() -> void:
 	ok = await _test_trigger_collision_settings() and ok
 	ok = await _test_trigger_contact_events() and ok
 	ok = _test_delivery_target() and ok
+	ok = await _test_scenario_runner() and ok
 	print("UNIT: ", "PASS" if ok else "FAIL")
 	quit(0 if ok else 1)
+
+func _test_scenario_runner() -> bool:
+	var stage := Stage.new()
+	root.add_child(stage)
+	stage.build()
+	stage.define_local(&"completed", false)
+	stage.define_local(&"use_first_branch", true)
+	var clock = ScenarioClockScript.new()
+	stage.engine.wait = clock.wait
+	var rule := Rule.new(&"scenario_rule", &"begin")
+	var received_payloads: Array[Dictionary] = []
+	var mark_complete := Step.new(func(context: Dictionary) -> void:
+		received_payloads.append(context.get("payload", {}).duplicate(true))
+		stage.write_var(&"completed", true, &"scenario_rule"))
+	mark_complete.delay = 1.0
+	var unused_branch := Step.new(func(_context: Dictionary) -> void: pass)
+	rule.steps.append(Step.conditional([&"use_first_branch"], [[mark_complete], [unused_branch]], 1))
+	stage.engine.rules = [rule]
+	var actions: Array[Dictionary] = [
+		{"action": "call", "event": "begin", "payload": {"source": "scenario"}},
+		{"action": "frames", "count": 2},
+		{"action": "assert", "check": "pending_remaining", "rule": "scenario_rule", "equals": 1.0},
+		{"action": "advance", "seconds": 1.0},
+		{"action": "frames", "count": 2},
+		{"action": "assert", "check": "var", "key": &"completed", "equals": true},
+		{"action": "assert", "check": "rule_covered", "rule": &"scenario_rule"},
+		{"action": "assert", "check": "branch_covered", "group": "scenario_rule:1", "branch": 1},
+		{"action": "assert", "check": "trace_count", "kind": "rule_completed", "rule": "scenario_rule", "equals": 1},
+		{"action": "teardown"},
+	]
+	var result: Dictionary = await ScenarioRunnerScript.run(stage, actions, clock)
+	var passed: bool = bool(result.get("ok", false)) and bool(result.get("torn_down", false))
+	stage.queue_free()
+	await process_frame
+	return _check("scenario runner dispatches payloads, fast-forwards waits, asserts state and coverage, and tears down",
+		passed and result.get("errors", []).is_empty() and received_payloads == [{"source": "scenario"}])
 
 func _test_snap_to_marker() -> bool:
 	var stage := Stage.new()

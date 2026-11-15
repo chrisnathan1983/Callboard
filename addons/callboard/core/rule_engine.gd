@@ -56,6 +56,20 @@ func _init(p_bb: Blackboard, p_fired: Dictionary, p_wait: Callable) -> void:
 	wait = p_wait
 
 func token() -> int: return _gen
+
+## Advance an injected manual test clock. Returns false for normal runtime clocks.
+func advance_test_time(seconds: float) -> bool:
+	var clock := wait.get_object()
+	if not is_instance_valid(clock) or not clock.has_method("advance"):
+		return false
+	clock.call("advance", seconds)
+	pending_changed.emit(pending_snapshot())
+	return true
+
+func has_test_clock() -> bool:
+	var clock := wait.get_object()
+	return is_instance_valid(clock) and clock.has_method("advance")
+
 func cancel_all() -> void:
 	if _cancelling_all:
 		return
@@ -657,22 +671,32 @@ func track_signal(signal_to_track: Signal, rule_id: StringName, label: String, s
 func _add_pending_wait(rule_id: StringName, label: String, seconds: float) -> int:
 	var id := _next_wait_id
 	_next_wait_id += 1
+	var clock := wait.get_object()
+	var test_now := float(clock.call("time_seconds")) if is_instance_valid(clock) \
+		and clock.has_method("time_seconds") else -1.0
 	_pending_waits[id] = {
 		"id": id,
 		"rule": String(rule_id),
 		"label": label,
 		"started_ms": Time.get_ticks_msec(),
+		"started_test_time": test_now,
 		"duration": seconds,
 	}
 	return id
 
 func pending_snapshot() -> Array:
 	var now := Time.get_ticks_msec()
+	var clock := wait.get_object()
+	var test_now := float(clock.call("time_seconds")) if is_instance_valid(clock) \
+		and clock.has_method("time_seconds") else -1.0
 	var entries: Array = []
 	for id in _pending_waits:
 		var entry: Dictionary = _pending_waits[id].duplicate()
 		var duration: float = entry["duration"]
-		entry["remaining"] = maxf(0.0, duration - (now - entry["started_ms"]) / 1000.0) if duration >= 0.0 else -1.0
+		var elapsed := ((test_now - float(entry["started_test_time"])) if test_now >= 0.0
+			and float(entry.get("started_test_time", -1.0)) >= 0.0
+			else (now - int(entry["started_ms"])) / 1000.0)
+		entry["remaining"] = maxf(0.0, duration - elapsed) if duration >= 0.0 else -1.0
 		entries.append(entry)
 	return entries
 

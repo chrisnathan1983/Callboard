@@ -212,6 +212,8 @@ godot --headless --path . --script res://demo/tests/smoke.gd
 
 [GitHub Actions](.github/workflows/test.yml) runs the four suites separately and checks that the demo runtime works without the editor and authoring model.
 
+The repository-only scenario harness in `addons/callboard/tests/scenario_runner.gd` can drive ordered Calls and explicit host callbacks against a built Stage. It supports lifecycle actions, Blackboard and latch assertions, trace and gameplay outcome checks, and rule/branch coverage. Supply `scenario_clock.gd` to advance engine waits deterministically. This virtual clock does not complete audio, animation, tween, physics, or host-owned timers; scenarios must emit or invoke those external results themselves. When attached to a Stage using the manual clock, the live debugger's **+1s test time** button advances it by one second.
+
 ### Releases and PR builds
 
 After all tests pass, a default-branch run publishes the addon ZIP to [GitHub Releases](https://github.com/chrisnathan1983/director_blackboard_demo_4/releases). To try a pull request, open its **Checks** tab, then follow **Package Callboard** to the workflow run and download the ZIP from the run summary or **Artifacts**.

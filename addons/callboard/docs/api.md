@@ -493,7 +493,11 @@ In the live **Calls & relays** panel, **Test payload** appears for Calls with de
 
 Graph compilation errors block editor saves and runtime `activate()`. `Stage.check()` reports advisory findings such as relay cycles and shared-trigger overlap. In a debug build, `activate()` logs those findings as warnings and still dispatches `arrive` if compilation succeeded. A direct call to `fire()` dispatches without running `activate()`.
 
-The [unit suite in the source repository](https://github.com/chrisnathan1983/director_blackboard_demo_4/blob/main/addons/callboard/tests/unit.gd) exercises guards, re-entry, cancellation, and migration.
+The [unit suite in the source repository](https://github.com/chrisnathan1983/director_blackboard_demo_4/blob/main/addons/callboard/tests/unit.gd) exercises guards, re-entry, cancellation, and migration. The repository-only [`ScenarioRunner`](../tests/scenario_runner.gd) drives ordered Calls and host callbacks against a built Stage, advances an injected [`ScenarioClock`](../tests/scenario_clock.gd), and checks Blackboard values, one-shot latches, trace outcomes, gameplay request outcomes, and rule/branch coverage. It also supports activation, deactivation, and teardown actions.
+
+Scenario actions are dictionaries with an `action` field: `call` accepts an event and payload, `host` invokes a supplied `Callable` with the Stage and a copied arguments dictionary, `advance` moves the manual clock, `frames` lets asynchronous continuations settle, `assert` checks an outcome, and `activate`/`deactivate`/`teardown` exercise lifecycle. Branch coverage keys use `rule_id:step_number`, and branch indexes are one-based. ScenarioClock controls engine delays and timeouts that use `RuleEngine.wait`; it does not simulate audio or animation playback completion, tweens, physics, or timers owned by the game. Those signals and host actions must be driven explicitly by the scenario or a test fixture. This harness is excluded from addon exports.
+
+When the live debugger is attached to a Stage whose engine uses ScenarioClock (or another clock with an `advance(seconds)` method), **+1s test time** advances that clock and releases due engine waits. The button is hidden for normal runtime clocks.
 
 ## Embedding the live debugger
 

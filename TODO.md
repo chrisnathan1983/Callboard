@@ -225,9 +225,9 @@ The first five items retain the high priority assigned in `TODO.md`.
 
 ## 6. Testing, clean installs, and exports
 
-- [ ] **Add a reusable scenario test harness.** See [addon unit tests](addons/callboard/tests/unit.gd) and [RuleEngine](addons/callboard/core/rule_engine.gd).
+- [x] **Add a reusable scenario test harness.** See [addon unit tests](addons/callboard/tests/unit.gd) and [RuleEngine](addons/callboard/core/rule_engine.gd).
   - [x] Hand-written headless tests exercise Call sequences, typed payload routing, restoration, and re-entry. Engine delays and repeat loops can already use an injected clock.
-  - [ ] Add a headless Call-sequence runner with payloads, Stage activation/teardown, state and outcome assertions, and rule/branch coverage. Add live debugger time fast-forward for waits driven by the test clock and document how external playback and host work are handled.
+  - [x] Add a headless Call-sequence runner with payloads, Stage activation/teardown, state and outcome assertions, and rule/branch coverage. Add live debugger time fast-forward for waits driven by the test clock and document how external playback and host work are handled.
 
 - [ ] **Make the developer test panel conditional and report errors accurately.** See [plugin registration](addons/callboard/plugin.gd) and [TestRunnerPanel](addons/callboard/editor/test_runner_panel.gd).
   - [x] A repository developer panel runs headless suites and captures output. The installable ZIP deliberately excludes addon test scripts.

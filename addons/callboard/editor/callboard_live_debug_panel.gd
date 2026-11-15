@@ -10,6 +10,7 @@ var _stage: Stage
 var _trace_rows := VBoxContainer.new()
 var _active_rows := VBoxContainer.new()
 var _pending_rows := VBoxContainer.new()
+var _advance_time_button: Button
 var _content_scroll: ScrollContainer
 var _trace_buffer: Array[Dictionary] = []
 var _active_lines := PackedStringArray()
@@ -28,6 +29,11 @@ func setup() -> PanelContainer:
 	clear_button.tooltip_text = "Clear the recent trace entries"
 	clear_button.pressed.connect(_clear_trace)
 	header.add_child(clear_button)
+	_advance_time_button = Button.new()
+	_advance_time_button.text = "+1s test time"
+	_advance_time_button.tooltip_text = "Advance the attached Stage's manually controlled scenario clock by one second."
+	_advance_time_button.pressed.connect(_advance_test_time)
+	header.add_child(_advance_time_button)
 	fields.add_child(header)
 
 	_active_rows.add_theme_constant_override("separation", 2)
@@ -81,12 +87,14 @@ func bind_stage(stage: Stage) -> void:
 	_pending_lines.clear()
 	_trace_buffer.clear()
 	if _stage == null or not is_instance_valid(_stage) or _stage.engine == null:
+		_advance_time_button.visible = false
 		_add_empty(_active_rows, "No live Stage attached.")
 		_add_empty(_pending_rows, "Nothing pending.")
 		_add_empty(_trace_rows, "Waiting for runtime events.")
 		return
 	_stage.engine.trace_event.connect(_on_trace)
 	_stage.engine.pending_changed.connect(_on_pending_changed)
+	_advance_time_button.visible = _stage.engine.has_test_clock()
 	_on_pending_changed(_stage.engine.pending_snapshot())
 	_refresh_active()
 	_add_empty(_trace_rows, "Waiting for runtime events.")
@@ -170,6 +178,11 @@ func _refresh_active() -> void:
 		lines.append("%s%s" % [entry["rule"], suffix])
 	_update_snapshot(_active_rows, lines, _active_lines, "No running rules.")
 	_active_lines = lines
+	_advance_time_button.visible = _stage.engine.has_test_clock()
+
+func _advance_test_time() -> void:
+	if _stage != null and is_instance_valid(_stage) and _stage.engine != null:
+		_stage.engine.advance_test_time(1.0)
 
 func _update_snapshot(rows: VBoxContainer, lines: PackedStringArray,
 		previous: PackedStringArray, empty_text: String) -> void:
