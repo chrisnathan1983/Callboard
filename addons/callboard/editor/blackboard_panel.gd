@@ -70,6 +70,8 @@ func _rebuild() -> void:
 		_rows.add_child(Style.label("No variables declared.", Style.MUTED, 13))
 	for v in _data.variables:
 		_rows.add_child(_make_row(v))
+	_rows.add_child(HSeparator.new())
+	_rows.add_child(_make_stage_settings())
 
 func _make_row(v: VariableData) -> Control:
 	var card := VBoxContainer.new()
@@ -216,13 +218,377 @@ func _default_editor(v: VariableData) -> Control:
 			s.value_changed.connect(func(x: float) -> void: set_default.call(int(x) if is_int else x, s))
 			return s
 	var l := LineEdit.new()
-	l.text = str(v.default_value)
+	var original_type := typeof(v.default_value)
+	var is_complex := original_type not in [TYPE_STRING, TYPE_STRING_NAME]
+	l.text = var_to_str(v.default_value) if is_complex else str(v.default_value)
 	l.editable = _editable
-	l.custom_minimum_size = Vector2(80, 0)
-	var is_name := typeof(v.default_value) == TYPE_STRING_NAME
-	l.text_submitted.connect(func(t: String) -> void: set_default.call(StringName(t) if is_name else t))
-	l.focus_exited.connect(func() -> void: set_default.call(StringName(l.text) if is_name else l.text))
+	l.custom_minimum_size = Vector2(150 if is_complex else 80, 0)
+	if is_complex:
+		l.tooltip_text = "Edit the serialized Variant value. The value is changed only when it parses to the same Variant type."
+	var commit := func(_text := "") -> void:
+		if is_complex:
+			var parsed: Variant = str_to_var(l.text)
+			if typeof(parsed) == original_type:
+				set_default.call(parsed)
+			else:
+				l.text = var_to_str(v.default_value)
+		else:
+			set_default.call(StringName(l.text) if original_type == TYPE_STRING_NAME else l.text)
+	l.text_submitted.connect(commit)
+	l.focus_exited.connect(commit)
 	return l
+
+func _make_stage_settings() -> Control:
+	var section := VBoxContainer.new()
+	section.add_theme_constant_override("separation", Style.ENTRY_GAP)
+	section.add_child(Style.label("Stage state", Style.TEXT, 15))
+	var managed := CheckButton.new()
+	managed.text = "Managed lifecycle"
+	managed.tooltip_text = "The Stage ignores Calls until activate(), then activates once per entry."
+	managed.button_pressed = _data.managed_lifecycle
+	managed.disabled = not _editable
+	managed.toggled.connect(func(enabled: bool) -> void:
+		_data.managed_lifecycle = enabled
+		changed.emit())
+	section.add_child(managed)
+	section.add_child(_make_writer_section())
+	section.add_child(_make_restoration_section())
+	return section
+
+func _make_writer_section() -> Control:
+	var section := VBoxContainer.new()
+	var header := HBoxContainer.new()
+	var title := Style.label("External writers", Style.TEXT, 13)
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header.add_child(title)
+	var add := Button.new()
+	add.text = "+ Writer"
+	add.disabled = not _editable
+	add.pressed.connect(func() -> void:
+		var writer := BlackboardWriterData.new()
+		writer.source = &"gameplay"
+		_data.external_writers.append(writer)
+		_rebuild()
+		changed.emit())
+	header.add_child(add)
+	section.add_child(header)
+	if _data.external_writers.is_empty():
+		section.add_child(Style.label("No typed external writers declared.", Style.MUTED, 12))
+	for writer: BlackboardWriterData in _data.external_writers:
+		var row := HBoxContainer.new()
+		var key := _key_picker(writer.key, func(value: StringName) -> void: writer.key = value)
+		key.tooltip_text = "Blackboard key written by host code"
+		row.add_child(key)
+		var source := LineEdit.new()
+		source.text = String(writer.source)
+		source.placeholder_text = "writer ID"
+		source.accessibility_name = "External writer ID"
+		source.editable = _editable
+		source.custom_minimum_size.x = 90
+		var commit_source := func(_text := "") -> void:
+			writer.source = StringName(source.text.strip_edges())
+			changed.emit()
+		source.text_submitted.connect(commit_source)
+		source.focus_exited.connect(commit_source)
+		row.add_child(source)
+		var type := OptionButton.new()
+		for option in ["Variant", "bool", "int", "float", "String", "StringName"]:
+			type.add_item(option)
+		type.select(maxi(0, ["Variant", "bool", "int", "float", "String", "StringName"].find(writer.value_type)))
+		type.disabled = not _editable
+		type.item_selected.connect(func(index: int) -> void:
+			writer.value_type = type.get_item_text(index)
+			changed.emit())
+		row.add_child(type)
+		var remove := Button.new()
+		Style.button_icon(remove, &"Remove", "?")
+		remove.tooltip_text = "Remove writer declaration"
+		remove.disabled = not _editable
+		remove.pressed.connect(func() -> void:
+			_data.external_writers.erase(writer)
+			_rebuild()
+			changed.emit())
+		row.add_child(remove)
+		section.add_child(Style.entry(row))
+	return section
+
+func _make_restoration_section() -> Control:
+	var section := VBoxContainer.new()
+	var header := HBoxContainer.new()
+	var title := Style.label("Restoration bindings", Style.TEXT, 13)
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header.add_child(title)
+	var add := Button.new()
+	add.text = "+ Binding"
+	add.disabled = not _editable
+	add.pressed.connect(func() -> void:
+		var binding := StageRestorationBinding.new()
+		if not _data.variables.is_empty():
+			binding.key = _data.variables[0].key
+		_data.restoration_bindings.append(binding)
+		_rebuild()
+		changed.emit())
+	header.add_child(add)
+	section.add_child(header)
+	if _data.restoration_bindings.is_empty():
+		section.add_child(Style.label("No resolved state is bound to scene nodes.", Style.MUTED, 12))
+	for binding: StageRestorationBinding in _data.restoration_bindings:
+		section.add_child(_make_binding_card(binding))
+	return section
+
+func _make_binding_card(binding: StageRestorationBinding) -> Control:
+	var body := VBoxContainer.new()
+	body.add_theme_constant_override("separation", 5)
+	var top := HBoxContainer.new()
+	top.add_child(_key_picker(binding.key, func(value: StringName) -> void: binding.key = value))
+	var kind := OptionButton.new()
+	var kind_names := ["Visibility", "Transform", "Snap to Marker", "Animation Pose", "Child Index", "Property", "Light Energy", "Light Color", "Audio Playback", "Particle Emitting"]
+	for label in kind_names:
+		kind.add_item(label)
+	kind.select(clampi(binding.kind, 0, kind_names.size() - 1))
+	kind.disabled = not _editable
+	kind.item_selected.connect(func(index: int) -> void:
+		binding.kind = index
+		_rebuild()
+		changed.emit())
+	top.add_child(kind)
+	var remove := Button.new()
+	Style.button_icon(remove, &"Remove", "?")
+	remove.tooltip_text = "Remove restoration binding"
+	remove.disabled = not _editable
+	remove.pressed.connect(func() -> void:
+		_data.restoration_bindings.erase(binding)
+		_rebuild()
+		changed.emit())
+	top.add_child(remove)
+	body.add_child(top)
+	_add_path_field(body, "Target", binding, "target_path", _target_classes(binding.kind))
+	match binding.kind:
+		StageRestorationBinding.Kind.SNAP_TO_MARKER:
+			_add_path_field(body, "Marker3D", binding, "marker_path", ["Marker3D"])
+			_add_path_field(body, "AnimationPlayer (optional)", binding, "animation_player_path", ["AnimationPlayer"])
+			_add_name_field(body, "Animation (optional)", binding, "animation_name",
+				_scene_animations(binding.animation_player_path))
+			_add_float_field(body, "Resolved time", binding, "animation_time")
+		StageRestorationBinding.Kind.POSE_ANIMATION:
+			_add_name_field(body, "Animation", binding, "animation_name",
+				_scene_animations(binding.target_path))
+			_add_float_field(body, "Resolved time", binding, "animation_time")
+		StageRestorationBinding.Kind.CHILD_INDEX:
+			_add_paths_field(body, "Child choices (one path per line)", binding)
+		StageRestorationBinding.Kind.PROPERTY:
+			_add_name_field(body, "Property", binding, "property_name",
+				_scene_property_names(binding.target_path))
+		StageRestorationBinding.Kind.AUDIO_PLAYBACK:
+			var replay := CheckButton.new()
+			replay.text = "Replay stateful audio on restore"
+			replay.button_pressed = binding.replay_audio_on_restore
+			replay.disabled = not _editable
+			replay.toggled.connect(func(enabled: bool) -> void:
+				binding.replay_audio_on_restore = enabled
+				changed.emit())
+			body.add_child(replay)
+	return Style.entry(body)
+
+func _key_picker(selected: StringName, assign: Callable) -> OptionButton:
+	var picker := OptionButton.new()
+	picker.accessibility_name = "Restoration Blackboard key"
+	picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var selected_index := -1
+	var missing_selection := not selected.is_empty() and not _data.variables.any(
+		func(variable: VariableData) -> bool: return variable.key == selected)
+	if missing_selection:
+		picker.add_item("(missing: %s)" % selected)
+	for variable: VariableData in _data.variables:
+		picker.add_item(String(variable.key))
+		if variable.key == selected:
+			selected_index = picker.item_count - 1
+	if picker.item_count == 0:
+		picker.add_item("(no keys)")
+	picker.select(maxi(0, selected_index if selected_index >= 0 else 0))
+	picker.disabled = not _editable or _data.variables.is_empty()
+	picker.item_selected.connect(func(index: int) -> void:
+		var variable_index := index - (1 if missing_selection else 0)
+		if variable_index >= 0 and variable_index < _data.variables.size():
+			assign.call(_data.variables[variable_index].key)
+			changed.emit())
+	return picker
+
+func _add_path_field(parent: VBoxContainer, label_text: String, binding: StageRestorationBinding,
+		property: String, expected_classes: Array[String] = []) -> void:
+	var row := HBoxContainer.new()
+	row.add_child(Style.label(label_text, Style.MUTED, 12))
+	var edit := LineEdit.new()
+	var paths := _scene_node_paths(expected_classes)
+	if not paths.is_empty():
+		var picker := OptionButton.new()
+		picker.accessibility_name = "%s node picker" % label_text
+		picker.tooltip_text = "Choose a node path from the Stage preview scene. You can also enter a path directly."
+		picker.add_item("Pick…")
+		for path: String in paths:
+			picker.add_item(path)
+		picker.disabled = not _editable
+		picker.item_selected.connect(func(index: int) -> void:
+			if index > 0 and index <= paths.size():
+				binding.set(property, NodePath(paths[index - 1]))
+				edit.text = paths[index - 1]
+				changed.emit())
+		row.add_child(picker)
+	edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	edit.text = String(binding.get(property))
+	edit.placeholder_text = "Scene node path"
+	edit.editable = _editable
+	edit.text_submitted.connect(func(text: String) -> void: binding.set(property, NodePath(text.strip_edges())); changed.emit())
+	edit.focus_exited.connect(func() -> void: binding.set(property, NodePath(edit.text.strip_edges())); changed.emit())
+	row.add_child(edit)
+	parent.add_child(row)
+
+func _target_classes(kind: int) -> Array[String]:
+	match kind:
+		StageRestorationBinding.Kind.TRANSFORM, StageRestorationBinding.Kind.SNAP_TO_MARKER:
+			return ["Node3D"]
+		StageRestorationBinding.Kind.POSE_ANIMATION:
+			return ["AnimationPlayer"]
+		StageRestorationBinding.Kind.LIGHT_ENERGY, StageRestorationBinding.Kind.LIGHT_COLOR:
+			return ["Light3D"]
+		StageRestorationBinding.Kind.AUDIO_PLAYBACK:
+			return ["AudioStreamPlayer", "AudioStreamPlayer2D", "AudioStreamPlayer3D"]
+		StageRestorationBinding.Kind.PARTICLE_EMITTING:
+			return ["GPUParticles3D", "CPUParticles3D"]
+		_:
+			return []
+
+func _scene_node_paths(expected_classes: Array[String]) -> Array[String]:
+	if _data == null or _data.definition == null:
+		return []
+	var scene_path := _data.definition.analysis_scene_path()
+	if scene_path.is_empty() or not ResourceLoader.exists(scene_path):
+		return []
+	var packed := ResourceLoader.load(scene_path) as PackedScene
+	if packed == null:
+		return []
+	var state := packed.get_state()
+	var result: Array[String] = []
+	for index in state.get_node_count():
+		var node_path := String(state.get_node_path(index))
+		var node_type := String(state.get_node_type(index))
+		if node_path == ".":
+			continue
+		if expected_classes.is_empty() or expected_classes.any(func(expected: String) -> bool:
+			return node_type == expected or ClassDB.is_parent_class(node_type, expected)):
+			result.append(node_path)
+	return result
+
+func _scene_property_names(path: NodePath) -> Array[String]:
+	var result: Array[String] = []
+	var state := _preview_scene_state()
+	if state == null or path.is_empty():
+		return result
+	for node_index in state.get_node_count():
+		if NodePath(state.get_node_path(node_index)) != path:
+			continue
+		var node_type := String(state.get_node_type(node_index))
+		for info: Dictionary in ClassDB.class_get_property_list(node_type):
+			var class_property := String(info.get("name", ""))
+			if class_property not in ["script", "owner"] \
+				and not (int(info.get("usage", 0)) & PROPERTY_USAGE_READ_ONLY) \
+				and not result.has(class_property):
+				result.append(class_property)
+		for property_index in state.get_node_property_count(node_index):
+			var name := String(state.get_node_property_name(node_index, property_index))
+			if name not in ["script", "owner"] and not result.has(name):
+				result.append(name)
+	result.sort()
+	return result
+
+func _scene_animations(path: NodePath) -> Array[String]:
+	var result: Array[String] = []
+	var state := _preview_scene_state()
+	if state == null or path.is_empty():
+		return result
+	for node_index in state.get_node_count():
+		if NodePath(state.get_node_path(node_index)) != path:
+			continue
+		for property_index in state.get_node_property_count(node_index):
+			var property_name := String(state.get_node_property_name(node_index, property_index))
+			if not property_name.begins_with("libraries/"):
+				continue
+			var library := state.get_node_property_value(node_index, property_index) as AnimationLibrary
+			if library == null:
+				continue
+			var library_key := property_name.trim_prefix("libraries/")
+			for animation_name: StringName in library.get_animation_list():
+				var qualified := String(animation_name) if library_key.is_empty() \
+					else "%s/%s" % [library_key, animation_name]
+				if not result.has(qualified):
+					result.append(qualified)
+	result.sort()
+	return result
+
+func _preview_scene_state() -> SceneState:
+	if _data == null or _data.definition == null:
+		return null
+	var scene_path := _data.definition.analysis_scene_path()
+	if scene_path.is_empty() or not ResourceLoader.exists(scene_path):
+		return null
+	var packed := ResourceLoader.load(scene_path) as PackedScene
+	return packed.get_state() if packed != null else null
+
+func _add_paths_field(parent: VBoxContainer, label_text: String, binding: StageRestorationBinding) -> void:
+	parent.add_child(Style.label(label_text, Style.MUTED, 12))
+	var edit := TextEdit.new()
+	edit.custom_minimum_size.y = 70
+	edit.text = "\n".join(binding.child_choices.map(func(path: NodePath) -> String: return String(path)))
+	edit.editable = _editable
+	var commit := func() -> void:
+		binding.child_choices.clear()
+		for line in edit.text.split("\n", false):
+			var path := line.strip_edges()
+			if not path.is_empty():
+				binding.child_choices.append(NodePath(path))
+		changed.emit()
+	edit.focus_exited.connect(commit)
+	parent.add_child(edit)
+
+func _add_name_field(parent: VBoxContainer, label_text: String, binding: StageRestorationBinding,
+		property: String, options: Array[String] = []) -> void:
+	var row := HBoxContainer.new()
+	row.add_child(Style.label(label_text, Style.MUTED, 12))
+	var edit := LineEdit.new()
+	if not options.is_empty():
+		var picker := OptionButton.new()
+		picker.accessibility_name = "%s picker" % label_text
+		picker.tooltip_text = "Choose a value from the Stage preview scene, or enter one directly."
+		picker.add_item("Pick…")
+		for option: String in options:
+			picker.add_item(option)
+		picker.disabled = not _editable
+		picker.item_selected.connect(func(index: int) -> void:
+			if index > 0 and index <= options.size():
+				edit.text = options[index - 1]
+				binding.set(property, StringName(options[index - 1]))
+				changed.emit())
+		row.add_child(picker)
+	edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	edit.text = String(binding.get(property))
+	edit.editable = _editable
+	edit.text_submitted.connect(func(text: String) -> void: binding.set(property, StringName(text.strip_edges())); changed.emit())
+	edit.focus_exited.connect(func() -> void: binding.set(property, StringName(edit.text.strip_edges())); changed.emit())
+	row.add_child(edit)
+	parent.add_child(row)
+
+func _add_float_field(parent: VBoxContainer, label_text: String, binding: StageRestorationBinding, property: String) -> void:
+	var row := HBoxContainer.new()
+	row.add_child(Style.label(label_text, Style.MUTED, 12))
+	var spin := SpinBox.new()
+	spin.min_value = 0.0
+	spin.max_value = 3600.0
+	spin.step = 0.05
+	spin.value = float(binding.get(property))
+	spin.editable = _editable
+	spin.value_changed.connect(func(value: float) -> void: binding.set(property, value); changed.emit())
+	row.add_child(spin)
+	parent.add_child(row)
 
 func _rename(v: VariableData, edit: LineEdit) -> void:
 	var new_key := edit.text.strip_edges()

@@ -2,6 +2,8 @@ extends SceneTree
 ## Headless authoring integration tests using addon-only fixtures.
 
 const TMP_PATH := "res://.godot/addon_stage_tmp.tres"
+const TMP_TYPED_DEFAULTS_PATH := "res://.godot/addon_typed_defaults_tmp.tres"
+const TMP_RESTORATION_SCENE_PATH := "res://.godot/addon_restoration_picker_tmp.tscn"
 const ExportFilter := preload("res://addons/callboard/editor/export_plugin.gd")
 
 func _initialize() -> void:
@@ -9,6 +11,8 @@ func _initialize() -> void:
 	var ok := _test_scene_assigned_props()
 	ok = _test_add_var_editor() and ok
 	ok = _test_shared_key_authoring() and ok
+	ok = _test_stage_authoring_controls() and ok
+	ok = _test_restoration_picker_options() and ok
 	ok = _test_parallel_group_authoring() and ok
 	ok = _test_conditional_group_authoring() and ok
 	ok = _test_guard_expression_authoring() and ok
@@ -201,6 +205,131 @@ func _test_shared_key_authoring() -> bool:
 		and _check("changing scope preserves the persisted storage identity",
 			scope_change_preserved_identity)
 	panel.free()
+	return ok
+
+func _test_stage_authoring_controls() -> bool:
+	var draft := GraphDraft.new()
+	draft.definition = StageDefinition.new()
+	var state := VariableData.new()
+	state.key = &"resolved"
+	state.scope = "saved"
+	state.default_value = Transform3D(Basis.IDENTITY, Vector3(1, 2, 3))
+	draft.variables.append(state)
+	var panel := BlackboardPanel.new()
+	root.add_child(panel)
+	panel.show_data(draft, true)
+	var settings := panel._make_stage_settings()
+	var lifecycle := settings.get_child(1) as CheckButton
+	lifecycle.toggled.emit(true)
+	var writers := settings.get_child(2) as VBoxContainer
+	(writers.get_child(0).get_child(1) as Button).pressed.emit()
+	var bindings := settings.get_child(3) as VBoxContainer
+	(bindings.get_child(0).get_child(1) as Button).pressed.emit()
+	var editor := panel._default_editor(state) as LineEdit
+	var changed_transform := Transform3D(Basis.from_euler(Vector3(0.2, 0.3, 0.4)), Vector3(4, 5, 6))
+	editor.text = var_to_str(changed_transform)
+	editor.text_submitted.emit(editor.text)
+	var typed_transform_preserved: bool = typeof(state.default_value) == TYPE_TRANSFORM3D \
+		and state.default_value.origin == changed_transform.origin \
+		and state.default_value.basis == changed_transform.basis
+	var complex_values: Array = [Color(0.2, 0.4, 0.6, 0.8), Vector3(7, 8, 9), {"nested": [1, &"two"]}]
+	var complex_types_preserved := true
+	for index in complex_values.size():
+		var variable := VariableData.new()
+		variable.key = StringName("complex_%d" % index)
+		variable.default_value = complex_values[index]
+		draft.variables.append(variable)
+		var value_editor := panel._default_editor(variable) as LineEdit
+		value_editor.text = var_to_str(complex_values[index])
+		value_editor.text_submitted.emit(value_editor.text)
+		complex_types_preserved = complex_types_preserved and typeof(variable.default_value) == typeof(complex_values[index]) \
+			and variable.default_value == complex_values[index]
+	var ok := _check("board exposes lifecycle, external-writer, and restoration controls",
+		draft.managed_lifecycle and draft.external_writers.size() == 1
+		and draft.restoration_bindings.size() == 1
+		and draft.restoration_bindings[0].key == &"resolved")
+	ok = _check("complex Blackboard defaults round-trip as their original Variant type",
+		typed_transform_preserved and complex_types_preserved) and ok
+	var snapshot := draft.snapshot()
+	var restored := GraphDraft.new()
+	restored.restore(snapshot)
+	ok = _check("typed defaults and board-authored settings survive draft undo snapshots",
+		typeof(restored.variables[0].default_value) == TYPE_TRANSFORM3D
+		and restored.managed_lifecycle and restored.external_writers.size() == 1
+		and restored.restoration_bindings.size() == 1) and ok
+	var migrated_definition := StageDefinition.new()
+	migrated_definition.variables = [{"key": "legacy_transform", "scope": "saved", "default": changed_transform}]
+	migrated_definition._migrate()
+	ok = _check("legacy variable migration keeps serialized Transform3D defaults typed",
+		migrated_definition.variables[0].default_value is Transform3D) and ok
+	var saved_definition := RuleGraphReader.make_definition(draft)
+	var save_error := ResourceSaver.save(saved_definition, TMP_TYPED_DEFAULTS_PATH)
+	var reloaded_definition := ResourceLoader.load(TMP_TYPED_DEFAULTS_PATH, "", ResourceLoader.CACHE_MODE_IGNORE) as StageDefinition
+	ok = _check("typed defaults survive StageDefinition save and reload",
+		save_error == OK and reloaded_definition != null
+		and typeof(reloaded_definition.variables[0].default_value) == TYPE_TRANSFORM3D
+		and reloaded_definition.variables[0].default_value.origin == changed_transform.origin) and ok
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(TMP_TYPED_DEFAULTS_PATH))
+	panel.free()
+	return ok
+
+func _test_restoration_picker_options() -> bool:
+	var scene_root := Node3D.new()
+	scene_root.name = "AuthoringFixture"
+	var target := Node3D.new()
+	target.name = "Target"
+	scene_root.add_child(target)
+	target.owner = scene_root
+	var marker := Marker3D.new()
+	marker.name = "Resolved"
+	scene_root.add_child(marker)
+	marker.owner = scene_root
+	var player := AnimationPlayer.new()
+	player.name = "AnimationPlayer"
+	scene_root.add_child(player)
+	player.owner = scene_root
+	var library := AnimationLibrary.new()
+	library.add_animation(&"resolved_pose", Animation.new())
+	player.add_animation_library(&"", library)
+	var packed := PackedScene.new()
+	var pack_result := packed.pack(scene_root)
+	var save_result := ResourceSaver.save(packed, TMP_RESTORATION_SCENE_PATH) if pack_result == OK else FAILED
+	scene_root.free()
+	if save_result != OK:
+		return _check("restoration picker fixture scene saves", false)
+	var draft := GraphDraft.new()
+	draft.definition = StageDefinition.new()
+	draft.definition.preview_scene_path = TMP_RESTORATION_SCENE_PATH
+	var panel := BlackboardPanel.new()
+	panel._data = draft
+	var marker_paths := panel._scene_node_paths(["Marker3D"])
+	var animations := panel._scene_animations(NodePath("./AnimationPlayer"))
+	var properties := panel._scene_property_names(NodePath("./Target"))
+	var binding := StageRestorationBinding.new()
+	binding.animation_name = &""
+	var fields := VBoxContainer.new()
+	panel._add_path_field(fields, "Marker", binding, "marker_path", ["Marker3D"])
+	var path_picker := (fields.get_child(0) as HBoxContainer).get_child(1) as OptionButton
+	var marker_option := marker_paths.find("./Resolved")
+	if marker_option >= 0:
+		path_picker.select(marker_option + 1)
+		path_picker.item_selected.emit(marker_option + 1)
+	var ok := _check("restoration node pickers filter preview paths by class",
+		marker_paths.has("./Resolved") and binding.marker_path == NodePath("./Resolved"))
+	var animation_fields := VBoxContainer.new()
+	panel._add_name_field(animation_fields, "Animation", binding, "animation_name", animations)
+	var animation_picker := (animation_fields.get_child(0) as HBoxContainer).get_child(1) as OptionButton
+	var animation_option := animations.find("resolved_pose")
+	if animation_option >= 0:
+		animation_picker.select(animation_option + 1)
+		animation_picker.item_selected.emit(animation_option + 1)
+	ok = _check("restoration animation and property suggestions come from the preview scene",
+		animations.has("resolved_pose") and binding.animation_name == &"resolved_pose"
+		and properties.has("position")) and ok
+	fields.free()
+	animation_fields.free()
+	panel.free()
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(TMP_RESTORATION_SCENE_PATH))
 	return ok
 
 func _test_parallel_group_authoring() -> bool:

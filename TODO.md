@@ -206,10 +206,10 @@ The first five items retain the high priority assigned in `TODO.md`.
   - [x] Rules are evaluated in authored array order. A synchronous write from an earlier rule can affect a later guard. The inspector can already reorder steps within a rule.
   - [x] Show rule order by trigger, allow undoable reordering, and persist it independently of board layout. Add opt-in first-match and fallback routing for mutually exclusive outcomes while preserving existing multi-match dispatch by default.
 
-- [ ] **Edit restoration, external writers, and managed lifecycle on the board.** See [StageDefinition](addons/callboard/core/stage_definition.gd), [GraphDraft](addons/callboard/model/graph_draft.gd), [RuleGraphReader](addons/callboard/model/rule_graph_reader.gd), and [BlackboardPanel](addons/callboard/editor/blackboard_panel.gd).
+- [x] **Edit restoration, external writers, and managed lifecycle on the board.** See [StageDefinition](addons/callboard/core/stage_definition.gd), [GraphDraft](addons/callboard/model/graph_draft.gd), [RuleGraphReader](addons/callboard/model/rule_graph_reader.gd), and [BlackboardPanel](addons/callboard/editor/blackboard_panel.gd).
   - [x] `managed_lifecycle` is reachable through the `StageDefinition` resource in Godot's Inspector. It already round-trips through the draft, as do restoration bindings and external writers. Scene-based `BlackboardWriter` declarations also feed validation.
-  - [ ] Add board controls for the lifecycle flag, typed writer declarations, and restoration bindings with key, target, marker, property, and animation pickers as applicable. Include standalone poses and the binding types from §3.
-  - [ ] Add type-preserving defaults for `Transform3D` and other supported types. The Blackboard panel currently falls back to a `LineEdit` for unsupported Variants, which writes text back to a manually authored transform default on submit or focus loss. Preserve existing typed values across edits, undo, reload, and migration.
+  - [x] Add board controls for the lifecycle flag, typed writer declarations, and restoration bindings with key, target, marker, property, and animation pickers as applicable. Include standalone poses and the binding types from §3.
+  - [x] Add type-preserving defaults for `Transform3D` and other supported types. The Blackboard panel parses serialized Variant values only when they retain the default original type; checks cover edits, undo snapshots, resource reload, and migration.
 
 - [ ] **Add parameterized rule templates.**
   - [ ] Cover reusable interaction outcomes, repeating ambient behavior, conditional sequences, and objective completion. Define bindings for props, keys, Calls, relays, and payload fields.
