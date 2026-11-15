@@ -599,6 +599,7 @@ func _initialize() -> void:
 	ok = await _test_core_verb_branch_factories() and ok
 	ok = _test_signal_callbacks_accept_arguments() and ok
 	ok = _test_snap_to_marker() and ok
+	ok = await _test_staging_tweens() and ok
 	ok = await _test_playback_wait_exits() and ok
 	ok = await _test_cancel_if_interrupts_a_wait() and ok
 	ok = _test_shared_write_order() and ok
@@ -674,6 +675,82 @@ func _test_snap_to_marker() -> bool:
 	ok = _check("snap_to_marker seeks to the resolved animation time", animation_seek) and ok
 	return _check("snap_to_marker validation rejects invalid markers, animation clips, and pose times",
 		reports_target and reports_animation and reports_time) and ok
+
+func _test_staging_tweens() -> bool:
+	var stage := Stage.new()
+	root.add_child(stage)
+	var actor := Node3D.new()
+	stage.add_child(actor)
+	var destination := Node3D.new()
+	destination.position = Vector3(2, 1, -3)
+	stage.add_child(destination)
+	var path := Path3D.new()
+	path.curve = Curve3D.new()
+	path.curve.add_point(Vector3.ZERO)
+	path.curve.add_point(Vector3(3, 0, 0))
+	stage.add_child(path)
+	var factory := StagingVerbs.new(StepContext.new(Blackboard.new(), null, stage, Callable()))
+	var move := factory.move_to(actor, destination, Vector3.ZERO, 0.03, Tween.TRANS_SINE, Tween.EASE_IN_OUT)
+	await move.fn.call({})
+	var moved := actor.global_position.is_equal_approx(destination.global_position)
+	var rotate := factory.rotate_to(actor, Vector3(0, 0.7, 0), 0.03, true,
+		Tween.TRANS_QUAD, Tween.EASE_OUT)
+	await rotate.fn.call({})
+	var rotated := is_equal_approx(actor.rotation.y, 0.7)
+	var property := factory.tween_property(actor, ^"scale", Vector3(2, 3, 4), 0.03,
+		true, Tween.TRANS_CUBIC, Tween.EASE_IN)
+	property.verb = &"tween_property"
+	property.args = [actor, ^"scale", Vector3(2, 3, 4), 0.03, true, Tween.TRANS_CUBIC, Tween.EASE_IN]
+	var valid_property := factory.validate_step(&"scale_actor", property, factory.context.bb).is_empty()
+	await property.fn.call({})
+	var property_tweened := actor.scale.is_equal_approx(Vector3(2, 3, 4))
+	var follow := factory.follow_path(actor, path, 0.03, true, true,
+		Tween.TRANS_LINEAR, Tween.EASE_IN_OUT)
+	await follow.fn.call({})
+	var followed := actor.global_position.is_equal_approx(path.to_global(Vector3(3, 0, 0)))
+	var final_path_sample := path.curve.sample_baked_with_rotation(path.curve.get_baked_length(), true, false)
+	var oriented := actor.global_rotation.is_equal_approx(
+		(path.global_transform.basis * final_path_sample.basis).get_euler())
+	actor.global_position = Vector3(-10, 2, 6)
+	var immediate := factory.follow_path(actor, path, 0.0)
+	immediate.fn.call({})
+	var immediate_path_snapped := actor.global_position.is_equal_approx(path.to_global(Vector3(3, 0, 0)))
+	var invalid_property := not factory._tween_values_compatible(Vector3.ZERO, Color.WHITE)
+	var invalid_property_step := Step.new()
+	invalid_property_step.verb = &"tween_property"
+	invalid_property_step.args = [actor, ^"scale", Color.WHITE, 0.03, true,
+		Tween.TRANS_LINEAR, Tween.EASE_IN_OUT]
+	var invalid_property_errors := factory.validate_step(&"bad_property", invalid_property_step,
+		factory.context.bb)
+	var invalid_property_reported := invalid_property_errors.any(func(problem: String) -> bool:
+		return "value type is incompatible" in problem)
+	destination.position = Vector3(12, -2, 5)
+	var moving_away := factory.move_to(actor, destination, Vector3.ZERO, 0.15)
+	moving_away.fn.call({})
+	var path_override := factory.follow_path(actor, path, 0.03)
+	await path_override.fn.call({})
+	await create_timer(0.17).timeout
+	var latest_path_wins := actor.global_position.is_equal_approx(path.to_global(Vector3(3, 0, 0)))
+	destination.position = Vector3(-2, 4, 1)
+	var superseded_move := factory.move_to(actor, destination, Vector3.ZERO, 0.15)
+	superseded_move.fn.call({})
+	var snap_move := factory.move_to(actor, destination, Vector3.ZERO, 0.0)
+	snap_move.fn.call({})
+	await create_timer(0.2).timeout
+	var immediate_move_wins := actor.global_position.is_equal_approx(destination.global_position)
+	root.remove_child(stage)
+	stage.free()
+	var ok := _check("move_to and rotate_to accept configurable easing", moved and rotated)
+	ok = _check("typed property tween validates and interpolates a Vector3 property",
+		valid_property and property_tweened) and ok
+	ok = _check("follow_path interpolates position and orientation along Curve3D",
+		followed and oriented) and ok
+	ok = _check("generic property tween rejects incompatible value types",
+		invalid_property and invalid_property_reported) and ok
+	ok = _check("follow_path takes ownership from an older move_to tween", latest_path_wins) and ok
+	ok = _check("zero-duration follow_path snaps to the path endpoint", immediate_path_snapped) and ok
+	ok = _check("immediate move invalidates a previous position tween", immediate_move_wins) and ok
+	return ok
 
 func _test_signal_callbacks_accept_arguments() -> bool:
 	var engine := RuleEngine.new(Blackboard.new(), {}, Callable())

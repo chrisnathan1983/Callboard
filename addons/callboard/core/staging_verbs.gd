@@ -228,19 +228,147 @@ func _watch_audio_playback(player_id: int, ticket: PlaybackTicket,
 
 ## Rotate a Node3D to an Euler rotation in radians. Waiting is explicit.
 func rotate_to(n: Node3D, target_rotation: Vector3, duration := 0.25,
-		wait_for_completion := true) -> Step:
+		wait_for_completion := true, transition := Tween.TRANS_LINEAR,
+		ease := Tween.EASE_IN_OUT) -> Step:
 	var host := context.host
 	var f := func(payload: Dictionary) -> Variant:
-		if duration < 0.0:
-			push_warning("Callboard rotate_to skipped: duration must be zero or greater.")
+		if not _valid_tween_options(duration, transition, ease, "rotate_to"):
+			return null
+		if not is_instance_valid(n):
+			push_warning("Callboard rotate_to requires a live Node3D target.")
+			return null
+		if not _is_finite_vector3(target_rotation):
+			push_warning("Callboard rotate_to skipped: target rotation must be finite.")
 			return null
 		if duration == 0.0:
 			n.rotation = target_rotation
 			return null
+		if not is_instance_valid(host) or not host is Node:
+			push_warning("Callboard rotate_to requires a live Node3D and an in-tree Stage host.")
+			return null
 		var tween := host.create_tween()
-		tween.tween_property(n, "rotation", target_rotation, duration)
+		tween.tween_property(n, ^"rotation", target_rotation, duration).set_trans(transition).set_ease(ease)
 		return _animation_completion(payload, tween.finished) if wait_for_completion else null
 	return Step.new(f)
+
+## Follow a Path3D curve by distance. The optional orientation follows the path's baked rotation.
+func follow_path(n: Node3D, path: Path3D, duration := 1.0, orient_to_path := false,
+		wait_for_completion := true, transition := Tween.TRANS_LINEAR,
+		ease := Tween.EASE_IN_OUT) -> Step:
+	var host := context.host
+	return Step.new(func(payload: Dictionary) -> Variant:
+		if not is_instance_valid(n) or not is_instance_valid(path) or path.curve == null:
+			push_warning("Callboard follow_path requires a live Node3D target and Path3D with a Curve3D.")
+			return null
+		if not _valid_tween_options(duration, transition, ease, "follow_path"):
+			return null
+		var curve_length := path.curve.get_baked_length()
+		if curve_length <= 0.0:
+			push_warning("Callboard follow_path skipped: the Curve3D has no baked length.")
+			return null
+		if duration == 0.0:
+			n.set_meta(POSITION_TWEEN_META, null)
+			_apply_path_pose(n, path, curve_length, orient_to_path)
+			return null
+		if not is_instance_valid(host) or not host is Node:
+			push_warning("Callboard follow_path requires a live Stage host.")
+			return null
+		var tween := host.create_tween()
+		var set_position := _position_setter(n, tween, ^"global_position")
+		var update := func(progress: float) -> void:
+			if is_instance_valid(n) and is_instance_valid(path) and path.curve != null:
+				_apply_path_pose(n, path, curve_length * progress, orient_to_path, set_position)
+		tween.tween_method(update, 0.0, 1.0, duration).set_trans(transition).set_ease(ease)
+		return _animation_completion(payload, tween.finished) if wait_for_completion else null)
+
+## Tween an interpolatable property when its current and destination values have compatible types.
+func tween_property(target: Object, property: NodePath, value: Variant, duration := 0.25,
+		wait_for_completion := true, transition := Tween.TRANS_LINEAR,
+		ease := Tween.EASE_IN_OUT) -> Step:
+	var host := context.host
+	return Step.new(func(payload: Dictionary) -> Variant:
+		if not _valid_tween_options(duration, transition, ease, "tween_property"):
+			return null
+		if not is_instance_valid(target) or property.is_empty():
+			push_warning("Callboard tween_property requires a live target and nonempty property path.")
+			return null
+		if not _is_tween_property_writable(target, property):
+			push_warning("Callboard tween_property requires a writable property path.")
+			return null
+		var current: Variant = target.get_indexed(property)
+		if not _tween_values_compatible(current, value):
+			push_warning("Callboard tween_property requires compatible interpolatable property values.")
+			return null
+		if duration == 0.0:
+			target.set_indexed(property, value)
+			return null
+		if not is_instance_valid(host) or not host is Node:
+			push_warning("Callboard tween_property requires a live Stage host.")
+			return null
+		var tween := host.create_tween()
+		tween.tween_property(target, property, value, duration).set_trans(transition).set_ease(ease)
+		return _animation_completion(payload, tween.finished) if wait_for_completion else null)
+
+func _valid_tween_options(duration: float, transition: int, ease: int, verb: String) -> bool:
+	if not is_finite(duration) or duration < 0.0:
+		push_warning("Callboard %s skipped: duration must be finite and zero or greater." % verb)
+		return false
+	if transition < Tween.TRANS_LINEAR or transition > Tween.TRANS_SPRING:
+		push_warning("Callboard %s skipped: transition is not a valid Tween transition." % verb)
+		return false
+	if ease < Tween.EASE_IN or ease > Tween.EASE_OUT_IN:
+		push_warning("Callboard %s skipped: ease is not a valid Tween ease." % verb)
+		return false
+	return true
+
+func _is_finite_vector3(value: Vector3) -> bool:
+	return is_finite(value.x) and is_finite(value.y) and is_finite(value.z)
+
+func _apply_path_pose(n: Node3D, path: Path3D, distance: float, orient_to_path: bool,
+		set_position := Callable()) -> void:
+	var sample := path.curve.sample_baked_with_rotation(distance, true, false)
+	var world_position := path.to_global(sample.origin)
+	if set_position.is_valid():
+		set_position.call(world_position)
+	else:
+		n.global_position = world_position
+	if orient_to_path:
+		n.global_rotation = (path.global_transform.basis * sample.basis).get_euler()
+
+func _tween_values_compatible(from_value: Variant, to_value: Variant) -> bool:
+	if typeof(from_value) == TYPE_INT or typeof(from_value) == TYPE_FLOAT:
+		return typeof(to_value) == TYPE_INT or typeof(to_value) == TYPE_FLOAT
+	if typeof(from_value) != typeof(to_value):
+		return false
+	return typeof(from_value) in [TYPE_VECTOR2, TYPE_VECTOR2I, TYPE_RECT2, TYPE_RECT2I,
+		TYPE_VECTOR3, TYPE_VECTOR3I, TYPE_TRANSFORM2D, TYPE_VECTOR4, TYPE_VECTOR4I,
+		TYPE_PLANE, TYPE_QUATERNION, TYPE_AABB, TYPE_BASIS, TYPE_TRANSFORM3D,
+		TYPE_PROJECTION, TYPE_COLOR]
+
+func _is_tween_property_writable(target: Object, property: NodePath) -> bool:
+	if property.get_name_count() == 0:
+		return false
+	for descriptor in target.get_property_list():
+		if StringName(descriptor.name) == property.get_name(0):
+			return (int(descriptor.usage) & PROPERTY_USAGE_READ_ONLY) == 0
+	return false
+
+func _validate_tween_options(rule_id: StringName, args: Array, duration_index: int,
+		transition_index: int, ease_index: int, verb: String) -> Array[String]:
+	var problems: Array[String] = []
+	if args.size() > duration_index:
+		var duration: Variant = args[duration_index]
+		if not (duration is int or duration is float) or not is_finite(float(duration)) or float(duration) < 0.0:
+			problems.append("rule '%s' %s duration must be finite and zero or greater" % [rule_id, verb])
+	if args.size() > transition_index:
+		var transition: Variant = args[transition_index]
+		if not transition is int or transition < Tween.TRANS_LINEAR or transition > Tween.TRANS_SPRING:
+			problems.append("rule '%s' %s transition must be a valid Tween transition enum" % [rule_id, verb])
+	if args.size() > ease_index:
+		var ease: Variant = args[ease_index]
+		if not ease is int or ease < Tween.EASE_IN or ease > Tween.EASE_OUT_IN:
+			problems.append("rule '%s' %s ease must be a valid Tween ease enum" % [rule_id, verb])
+	return problems
 
 ## Instantly copy a Marker3D's world transform onto a Node3D. Optionally leave
 ## an AnimationPlayer paused at a resolved pose after moving the target.
@@ -412,16 +540,32 @@ func say(n: Node3D, text: String, seconds := 1.0) -> Step:
 		label.set_meta(SPEECH_TWEEN_META, t)
 	return Step.new(f)
 
-func move_to(n: Node3D, dest: Node3D, offset := Vector3.ZERO, duration := 0.7) -> Step:
+func move_to(n: Node3D, dest: Node3D, offset := Vector3.ZERO, duration := 0.7,
+		transition := Tween.TRANS_LINEAR, ease := Tween.EASE_IN_OUT) -> Step:
 	var host := context.host
-	var move := func(payload: Dictionary) -> Signal:
+	var move := func(payload: Dictionary) -> Variant:
+		if not is_instance_valid(n) or not is_instance_valid(dest):
+			push_warning("Callboard move_to requires live Node3D target and destination.")
+			return null
+		if not _is_finite_vector3(offset):
+			push_warning("Callboard move_to skipped: offset must be finite.")
+			return null
+		if not _valid_tween_options(duration, transition, ease, "move_to"):
+			return null
 		var target_global := dest.global_position + offset
 		var parent := n.get_parent_node_3d()
 		var target_local := target_global if parent == null or n.top_level else parent.to_local(target_global)
 		n.set_meta(BASE_Y_META, target_local.y)
+		if duration == 0.0:
+			n.set_meta(POSITION_TWEEN_META, null)
+			n.global_position = target_global
+			return null
+		if not is_instance_valid(host) or not host is Node:
+			push_warning("Callboard move_to requires a live Stage host.")
+			return null
 		var tween := host.create_tween()
 		var set_position := _position_setter(n, tween, ^"global_position")
-		tween.tween_method(set_position, n.global_position, target_global, duration)
+		tween.tween_method(set_position, n.global_position, target_global, duration).set_trans(transition).set_ease(ease)
 		return _animation_completion(payload, tween.finished)
 	return Step.new(move)
 
@@ -531,9 +675,9 @@ func _position_setter(node: Node3D, tween: Tween, property: NodePath) -> Callabl
 	node.set_meta(POSITION_TWEEN_META, tween)
 	return func(value: Variant) -> void:
 		var target := instance_from_id(node_id) as Node3D
-		if target == null:
+		if target == null or not target.has_meta(POSITION_TWEEN_META):
 			return
-		var current_tween := target.get_meta(POSITION_TWEEN_META, null) as Tween
+		var current_tween := target.get_meta(POSITION_TWEEN_META) as Tween
 		if current_tween != null and current_tween.get_instance_id() == tween_id:
 			target.set_indexed(property, value)
 
@@ -649,8 +793,25 @@ func validate_step(rule_id: StringName, step: Step, bb: Blackboard) -> Array[Str
 	if step.verb == &"rotate_to":
 		if not target is Node3D or not is_instance_valid(target):
 			problems.append("rule '%s' rotate_to target must be a valid Node3D" % rule_id)
-		if step.args.size() > 2 and float(step.args[2]) < 0.0:
-			problems.append("rule '%s' rotate_to duration must be zero or greater" % rule_id)
+		problems.append_array(_validate_tween_options(rule_id, step.args, 2, 4, 5, "rotate_to"))
+	if step.verb == &"move_to":
+		problems.append_array(_validate_tween_options(rule_id, step.args, 3, 4, 5, "move_to"))
+	if step.verb == &"follow_path":
+		if step.args.size() < 2 or not step.args[1] is Path3D or not is_instance_valid(step.args[1]):
+			problems.append("rule '%s' follow_path path must be a valid Path3D" % rule_id)
+		elif step.args[1].curve == null or step.args[1].curve.get_baked_length() <= 0.0:
+			problems.append("rule '%s' follow_path requires a Path3D with a nonempty Curve3D" % rule_id)
+		problems.append_array(_validate_tween_options(rule_id, step.args, 2, 5, 6, "follow_path"))
+	if step.verb == &"tween_property":
+		if step.args.size() < 3 or not step.args[0] is Object or not is_instance_valid(step.args[0]):
+			problems.append("rule '%s' tween_property target must be a live Object" % rule_id)
+		elif not step.args[1] is NodePath or not _is_tween_property_writable(step.args[0], step.args[1]):
+			problems.append("rule '%s' tween_property path must identify a writable property" % rule_id)
+		else:
+			var current_value: Variant = step.args[0].get_indexed(step.args[1])
+			if not _tween_values_compatible(current_value, step.args[2]):
+				problems.append("rule '%s' tween_property value type is incompatible with its property" % rule_id)
+		problems.append_array(_validate_tween_options(rule_id, step.args, 3, 5, 6, "tween_property"))
 	if step.verb in [&"play_animation", &"pose_animation"]:
 		if not target is AnimationPlayer or not is_instance_valid(target):
 			problems.append("rule '%s' '%s' target must be a valid AnimationPlayer" % [rule_id, step.verb])
