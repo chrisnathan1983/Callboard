@@ -9,6 +9,20 @@ const SUITES := [
 	{"name": "Demo runtime smoke test", "path": "res://demo/tests/smoke.gd"},
 ]
 const FAILURE_LOCATION_PATTERN := "(?<path>res://[^\\s\\):,]+\\.gd)(?::(?<line>[0-9]+))?"
+const EXPECTED_DIAGNOSTIC_MARKER := "CALLBOARD_EXPECTED_DIAGNOSTIC:"
+const TEARDOWN_LEAK_PATTERNS := [
+	"ObjectDB instances were leaked",
+	"RIDs of type ",
+	"RID allocations of type ",
+	"resources still in use at exit",
+	"Leaked instance:",
+	"Orphan StringName:",
+	"unclaimed string names at exit",
+	"Pages in use exist at exit in PagedAllocator",
+	"Cannot get path of node as it is not in a scene tree",
+]
+
+var _suites: Array[Dictionary] = []
 
 var _run_all_button: Button
 var _status_label: Label
@@ -24,7 +38,83 @@ var _results: Array[Dictionary] = []
 var _row_statuses: Array[Label] = []
 var _row_durations: Array[Label] = []
 
+static func available_suites() -> Array[Dictionary]:
+	var existing_paths: Array[String] = []
+	for suite: Dictionary in SUITES:
+		var path: String = suite["path"]
+		if FileAccess.file_exists(path):
+			existing_paths.append(path)
+	return filter_available_suites(SUITES, existing_paths)
+
+static func filter_available_suites(configured_suites: Array, existing_paths: Array[String]) -> Array[Dictionary]:
+	var available: Array[Dictionary] = []
+	for suite: Dictionary in configured_suites:
+		if existing_paths.has(str(suite.get("path", ""))):
+			available.append(suite.duplicate())
+	return available
+
+static func analyze_suite_output(output_text: String, exit_code: int) -> Dictionary:
+	var failures: Array[String] = []
+	var expected: Array[Dictionary] = []
+	var lines := output_text.split("\n")
+	var visible_lines: Array[String] = []
+	for raw_line: String in lines:
+		var line := raw_line.strip_edges()
+		if not line.begins_with(EXPECTED_DIAGNOSTIC_MARKER):
+			continue
+		var declaration := line.trim_prefix(EXPECTED_DIAGNOSTIC_MARKER)
+		var separator := declaration.find(":")
+		if separator <= 0 or separator == declaration.length() - 1:
+			failures.append("Malformed expected diagnostic marker: %s" % line)
+			continue
+		expected.append({
+			"severity": declaration.substr(0, separator),
+			"fragment": declaration.substr(separator + 1),
+			"matched": false,
+		})
+	for raw_line: String in lines:
+		var line := raw_line.strip_edges()
+		if line.begins_with(EXPECTED_DIAGNOSTIC_MARKER):
+			continue
+		visible_lines.append(raw_line)
+		if line.begins_with("SCRIPT ERROR:"):
+			failures.append("Unexpected script error: %s" % line)
+		elif line.begins_with("ERROR:"):
+			var matched := false
+			var error_message := line.trim_prefix("ERROR:").strip_edges()
+			for expected_index in range(expected.size()):
+				var diagnostic: Dictionary = expected[expected_index]
+				if not diagnostic["matched"] and diagnostic["severity"] == "ERROR" \
+						and error_message.begins_with(diagnostic["fragment"]):
+					expected[expected_index]["matched"] = true
+					matched = true
+					break
+			if not matched:
+				failures.append("Unexpected engine error: %s" % line)
+		elif line.begins_with("FAIL ") or line.begins_with("FAIL:") \
+				or line.ends_with(": FAIL"):
+			failures.append("Test assertion failed: %s" % line.strip_edges())
+		for pattern: String in TEARDOWN_LEAK_PATTERNS:
+			if line.contains(pattern):
+				var leak_summary := "Teardown leak reported (matched %s)." % pattern.strip_edges()
+				if not failures.has(leak_summary):
+					failures.append(leak_summary)
+				break
+	for expected_index in range(expected.size()):
+		var diagnostic: Dictionary = expected[expected_index]
+		if not diagnostic["matched"]:
+			failures.append("Expected diagnostic was not observed: %s: %s" % [
+				diagnostic["severity"], diagnostic["fragment"]])
+	if exit_code != 0:
+		failures.append("Godot exited with code %d." % exit_code)
+	return {
+		"passed": failures.is_empty(),
+		"failures": failures,
+		"display_output": "\n".join(visible_lines),
+	}
+
 func _ready() -> void:
+	_suites = available_suites()
 	_build_ui()
 
 func _process(_delta: float) -> void:
@@ -62,7 +152,7 @@ func _build_ui() -> void:
 	_results_list = VBoxContainer.new()
 	_results_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	left.add_child(_results_list)
-	for i in range(SUITES.size()):
+	for i in range(_suites.size()):
 		_add_suite_row(i)
 	var locations_title := Label.new()
 	locations_title.text = "Failure locations"
@@ -93,7 +183,7 @@ func _build_ui() -> void:
 func _add_suite_row(index: int) -> void:
 	var row := HBoxContainer.new()
 	var name_button := Button.new()
-	name_button.text = SUITES[index]["name"]
+	name_button.text = _suites[index]["name"]
 	name_button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	name_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	name_button.pressed.connect(_show_suite_output.bind(index))
@@ -122,7 +212,7 @@ func _on_run_all_pressed() -> void:
 	_clear_results()
 	_is_run_all = true
 	_pending_suites.clear()
-	for i in range(SUITES.size()):
+	for i in range(_suites.size()):
 		_pending_suites.append(i)
 	_start_next_suite()
 
@@ -136,7 +226,7 @@ func _on_run_one_pressed(index: int) -> void:
 	_start_next_suite()
 
 func _clear_results() -> void:
-	for i in range(SUITES.size()):
+	for i in range(_suites.size()):
 		_clear_result(i)
 	_output.clear()
 	_clear_locations()
@@ -151,15 +241,15 @@ func _start_next_suite() -> void:
 		_run_all_button.disabled = false
 		if not _is_run_all:
 			if _last_started_suite >= 0 and not _results[_last_started_suite].is_empty():
-				var state := "passed" if int(_results[_last_started_suite]["exit_code"]) == 0 else "failed"
-				_status_label.text = "%s %s" % [SUITES[_last_started_suite]["name"], state]
+				var state := "passed" if _results[_last_started_suite]["passed"] else "failed"
+				_status_label.text = "%s %s" % [_suites[_last_started_suite]["name"], state]
 			return
 		var passed := 0
 		var failed := 0
 		for result in _results:
 			if result.is_empty():
 				continue
-			if int(result["exit_code"]) == 0:
+			if result["passed"]:
 				passed += 1
 			else:
 				failed += 1
@@ -169,16 +259,20 @@ func _start_next_suite() -> void:
 	_last_started_suite = _active_suite
 	_run_all_button.disabled = true
 	_row_statuses[_active_suite].text = "Running…"
-	_status_label.text = "Running %s" % SUITES[_active_suite]["name"]
+	_status_label.text = "Running %s" % _suites[_active_suite]["name"]
 	var executable := _headless_executable_path()
 	var project_path := ProjectSettings.globalize_path("res://")
-	var script_path: String = SUITES[_active_suite]["path"]
+	var script_path: String = _suites[_active_suite]["path"]
 	var error := _thread.start(_execute_suite.bind(executable, project_path, script_path))
 	if error != OK:
+		var start_error_output := "Could not start the headless Godot process: %s" % error_string(error)
 		var failed_to_start := {
 			"exit_code": -1,
 			"duration_ms": 0,
-			"output": "Could not start the headless Godot process: %s" % error_string(error),
+			"output": start_error_output,
+			"display_output": start_error_output,
+			"passed": false,
+			"failures": [start_error_output],
 		}
 		_results[_active_suite] = failed_to_start
 		_show_suite_result(_active_suite, failed_to_start)
@@ -200,10 +294,14 @@ static func _execute_suite(executable: String, project_path: String, script_path
 	])
 	var started := Time.get_ticks_msec()
 	var exit_code := OS.execute(executable, args, output, true)
+	var output_text := str(output[0]) if not output.is_empty() else "(No output captured.)"
+	var analysis := analyze_suite_output(output_text, exit_code)
 	return {
 		"exit_code": exit_code,
 		"duration_ms": Time.get_ticks_msec() - started,
-		"output": str(output[0]) if not output.is_empty() else "(No output captured.)",
+		"output": output_text,
+		"passed": analysis["passed"],
+		"failures": analysis["failures"],
 	}
 
 func shutdown() -> void:
@@ -212,7 +310,7 @@ func shutdown() -> void:
 		_active_suite = -1
 
 func _show_suite_result(index: int, result: Dictionary) -> void:
-	var passed := int(result["exit_code"]) == 0
+	var passed := bool(result["passed"])
 	_row_statuses[index].text = "PASS" if passed else "FAIL"
 	_row_durations[index].text = _format_duration(int(result["duration_ms"]))
 	_show_suite_output(index)
@@ -221,7 +319,11 @@ func _show_suite_output(index: int) -> void:
 	var result := _results[index]
 	if result.is_empty():
 		return
-	_output.text = str(result["output"])
+	var output_text: String = str(result.get("display_output", result["output"]))
+	var failures: Array = result.get("failures", [])
+	if not failures.is_empty():
+		output_text += "\n\nTest runner findings:\n- " + "\n- ".join(failures)
+	_output.text = output_text
 	_build_failure_locations(str(result["output"]))
 
 func _build_failure_locations(output_text: String) -> void:

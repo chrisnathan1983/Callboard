@@ -5,6 +5,7 @@ const TMP_PATH := "res://.godot/addon_stage_tmp.tres"
 const TMP_TYPED_DEFAULTS_PATH := "res://.godot/addon_typed_defaults_tmp.tres"
 const TMP_RESTORATION_SCENE_PATH := "res://.godot/addon_restoration_picker_tmp.tscn"
 const ExportFilter := preload("res://addons/callboard/editor/export_plugin.gd")
+const TestRunnerPanelScript := preload("res://addons/callboard/editor/test_runner_panel.gd")
 const RuleTemplateLibraryScript := preload("res://addons/callboard/model/rule_template_library.gd")
 const RuleTemplateDataScript := preload("res://addons/callboard/core/rule_template_data.gd")
 const CrossStageValidatorScript := preload("res://addons/callboard/model/cross_stage_event_validator.gd")
@@ -35,6 +36,7 @@ func _initialize() -> void:
 	ok = _test_live_payload_form() and ok
 	ok = _test_emit_relay_authoring() and ok
 	ok = _test_project_settings() and ok
+	ok = _test_runner_panel_results() and ok
 	print("ADDON EDITOR: ", "PASS" if ok else "FAIL")
 	# Dispose any fixture roots still owned by this test, then let deferred
 	# GraphEdit and popup cleanup finish before the engine reports leaked RIDs.
@@ -1217,6 +1219,45 @@ func _test_project_settings() -> bool:
 		and not ProjectSettings.has_setting(Settings.LEGACY_SCAN_FOLDERS))
 	ProjectSettings.set_setting(Settings.DEFAULT_STAGE_FOLDER, saved_folder)
 	ProjectSettings.set_setting(Settings.STAGE_SCAN_FOLDERS, scan_folders)
+	return ok
+
+func _test_runner_panel_results() -> bool:
+	var configured: Array = [
+		{"name": "Present", "path": "res://present.gd"},
+		{"name": "Missing", "path": "res://missing.gd"},
+	]
+	var existing_paths: Array[String] = ["res://present.gd"]
+	var no_paths: Array[String] = []
+	var available := TestRunnerPanelScript.filter_available_suites(configured, existing_paths)
+	var availability_ok: bool = available.size() == 1 \
+		and available[0]["name"] == "Present" \
+		and TestRunnerPanelScript.filter_available_suites(configured, no_paths).is_empty()
+	var expected_output := "CALLBOARD_EXPECTED_DIAGNOSTIC:ERROR:deliberate validation error\n" \
+		+ "ERROR: deliberate validation error\nUNIT: PASS\n"
+	var expected_diagnostic_result: Dictionary = TestRunnerPanelScript.analyze_suite_output(
+		expected_output, 0)
+	var unexpected_error_result: Dictionary = TestRunnerPanelScript.analyze_suite_output(
+		"ERROR: unexpected engine failure\nUNIT: PASS\n", 0)
+	var script_error_result: Dictionary = TestRunnerPanelScript.analyze_suite_output(
+		"SCRIPT ERROR: unexpected script failure\nUNIT: PASS\n", 0)
+	var nonzero_exit_result: Dictionary = TestRunnerPanelScript.analyze_suite_output(
+		"UNIT: PASS\n", 1)
+	var assertion_result: Dictionary = TestRunnerPanelScript.analyze_suite_output(
+		"  FAIL broken assertion\nUNIT: PASS\n", 0)
+	var leak_result: Dictionary = TestRunnerPanelScript.analyze_suite_output(
+		"WARNING: 3 ObjectDB instances were leaked at exit.\nUNIT: PASS\n", 0)
+	var missing_diagnostic_result: Dictionary = TestRunnerPanelScript.analyze_suite_output(
+		"CALLBOARD_EXPECTED_DIAGNOSTIC:ERROR:missing expected error\nUNIT: PASS\n", 0)
+	var ok := _check("developer panel lists only suites present in a partial checkout", availability_ok)
+	ok = _check("test output accepts explicitly expected diagnostics", expected_diagnostic_result["passed"]) and ok
+	ok = _check("test output fails on unexpected engine and script errors despite exit code zero",
+		not unexpected_error_result["passed"] and not script_error_result["passed"]) and ok
+	ok = _check("test output fails when the child process exits nonzero",
+		not nonzero_exit_result["passed"]) and ok
+	ok = _check("test output fails on assertion failures and teardown leaks despite exit code zero",
+		not assertion_result["passed"] and not leak_result["passed"]) and ok
+	ok = _check("test output fails when a declared diagnostic was not observed",
+		not missing_diagnostic_result["passed"]) and ok
 	return ok
 
 func _check(label: String, cond: bool) -> bool:

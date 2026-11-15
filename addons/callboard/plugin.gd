@@ -5,6 +5,7 @@ extends EditorPlugin
 
 const MENU_ITEM := "Create New Stage..."
 const ExportPlugin := preload("res://addons/callboard/editor/export_plugin.gd")
+const TestRunnerPanelScript := preload("res://addons/callboard/editor/test_runner_panel.gd")
 const Settings := preload("res://addons/callboard/core/callboard_settings.gd")
 
 var board: Callboard
@@ -26,8 +27,9 @@ func _enter_tree() -> void:
 		EditorInterface.get_resource_filesystem().update_file(path))
 	EditorInterface.get_editor_main_screen().add_child(board)
 	_make_visible(false)
-	test_runner = preload("res://addons/callboard/editor/test_runner_panel.gd").new()
-	add_control_to_bottom_panel(test_runner, "Callboard Tests")
+	if not TestRunnerPanelScript.available_suites().is_empty():
+		test_runner = TestRunnerPanelScript.new()
+		add_control_to_bottom_panel(test_runner, "Callboard Tests")
 	add_tool_menu_item(MENU_ITEM, _on_create_stage_pressed)
 	_export_plugin = ExportPlugin.new()
 	add_export_plugin(_export_plugin)

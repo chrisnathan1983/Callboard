@@ -188,7 +188,8 @@ func stop_audio(player: Node) -> Step:
 		if not is_instance_valid(player) or not _is_audio_player(player):
 			push_warning("Callboard stop_audio requires a live AudioStreamPlayer target.")
 			return
-		var ticket := player.get_meta(AUDIO_PLAYBACK_META, null) as PlaybackTicket
+		var ticket: PlaybackTicket = player.get_meta(AUDIO_PLAYBACK_META) as PlaybackTicket \
+			if player.has_meta(AUDIO_PLAYBACK_META) else null
 		if ticket != null:
 			ticket.cancel(&"stopped")
 		player.call("stop"))

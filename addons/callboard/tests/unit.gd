@@ -284,6 +284,7 @@ func _initialize() -> void:
 	writer_stage.free()
 	var undeclared_changes := [0]
 	bb.changed.connect(func(_key: StringName, _value: Variant) -> void: undeclared_changes[0] += 1)
+	_expect_error("Undeclared Blackboard key 'missing'")
 	bb.write(&"missing", true)
 	ok = _check("undeclared Blackboard writes are rejected in every build",
 		not bb.local.has(&"missing") and undeclared_changes[0] == 0) and ok
@@ -1554,6 +1555,7 @@ func _test_emit_relay() -> bool:
 	cycle_engine.dispatch_limit_reached.connect(func(limit: String, chain: PackedStringArray, _rule: StringName) -> void:
 		if limit == "event depth" and chain.has("relay:a") and chain.has("relay:b"):
 			cycle_stopped[0] = true)
+	_expect_error("Callboard stopped event depth")
 	cycle_engine.fire(&"relay:a")
 	return (_check("emit_relay selects/remaps fields and exposes its relay argument in step traces",
 		mapped_payload and relay_metadata) \
@@ -2290,6 +2292,7 @@ func _test_on_change_triggers() -> bool:
 	loop_stage.engine.dispatch_limit_reached.connect(func(limit: String, _chain: PackedStringArray, _rule: StringName) -> void:
 		if limit == "event depth":
 			loop_limited[0] = true)
+	_expect_error("Callboard stopped event depth")
 	loop_stage.write_var(&"loop_count", 1)
 	var feedback_stopped: bool = loop_limited[0] and loop_stage.get_var(&"loop_count") < 100
 	loop_stage.free()
@@ -2335,6 +2338,7 @@ func _test_dispatch_limits_and_ancestry() -> bool:
 		var rule := Rule.new(StringName("chain_rule_%d" % event_index), event_name)
 		next_events[rule.id] = next_event
 		depth_engine.rules.append(rule)
+	_expect_error("Callboard stopped event depth")
 	depth_engine.fire(&"chain_0")
 	var depth_stopped: bool = started[0] == RuleEngine.MAX_FIRE_DEPTH and limit_chains.size() == 1 \
 		and limit_chains[0].size() == RuleEngine.MAX_FIRE_DEPTH + 1
@@ -2365,6 +2369,7 @@ func _test_dispatch_limits_and_ancestry() -> bool:
 		var engine := cycle_engine_ref.get_ref() as RuleEngine
 		engine.fire_from_context(&"cycle_a", {}, context)))
 	cycle_engine.rules.append_array([cycle_a, cycle_b])
+	_expect_error("Callboard stopped event depth")
 	cycle_engine.fire(&"cycle_a")
 	for _i in RuleEngine.MAX_FIRE_DEPTH + 2:
 		clock_tick.emit()
@@ -2386,6 +2391,7 @@ func _test_dispatch_limits_and_ancestry() -> bool:
 		if limit == "pending queue":
 			queue_limit_count[0] += 1)
 	queue_engine.fire(&"queue_limit")
+	_expect_error("Callboard stopped pending queue")
 	for _i in RuleEngine.MAX_PENDING_PER_RULE + 1:
 		queue_engine.fire(&"queue_limit")
 	var queue_bounded: bool = queue_engine.active_snapshot()[0]["queued"] == RuleEngine.MAX_PENDING_PER_RULE \
@@ -2404,6 +2410,7 @@ func _test_dispatch_limits_and_ancestry() -> bool:
 			_rule_id: StringName) -> void:
 		if limit == "per-frame dispatch budget":
 			frame_limits[0] += 1)
+	_expect_error("Callboard stopped per-frame dispatch budget")
 	frame_engine.fire(&"frame_budget")
 	var frame_bounded: bool = frame_starts[0] == RuleEngine.MAX_DISPATCHES_PER_FRAME \
 		and frame_limits[0] == 1
@@ -2453,6 +2460,7 @@ func _test_stage_dispatch_policy() -> bool:
 		and partial.engine.rules[0].steps.size() == 2
 		and partial.graph_errors.size() == 1)
 	partial.fire(&"partial_call")
+	_expect_error("rule 'partially_compiled' has an invalid step: missing_verb()")
 	partial.activate()
 	var partial_blocked: bool = (placeholder_preserved and not partial.get_var(&"valid_called")
 		and partial_diagnostic[0])
@@ -3578,3 +3586,6 @@ func _test_async_stage_loading() -> bool:
 func _check(label: String, condition: bool) -> bool:
 	print(("  ok   " if condition else "  FAIL ") + label)
 	return condition
+
+func _expect_error(message_fragment: String) -> void:
+	print("CALLBOARD_EXPECTED_DIAGNOSTIC:ERROR:", message_fragment)

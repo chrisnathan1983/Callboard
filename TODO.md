@@ -229,10 +229,10 @@ The first five items retain the high priority assigned in `TODO.md`.
   - [x] Hand-written headless tests exercise Call sequences, typed payload routing, restoration, and re-entry. Engine delays and repeat loops can already use an injected clock.
   - [x] Add a headless Call-sequence runner with payloads, Stage activation/teardown, state and outcome assertions, and rule/branch coverage. Add live debugger time fast-forward for waits driven by the test clock and document how external playback and host work are handled.
 
-- [ ] **Make the developer test panel conditional and report errors accurately.** See [plugin registration](addons/callboard/plugin.gd) and [TestRunnerPanel](addons/callboard/editor/test_runner_panel.gd).
+- [x] **Make the developer test panel conditional and report errors accurately.** See [plugin registration](addons/callboard/plugin.gd) and [TestRunnerPanel](addons/callboard/editor/test_runner_panel.gd).
   - [x] A repository developer panel runs headless suites and captures output. The installable ZIP deliberately excludes addon test scripts.
-  - [ ] Register the panel only when runnable suites exist, and list only available suites in partial checkouts. It currently registers unconditionally, including from the installed ZIP where its configured suites are absent.
-  - [ ] Detect unexpected script/engine errors and test failures in both suite badges and aggregate results, even when the child exits with code 0. Keep deliberately asserted diagnostics distinguishable from failures and report teardown leaks.
+  - [x] Register the panel only when runnable suites exist, and list only available suites in partial checkouts. The installed ZIP has no configured suite scripts, so it does not add the panel.
+  - [x] Detect unexpected script/engine errors and test failures in both suite badges and aggregate results, even when the child exits with code 0. Expected diagnostics use explicit markers; teardown leaks fail the suite.
 
 - [ ] **Exercise the packaged addon in CI and diagnose teardown leaks.** See [CI workflow](.github/workflows/test.yml), [package script](.github/scripts/package_addon.py), [export filter](addons/callboard/editor/export_plugin.gd), and [editor smoke suite](addons/callboard/tests/editor_smoke.gd).
   - [x] CI targets Godot `4.7.2`, runs four suites before packaging, and checks runtime with authoring layers removed. Editor assertions cover the export filter, which removes tests from exports and strips authoring layers from release exports.
