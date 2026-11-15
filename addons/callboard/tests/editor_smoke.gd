@@ -18,6 +18,7 @@ func _initialize() -> void:
 	ok = _test_restoration_picker_options() and ok
 	ok = _test_rule_templates() and ok
 	ok = _test_cross_stage_shared_validation() and ok
+	ok = _test_objective_reachability() and ok
 	ok = _test_parallel_group_authoring() and ok
 	ok = _test_conditional_group_authoring() and ok
 	ok = _test_guard_expression_authoring() and ok
@@ -38,6 +39,56 @@ func _initialize() -> void:
 	await process_frame
 	await process_frame
 	quit(0 if ok else 1)
+
+func _test_objective_reachability() -> bool:
+	var data := GraphDraft.new()
+	data.definition = StageDefinition.new()
+	data.external_calls = ["unlock", "deliver", "draw"]
+	data.external_vars = ["host_done"]
+	for key in ["ready", "done", "lucky", "host_done", "never"]:
+		data.variables.append(VariableData.from_dictionary({"key": key, "default": false}))
+		data.objectives.append(ObjectiveData.from_dictionary({"id": key + "_objective", "condition": key}))
+	data.rules = [
+		RuleData.from_dictionary({"id": "unlock", "trigger": "unlock",
+			"steps": [{"verb": "set_var", "args": ['&"ready"', "true"]}]}),
+		RuleData.from_dictionary({"id": "attempt", "trigger": "deliver", "one_shot": true,
+			"steps": [{"verb": "conditional", "branch_conditions": ["ready"],
+				"parallel_branches": [[{"verb": "emit_relay", "args": ['&"accepted"']}]]}]}),
+		RuleData.from_dictionary({"id": "finish", "trigger": "relay:accepted",
+			"steps": [{"verb": "set_var", "args": ['&"done"', "true"]}]}),
+		RuleData.from_dictionary({"id": "draw", "trigger": "draw",
+			"steps": [{"verb": "random", "parallel_branches": [
+				[{"verb": "set_var", "args": ['&"lucky"', "true"]}], []]}]}),
+	]
+	RuleGraphReader.validate_resources(data)
+	var ok := _check("objective analysis finds ordered Call and relay paths from defaults",
+		data.objective_results.any(func(note: String) -> bool:
+			return "done_objective" in note and "unlock → deliver" in note))
+	ok = _check("objective analysis flags an early latch only when a retry would complete the route",
+		data.warnings.any(func(note: String) -> bool:
+			return ("done_objective" in note and "one-shot rule 'attempt'" in note
+				and "deliver → unlock → deliver" in note))) and ok
+	ok = _check("objective analysis distinguishes host-dependent, random and missing paths",
+		data.warnings.any(func(note: String) -> bool: return "host_done_objective" in note and "declared host" in note)
+		and data.warnings.any(func(note: String) -> bool: return "lucky_objective" in note and "random branch 1" in note)
+		and data.warnings.any(func(note: String) -> bool: return "never_objective" in note and "No path" in note)) and ok
+	data.rules[1].requires = PackedStringArray(["ready"])
+	RuleGraphReader.validate_resources(data)
+	ok = _check("guarding the rule before it latches removes the early-consumption warning",
+		not data.warnings.any(func(note: String) -> bool: return "one-shot rule 'attempt'" in note)) and ok
+	var snapshot := data.snapshot()
+	AuthoredData.rename_key(data, "done", "delivered")
+	ok = _check("Blackboard rename updates objective conditions", data.objectives[1].condition == "delivered") and ok
+	data.restore(snapshot)
+	var saved := RuleGraphReader.make_definition(data)
+	var objective_path := "res://.godot/addon_objective_tmp.tres"
+	var save_error := ResourceSaver.save(saved, objective_path)
+	var reloaded := RuleGraphReader.inspect_definition_resources(objective_path)
+	DirAccess.remove_absolute(objective_path)
+	ok = _check("objective declarations survive history, save and resource reload",
+		save_error == OK and reloaded.objectives.size() == 5
+		and reloaded.objectives[1].condition == "done" and not reloaded.objective_results.is_empty()) and ok
+	return ok
 
 func _test_cross_stage_shared_validation() -> bool:
 	var reader := GraphDraft.new()
@@ -292,13 +343,22 @@ func _test_stage_authoring_controls() -> bool:
 	var panel := BlackboardPanel.new()
 	root.add_child(panel)
 	panel.show_data(draft, true)
-	var settings := panel._make_stage_settings()
+	var settings := panel._rows.get_child(panel._rows.get_child_count() - 1)
 	var lifecycle := settings.get_child(1) as CheckButton
 	lifecycle.toggled.emit(true)
+	settings = panel._rows.get_child(panel._rows.get_child_count() - 1)
 	var writers := settings.get_child(2) as VBoxContainer
 	(writers.get_child(0).get_child(1) as Button).pressed.emit()
+	settings = panel._rows.get_child(panel._rows.get_child_count() - 1)
 	var bindings := settings.get_child(3) as VBoxContainer
 	(bindings.get_child(0).get_child(1) as Button).pressed.emit()
+	settings = panel._rows.get_child(panel._rows.get_child_count() - 1)
+	var objectives := settings.get_child(4) as VBoxContainer
+	(objectives.get_child(0).get_child(1) as Button).pressed.emit()
+	settings = panel._rows.get_child(panel._rows.get_child_count() - 1)
+	var condition := settings.get_child(4).get_child(1).get_child(1) as LineEdit
+	condition.text = "resolved"
+	condition.text_submitted.emit(condition.text)
 	var editor := panel._default_editor(state) as LineEdit
 	var changed_transform := Transform3D(Basis.from_euler(Vector3(0.2, 0.3, 0.4)), Vector3(4, 5, 6))
 	editor.text = var_to_str(changed_transform)
@@ -320,11 +380,12 @@ func _test_stage_authoring_controls() -> bool:
 			and variable.default_value == complex_values[index]
 		value_editor.free()
 	editor.free()
-	settings.free()
 	var ok := _check("board exposes lifecycle, external-writer, and restoration controls",
 		draft.managed_lifecycle and draft.external_writers.size() == 1
 		and draft.restoration_bindings.size() == 1
 		and draft.restoration_bindings[0].key == &"resolved")
+	ok = _check("Blackboard can declare and edit an objective",
+		draft.objectives.size() == 1 and draft.objectives[0].condition == "resolved") and ok
 	ok = _check("complex Blackboard defaults round-trip as their original Variant type",
 		typed_transform_preserved and complex_types_preserved) and ok
 	var snapshot := draft.snapshot()

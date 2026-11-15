@@ -21,6 +21,7 @@ var _rows := VBoxContainer.new()
 var _add := MenuButton.new()
 var _latched := Label.new()
 var _live_labels := {}   # key -> Label
+var _objective_editors: Dictionary[ObjectiveData, LineEdit] = {}
 
 func _init() -> void:
 	custom_minimum_size.x = Style.LIST_WIDTH
@@ -65,6 +66,7 @@ func _rebuild() -> void:
 		_rows.remove_child(c)
 		c.queue_free()
 	_live_labels.clear()
+	_objective_editors.clear()
 	_latched.text = ""
 	if _data.variables.is_empty():
 		_rows.add_child(Style.label("No variables declared.", Style.MUTED, 13))
@@ -253,6 +255,74 @@ func _make_stage_settings() -> Control:
 	section.add_child(managed)
 	section.add_child(_make_writer_section())
 	section.add_child(_make_restoration_section())
+	section.add_child(_make_objective_section())
+	return section
+
+func _make_objective_section() -> Control:
+	var section := VBoxContainer.new()
+	var header := HBoxContainer.new()
+	var title := Style.label("Objectives", Style.TEXT, 13)
+	title.size_flags_horizontal = SIZE_EXPAND_FILL
+	header.add_child(title)
+	if _editable:
+		var add := Button.new()
+		add.text = "+ Objective"
+		add.pressed.connect(func() -> void:
+			var names: Array = []
+			for objective: ObjectiveData in _data.objectives:
+				if objective != null:
+					names.append(String(objective.id))
+			var objective := ObjectiveData.new()
+			objective.id = AuthoredData.unique_name(names, "objective")
+			_data.objectives.append(objective)
+			_rebuild()
+			changed.emit())
+		header.add_child(add)
+	section.add_child(header)
+	for index in _data.objectives.size():
+		var objective := _data.objectives[index]
+		var row := HBoxContainer.new()
+		if objective != null:
+			var id := LineEdit.new()
+			id.text = objective.id
+			id.accessibility_name = "Objective ID"
+			id.placeholder_text = "Objective ID"
+			id.editable = _editable
+			var commit_id := func(_text := "") -> void:
+				var name := StringName(id.text.strip_edges())
+				if objective.id != name:
+					objective.id = name
+					changed.emit()
+			id.text_submitted.connect(commit_id)
+			id.focus_exited.connect(commit_id)
+			row.add_child(id)
+			var condition := LineEdit.new()
+			condition.text = objective.condition
+			condition.accessibility_name = "Completion condition"
+			condition.placeholder_text = "Completion condition"
+			condition.size_flags_horizontal = SIZE_EXPAND_FILL
+			condition.editable = _editable
+			var commit_condition := func(_text := "") -> void:
+				var expression := condition.text.strip_edges()
+				if objective.condition != expression:
+					objective.condition = expression
+					changed.emit()
+			condition.text_submitted.connect(commit_condition)
+			condition.focus_exited.connect(commit_condition)
+			row.add_child(condition)
+			_objective_editors[objective] = condition
+		else:
+			row.add_child(Style.label("Empty objective", Style.WARNING, 12))
+		if _editable:
+			var remove := Button.new()
+			Style.button_icon(remove, &"Remove", "×")
+			remove.accessibility_name = "Remove objective"
+			remove.pressed.connect(func() -> void:
+				_data.objectives.remove_at(index)
+				_rebuild()
+				changed.emit())
+			row.add_child(remove)
+		section.add_child(row)
 	return section
 
 func _make_writer_section() -> Control:
@@ -599,6 +669,8 @@ func _rename(v: VariableData, edit: LineEdit) -> void:
 		edit.text = v.key
 		return
 	AuthoredData.rename_key(_data, v.key, new_key)
+	for objective: ObjectiveData in _objective_editors:
+		_objective_editors[objective].text = objective.condition
 	edit.tooltip_text = new_key
 	changed.emit()
 

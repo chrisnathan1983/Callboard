@@ -215,6 +215,7 @@ Callboard opens StageDefinitions and processes ordinary graph edits with resourc
 | `call_positions` | Saved graph positions keyed by external event ID. |
 | `external_vars` | Declared Blackboard keys that gameplay writes. This tells validation which values have a writer outside the graph. |
 | `external_writers` | `BlackboardWriterData` resources describing key, source label, and output type for typed gameplay producers. These declarations satisfy guard producer checks and are checked against the Blackboard schema. |
+| `objectives` | `ObjectiveData` resources with a unique ID and a Blackboard completion condition for graph analysis. |
 | `variables`, `rules`, `groups` | Authored subresources. Rule steps are stored with the rule. |
 
 Use the generated `.tscn` when loading a Stage that relies on scene-assigned nodes. `StageDefinition.instantiate()` creates a Stage from its script and assigns the definition.
@@ -222,6 +223,14 @@ Use the generated `.tscn` when loading a Stage that relies on scene-assigned nod
 For cross-Stage authoring checks, list each host-assigned target ID in the destination definition's `cross_stage_instance_ids` field in the Inspector. The Callboard scans StageDefinitions in the configured stage folders. It checks targeted IDs against those declarations, checks that recipients declare or listen for the event, and compares literal or typed runtime payload fields with each recipient schema. Broadcasts are checked against all configured definitions that receive the event. Runtime IDs or payloads that cannot be resolved statically still receive the store's runtime checks.
 
 Step arguments and delays are evaluated at graph compilation using Godot's [Expression](https://docs.godotengine.org/en/stable/classes/class_expression.html). Use project-authored data. The expressions can call methods and reference typed props and script constants. The event payload is available to the step callable when the rule runs.
+
+### Objective reachability
+
+In Callboard, open **Blackboard → Stage state → Objectives** and add an objective with an ID and a guard such as `permit_stamped and gifts_delivered >= 2`. Use keys declared in the StageDefinition, including their aliases. Objective conditions use the regular guard grammar and have no event payload. You can also edit `StageDefinition.objectives` in the Godot Inspector.
+
+Callboard checks objectives as you edit. The diagnostics menu shows a Call sequence when one reaches the condition. It follows authored rule order, literal Blackboard changes, relays, and one-shot latches. If an earlier Call can consume a latch and a later attempt would succeed with that latch released, the warning shows the problematic sequence. Check the rule's **Requires** guards when its prerequisite currently appears only inside the rule.
+
+The search starts from authored defaults, explores activation and declared Calls, and observes the condition after each modeled Call settles. It explores up to 256 distinct states and ten Calls per path, with a separate transition budget. Paths involving host writes, payloads, random draws, or modeled timing are reported with their dependencies. Pending waits, parallel schedules, and custom code can leave results inconclusive. This is authoring feedback for one fresh Stage. Existing saves, live timing, and host-side Call eligibility can produce different results.
 
 ## Blackboard
 

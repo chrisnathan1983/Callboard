@@ -16,6 +16,8 @@ var groups: Array[GroupData] = []
 var external_calls: Array[String] = []
 var external_vars: Array[String] = []
 var external_writers: Array[BlackboardWriterData] = []
+var objectives: Array[ObjectiveData] = []
+var objective_results: Array[String] = []
 var managed_lifecycle := false
 var restoration_bindings: Array[StageRestorationBinding] = []
 var payload_fields: Array[PayloadFieldData] = []
@@ -60,6 +62,8 @@ func snapshot() -> Dictionary:
 		"external_calls": external_calls.duplicate(),
 		"external_vars": external_vars.duplicate(),
 		"external_writers": external_writers.map(func(writer: BlackboardWriterData) -> Dictionary: return writer.to_dictionary()),
+		"objectives": objectives.map(func(objective: ObjectiveData) -> Variant:
+			return objective.to_dictionary() if objective != null else null),
 		"managed_lifecycle": managed_lifecycle,
 		"restoration_bindings": restoration_bindings.map(func(binding: StageRestorationBinding) -> Dictionary: return binding.to_dictionary()),
 		"payload_fields": payload_fields.map(func(field: PayloadFieldData) -> Dictionary: return field.to_dictionary()),
@@ -76,6 +80,8 @@ func restore(snapshot_data: Dictionary) -> void:
 	external_calls.assign(snapshot_data["external_calls"])
 	external_vars.assign(snapshot_data["external_vars"])
 	external_writers.assign(snapshot_data.get("external_writers", []).map(BlackboardWriterData.from_dictionary))
+	objectives.assign(snapshot_data.get("objectives", []).map(func(objective: Variant) -> ObjectiveData:
+		return ObjectiveData.from_dictionary(objective) if objective is Dictionary else null))
 	managed_lifecycle = snapshot_data.get("managed_lifecycle", managed_lifecycle)
 	restoration_bindings.assign(snapshot_data.get("restoration_bindings", []).map(StageRestorationBinding.from_dictionary))
 	payload_fields.assign(snapshot_data.get("payload_fields", []).map(PayloadFieldData.from_dictionary))

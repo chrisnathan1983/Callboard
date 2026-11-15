@@ -133,7 +133,7 @@ func _init() -> void:
 	status_row.add_child(_status)
 	_notes_button.flat = false
 	_notes_button.focus_mode = Control.FOCUS_ALL
-	_notes_button.tooltip_text = "Show graph errors and warnings"
+	_notes_button.tooltip_text = "Show graph diagnostics and objective paths"
 	Style.button_icon(_notes_button, &"NodeWarning", "", true)
 	_notes_button.get_popup().index_pressed.connect(_on_note_selected)
 	_notes_button.hide()
@@ -523,13 +523,17 @@ func _update_status() -> void:
 		counts.append("%d %s" % [_data.errors.size(), "error" if _data.errors.size() == 1 else "errors"])
 	if not _data.warnings.is_empty():
 		counts.append("%d %s" % [_data.warnings.size(), "warning" if _data.warnings.size() == 1 else "warnings"])
+	if not _data.objective_results.is_empty():
+		counts.append("%d reachable" % _data.objective_results.size())
 	_notes_button.visible = not counts.is_empty()
 	_notes_button.text = ", ".join(counts)
-	Style.tint(_notes_button, Style.WARNING if _data.errors.is_empty() else Style.ERROR)
+	var diagnostic_color := Style.ERROR if not _data.errors.is_empty() else Style.WARNING
+	Style.tint(_notes_button, Style.SUCCESS if _data.errors.is_empty() and _data.warnings.is_empty() else diagnostic_color)
 	var popup := _notes_button.get_popup()
 	popup.clear()
 	_add_diagnostic_items(popup, _data.errors, "Error")
 	_add_diagnostic_items(popup, _data.warnings, "Warning")
+	_add_diagnostic_items(popup, _data.objective_results, "Objective")
 
 func _add_diagnostic_items(popup: PopupMenu, messages: Array[String], severity: String) -> void:
 	for message in messages:
@@ -545,11 +549,14 @@ func _set_status(message: String, color: Color) -> void:
 	Style.tint(_status, color)
 
 func _on_note_selected(index: int) -> void:
-	var messages := _data.errors + _data.warnings
+	var messages := _data.errors + _data.warnings + _data.objective_results
 	if index < 0 or index >= messages.size():
 		return
 	var message := messages[index]
-	_set_status(message, Style.ERROR if index < _data.errors.size() else Style.WARNING)
+	var color := Style.ERROR if index < _data.errors.size() else Style.WARNING
+	if index >= _data.errors.size() + _data.warnings.size():
+		color = Style.SUCCESS
+	_set_status(message, color)
 	for rule in _data.rules:
 		var id := String(rule.id)
 		if not id.is_empty() and ("'%s'" % id) in message:

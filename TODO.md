@@ -219,9 +219,9 @@ The first five items retain the high priority assigned in `TODO.md`.
   - [x] The store checks Shared type conflicts among loaded boards. Per-Stage validation checks declared producers, listeners, cycles, and overlapping rules.
   - [x] Scan authored Stage definitions, including unloaded Stages, for conflicting Shared types, Shared reads with no declared producer, and unresolved cross-Stage event targets and payload contracts. Reuse the resource-only validation path where possible and account for declared host writers.
 
-- [ ] **Analyze objective reachability.**
-  - [ ] Let authors declare completion conditions, then check whether plausible Call and state sequences can reach them. Flag one-shot paths that can be consumed before their prerequisites are met.
-  - [ ] Report which paths depend on unknown host behavior or random branches. The existing per-key “nothing sets it” check and relay-cycle analysis provide inputs, while reachability needs to model order, state, and latches.
+- [x] **Analyze objective reachability.**
+  - [x] Let authors declare completion conditions, then check whether plausible Call and state sequences can reach them. Flag one-shot paths that can be consumed before their prerequisites are met.
+  - [x] Report which paths depend on unknown host behavior or random branches. The existing per-key and relay-cycle checks run alongside a bounded search that models Call order, Blackboard state, and latches.
 
 ## 6. Testing, clean installs, and exports
 

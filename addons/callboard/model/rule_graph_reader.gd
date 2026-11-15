@@ -3,6 +3,7 @@ class_name RuleGraphReader extends RefCounted
 ## Loads and analyzes typed graph drafts for the editor and live board.
 
 const CrossStageValidator := preload("res://addons/callboard/model/cross_stage_event_validator.gd")
+const ObjectiveReachability := preload("res://addons/callboard/model/objective_reachability.gd")
 const TriggerRoutingData = preload("res://addons/callboard/core/trigger_routing_data.gd")
 
 static func read(stage: Stage) -> GraphDraft:
@@ -28,6 +29,7 @@ static func read(stage: Stage) -> GraphDraft:
 	data.external_vars.assign(stage.external_vars)
 	for writer: BlackboardWriterData in definition.external_writers:
 		data.external_writers.append(writer.duplicate_data())
+	data.objectives = definition.objectives.duplicate_deep(Resource.DEEP_DUPLICATE_ALL)
 	for field: PayloadFieldData in definition.payload_fields:
 		data.payload_fields.append(field.duplicate(true))
 	data.call_positions = definition.call_positions.duplicate(true)
@@ -59,6 +61,7 @@ static func inspect_definition_resources(path: String) -> GraphDraft:
 	data.external_vars.assign(definition.external_vars)
 	for writer: BlackboardWriterData in definition.external_writers:
 		data.external_writers.append(writer.duplicate_data())
+	data.objectives = definition.objectives.duplicate_deep(Resource.DEEP_DUPLICATE_ALL)
 	for field: PayloadFieldData in definition.payload_fields:
 		data.payload_fields.append(field.duplicate(true))
 	data.call_positions = definition.call_positions.duplicate(true)
@@ -194,6 +197,7 @@ static func validate_resources(data: GraphDraft) -> void:
 		names.sort()
 		data.warnings.append("Custom verbs require scene analysis: %s" % ", ".join(names))
 	CrossStageValidator.apply(data)
+	ObjectiveReachability.apply(data)
 
 static func _validate_conditional_data(rule: RuleData, step: StepData,
 		payloads: Dictionary, keys: Dictionary, errors: Array[String],
@@ -395,6 +399,7 @@ static func make_definition(data: GraphDraft) -> StageDefinition:
 	draft.external_vars = PackedStringArray(data.external_vars)
 	for writer: BlackboardWriterData in data.external_writers:
 		draft.external_writers.append(writer.duplicate_data())
+	draft.objectives = data.objectives.duplicate_deep(Resource.DEEP_DUPLICATE_ALL)
 	draft.payload_fields = data.payload_fields.duplicate_deep(Resource.DEEP_DUPLICATE_ALL)
 	draft.trigger_routing = data.trigger_routing.duplicate_deep(Resource.DEEP_DUPLICATE_ALL)
 	draft.call_positions = data.call_positions.duplicate(true)
@@ -434,6 +439,7 @@ static func _read_results(data: GraphDraft, stage: Stage) -> void:
 	data.props = RuntimeVerbCatalog.props_of(stage)
 	data.errors.assign(stage.graph_errors)
 	data.warnings.assign(stage.check())
+	ObjectiveReachability.apply(data, stage.external_writers)
 	data.step_metadata.clear()
 	# Match by ID because a live Stage may have added or removed runtime rules.
 	var compiled_by_id: Dictionary[StringName, Rule] = {}

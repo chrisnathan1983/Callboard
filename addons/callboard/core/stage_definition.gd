@@ -23,6 +23,8 @@ static var _string_token_pattern: RegEx
 @export var external_vars := PackedStringArray()
 ## Typed external Blackboard producers. `external_vars` remains supported as an anonymous declaration.
 @export var external_writers: Array[BlackboardWriterData] = []
+## Optional, editor-analyzed completion conditions. Stages do not dispatch these.
+@export var objectives: Array[ObjectiveData] = []
 ## When enabled, the Stage ignores Calls until activate() and only activates once per entry.
 @export var managed_lifecycle := false
 ## Resolved state is applied after load and before the Stage is activated.

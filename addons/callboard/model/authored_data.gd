@@ -45,6 +45,9 @@ static func rename_key(data: GraphDraft, old: String, new_key: String) -> void:
 	for binding: StageRestorationBinding in data.restoration_bindings:
 		if binding.key == old:
 			binding.key = StringName(new_key)
+	for objective: ObjectiveData in data.objectives:
+		if objective != null:
+			objective.condition = GuardExpression.rename_key(objective.condition, old, new_key)
 	for rule in data.rules:
 		for field in GUARDS:
 			var guards: PackedStringArray = rule.get(field)
