@@ -154,6 +154,38 @@ The final optional `request_id` argument is `0` for an automatically allocated I
 
 `response_schema` maps response field names to Godot Variant type constants such as `TYPE_INT`, `TYPE_BOOL`, or `TYPE_STRING`. A nonempty schema rejects undeclared fields and incompatible values; omitted fields are allowed, and integer values widen to float fields. An empty schema accepts dynamic response values. Response fields `request_id` and `accepted` are reserved. An invalid response is rejected without settling the request, allowing the host to correct it before timeout. Completion outcomes are `accepted` or `rejected`; the `data` dictionary contains those reserved fields alongside the validated response fields. Timeout and cancellation outcomes carry an empty data dictionary.
 
+### Input and camera control
+
+Create one [`StageControlAdapter`](../core/stage_control_adapter.gd) in your host and assign it to `stage.control_adapter` before the Stage starts rules. Share the adapter between Stages that control the same players or camera rigs. Connect to `state_changed` and read the current state for the channels your host handles.
+
+```gdscript
+var controls := StageControlAdapter.new()
+
+func bind_stage_controls(stage: Stage) -> void:
+    stage.control_adapter = controls
+
+func _ready() -> void:
+    controls.state_changed.connect(_apply_controls)
+    _apply_controls()
+
+func _apply_controls() -> void:
+    player.cutscene_input_locked = controls.is_input_locked(&"gameplay")
+    camera_rig.set_callboard_shot(controls.camera_request(&"main"))
+    camera_rig.set_callboard_shake(controls.shake_request(&"main"))
+```
+
+Implement the player flag and camera rig methods in your host. Combine the flag with the host's other input restrictions, and check it wherever gameplay input enters, including touch and interaction. Keep the rig's normal shot as its baseline. A `null` shot request restores that baseline and a `null` shake request clears the shake layer. Treat requests as read-only and only restart a blend or shake when its effective request changes. Stop or replace any tween or animation from the previous request as ownership changes.
+
+The typed `StageControlAdapter.CameraRequest` has a `kind` and these fields:
+
+| Kind | Fields |
+| --- | --- |
+| `FOCUS` | `target: Node3D` and `blend_seconds: float`. A freed target reads as `null`. |
+| `FRAME` | `shot: StringName`, a host-defined framing preset, and `blend_seconds: float`. |
+| `SHAKE` | `strength: float` in host-defined units and `frequency: float` in Hz. |
+
+One rule run owns at most one input lock per channel, one focus or framing request per camera channel, and one shake request per camera channel. An input channel stays locked until every owner has released it. For each camera layer, the most recent owner takes effect. Releasing it restores the next live request or returns that layer to the host. Parallel branches share their parent run's ownership. Use a wait or delay to hold an effect, and a release step to end it early. Remaining requests clear automatically on completion, a timeout that ends the run, Restart, Cancel If, Stage deactivation, or teardown.
+
 ### Stage hooks
 
 | Override | Purpose |
@@ -332,6 +364,11 @@ The default factory is [`StagingVerbs`](../core/staging_verbs.gd), which inherit
 | Staging | `pose_animation(player, animation, time = 0.0)` | Seek to a time in a named clip and pause there. |
 | Staging | `gameplay_event(event_id, arguments = {})` | Emit `Stage.gameplay_event` for host-owned behavior such as doors, quests, or inventory. |
 | Staging | `gameplay_request(event_id, arguments = {}, timeout = 0.0, response_schema = {}, timeout_relay = &"", request_id = 0)` | Emit a correlated host request and wait for an accepted or rejected acknowledgment. Timeout ends the run and can fire a recovery relay; cancellation releases the request. |
+| Staging | `lock_input(channel = &"gameplay")`, `release_input(channel = &"gameplay")` | Acquire or release this run's lock on a host input channel. |
+| Staging | `camera_focus(target, blend_seconds = 0.0, channel = &"main")` | Request focus on a Stage `Node3D` prop. |
+| Staging | `camera_frame(shot, blend_seconds = 0.0, channel = &"main")` | Request a named framing preset from the host camera rig. |
+| Staging | `camera_shake(strength, frequency = 12.0, channel = &"main")` | Request shake on a separate layer from the shot. |
+| Staging | `release_camera(channel = &"main")` | Release this run's shot and shake for the camera channel. |
 | Staging | `flash(m)`, `jump(m)` | Tint compatible `BaseMaterial3D` overrides or mesh surfaces. Materials are duplicated for the target instance; `jump` still performs its hop when no tintable material exists. |
 
 `set_state`, `toggle_var`, and `reset_var` write through `Blackboard.write()`. Local values remain Stage-local; Saved values update the Stage save dictionary; Shared values use the store's ordered, type-checked commit; Session values live in the StageStateStore's runtime-only session dictionary. Changed values emit the normal change notifications and record the running rule as writer. Rejected and unchanged writes retain the existing Blackboard behavior.

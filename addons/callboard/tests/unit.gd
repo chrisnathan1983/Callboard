@@ -607,6 +607,7 @@ func _initialize() -> void:
 	ok = await _test_named_actor_states() and ok
 	ok = await _test_authored_waits() and ok
 	ok = await _test_gameplay_requests() and ok
+	ok = await _test_stage_controls() and ok
 	ok = _test_on_change_triggers() and ok
 	ok = await _test_dispatch_limits_and_ancestry() and ok
 	ok = _test_stage_dispatch_policy() and ok
@@ -1470,6 +1471,107 @@ func _test_named_actor_states() -> bool:
 		and initial_validation.any(func(problem: String) -> bool: return "initial state" in problem)) \
 		and _check("repeat_emit supports relay-free ambient waits without an unused-relay diagnostic",
 		ambient_validation.is_empty())
+
+func _test_stage_controls() -> bool:
+	var adapter := StageControlAdapter.new()
+	var host_input_lock := [false]
+	var apply_host_input := func() -> void:
+		host_input_lock[0] = adapter.is_input_locked()
+	adapter.state_changed.connect(apply_host_input)
+	var first := Stage.new()
+	var second := Stage.new()
+	first.control_adapter = adapter
+	second.control_adapter = adapter
+	root.add_child(first)
+	root.add_child(second)
+	await process_frame
+	var target := Node3D.new()
+	first.add_child(target)
+	var first_verbs := first.verbs as StagingVerbs
+	var second_verbs := second.verbs as StagingVerbs
+	var catalog := RuntimeVerbCatalog.from_factory(first_verbs)
+	var ok := _check("input and camera verbs are available to the board",
+		not RuntimeVerbCatalog.find(catalog, "lock_input").is_empty()
+		and not RuntimeVerbCatalog.find(catalog, "camera_focus").is_empty()
+		and not RuntimeVerbCatalog.find(catalog, "camera_frame").is_empty()
+		and not RuntimeVerbCatalog.find(catalog, "camera_shake").is_empty())
+	first.define_local(&"stop", false)
+	var base := Rule.new(&"base", &"base")
+	base.cancel_if = [&"stop"]
+	base.steps = [
+		first_verbs.lock_input(), first_verbs.lock_input(),
+		first_verbs.camera_focus(target, 0.2),
+		first_verbs.wait_for_call(&"done"),
+	]
+	first.engine.rules.append(base)
+	var overlay := Rule.new(&"overlay", &"overlay")
+	overlay.reentry = Rule.ReentryPolicy.RESTART
+	var overlay_branch: Array[Step] = [
+		second_verbs.lock_input(),
+		second_verbs.camera_frame(&"detail", 0.15),
+		second_verbs.camera_shake(0.25, 8.0),
+		second_verbs.wait_for_call(&"release"),
+		second_verbs.release_input(), second_verbs.release_camera(),
+		second_verbs.wait_for_call(&"done"),
+	]
+	var nested_branch: Array[Step] = [Step.parallel([overlay_branch], false)]
+	overlay.steps = [Step.parallel([nested_branch])]
+	second.engine.rules.append(overlay)
+	first.fire(&"base")
+	var base_shot := adapter.camera_request()
+	ok = _check("focus targets a Stage prop and input locks are per channel",
+		base_shot != null and base_shot.target == target and base_shot.blend_seconds == 0.2
+		and host_input_lock[0] and not adapter.is_input_locked(&"menu")) and ok
+	second.fire(&"overlay")
+	var initial_overlay := adapter.camera_request()
+	ok = _check("a nested unjoined branch retains independent shot and shake claims",
+		initial_overlay != null and initial_overlay.shot == &"detail"
+		and adapter.shake_request() != null and adapter.shake_request().frequency == 8.0) and ok
+	second.fire(&"overlay")
+	await process_frame
+	await process_frame
+	ok = _check("Restart replaces an unjoined camera owner without releasing another Stage's input",
+		adapter.camera_request() != null and adapter.camera_request() != initial_overlay
+		and adapter.camera_request().shot == &"detail" and adapter.is_input_locked()) and ok
+	second.fire(&"release")
+	await process_frame
+	await process_frame
+	ok = _check("explicit releases restore the previous shot and leave another owner's lock intact",
+		adapter.camera_request() == base_shot and adapter.shake_request() == null
+		and adapter.is_input_locked()) and ok
+	first.write_var(&"stop", true)
+	ok = _check("Cancel If immediately releases the last input lock and returns camera control",
+		not host_input_lock[0] and adapter.camera_request() == null) and ok
+	second.fire(&"overlay")
+	await process_frame
+	await process_frame
+	second.free()
+	ok = _check("Stage teardown releases input, focus and shake even with a branch waiting",
+		not adapter.is_input_locked() and adapter.camera_request() == null
+		and adapter.shake_request() == null) and ok
+
+	first.write_var(&"stop", false)
+	first.fire(&"base")
+	first.fire(&"done")
+	await process_frame
+	await process_frame
+	ok = _check("normal rule completion restores controls without explicit release steps",
+		not adapter.is_input_locked() and adapter.camera_request() == null) and ok
+	var timeout_rule := Rule.new(&"timeout", &"timeout")
+	timeout_rule.steps = [
+		first_verbs.lock_input(),
+		first_verbs.camera_frame(&"wide"),
+		first_verbs.wait_for_call(&"missing", &"", 0.01),
+	]
+	first.engine.rules.append(timeout_rule)
+	first.fire(&"timeout")
+	await create_timer(0.04).timeout
+	await process_frame
+	ok = _check("a timed-out wait restores the camera and releases input",
+		not adapter.is_input_locked() and adapter.camera_request() == null) and ok
+	first.free()
+	adapter.state_changed.disconnect(apply_host_input)
+	return ok
 
 func _test_gameplay_requests() -> bool:
 	var stage := Stage.new()

@@ -23,6 +23,7 @@ var _move_hint: Label
 var _touch_buttons: Array[Button] = []
 var _pressed_button: Button
 var _button_pointer := -1
+var _player_input_locked := false
 
 func _ready() -> void:
 	var layout := Control.new()
@@ -126,6 +127,17 @@ func bind_stage(stage: Stage) -> void:
 	if board_panel:
 		board_panel.bind_stage(stage)
 
+func set_player_input_locked(locked: bool) -> void:
+	_player_input_locked = locked
+	if locked:
+		_stick.cancel()
+		if _pressed_button == _interact:
+			_cancel_button_press()
+	_refresh_play_controls()
+
+func _refresh_play_controls() -> void:
+	_play_controls.visible = not _player_input_locked and (board_panel == null or not board_panel.visible)
+
 func bind_player(player: Player) -> void:
 	if is_instance_valid(_player) and _player.interaction_resolver != null:
 		_stick.cancel()
@@ -159,7 +171,7 @@ func _toggle_board() -> void:
 	if not board_panel:
 		return
 	board_panel.visible = not board_panel.visible
-	_play_controls.visible = not board_panel.visible
+	_refresh_play_controls()
 	_board_button.text = "Close board · F1" if board_panel.visible else "Callboard · F1"
 
 func _notification(what: int) -> void:

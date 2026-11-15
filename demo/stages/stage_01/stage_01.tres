@@ -424,6 +424,7 @@ args = PackedStringArray("bell")
 script = ExtResource("3_udjpu")
 verb = &"rotate_to"
 args = PackedStringArray("bell", "Vector3(0, 0, 0)", "0.35", "true")
+delay = "0.25"
 
 [sub_resource type="Resource" id="z1_bell_delivered"]
 script = ExtResource("2_sw6iv")
@@ -474,10 +475,35 @@ group = "Delivery"
 pos = Vector2(1740, 1040)
 has_pos = true
 
+[sub_resource type="Resource" id="FocusBell"]
+script = ExtResource("3_udjpu")
+verb = &"camera_focus"
+args = PackedStringArray("bell", "0.25")
+
+[sub_resource type="Resource" id="BellShake"]
+script = ExtResource("3_udjpu")
+verb = &"camera_shake"
+args = PackedStringArray("0.12", "13.0")
+
+[sub_resource type="Resource" id="ReleaseBellCloseup"]
+script = ExtResource("3_udjpu")
+verb = &"release_camera"
+delay = "0.25"
+
+[sub_resource type="Resource" id="FrameReception"]
+script = ExtResource("3_udjpu")
+verb = &"camera_frame"
+args = PackedStringArray("&\"reception\"", "0.35")
+
 [sub_resource type="Resource" id="BellReceiptLine"]
 script = ExtResource("3_udjpu")
 verb = &"say"
 args = PackedStringArray("window", "\"The deputy has a desk bell!\"", "3.0")
+
+[sub_resource type="Resource" id="ReleaseReceptionShot"]
+script = ExtResource("3_udjpu")
+verb = &"release_camera"
+delay = "1.1"
 
 [sub_resource type="Resource" id="z1_bell_receipt"]
 script = ExtResource("2_sw6iv")
@@ -486,7 +512,7 @@ trigger = &"relay:gift_delivered"
 requires = PackedStringArray("payload.gift_id == \"bell\"")
 allow_overlap = true
 state_key = &"z1_bell_receipt"
-steps = Array[ExtResource("3_udjpu")]([SubResource("BellReceiptLine"), SubResource("TurnBell")])
+steps = Array[ExtResource("3_udjpu")]([SubResource("FocusBell"), SubResource("TurnBell"), SubResource("BellShake"), SubResource("ReleaseBellCloseup"), SubResource("FrameReception"), SubResource("BellReceiptLine"), SubResource("ReleaseReceptionShot")])
 group = "Delivery"
 pos = Vector2(1370, 1040)
 has_pos = true
@@ -567,16 +593,51 @@ target_path = NodePath("Bell")
 kind = 2
 marker_path = NodePath("BellRest")
 
+[sub_resource type="Resource" id="IntroLock"]
+script = ExtResource("3_udjpu")
+verb = &"lock_input"
+
+[sub_resource type="Resource" id="IntroReception"]
+script = ExtResource("3_udjpu")
+verb = &"camera_frame"
+args = PackedStringArray("&\"reception\"")
+
+[sub_resource type="Resource" id="IntroGuard"]
+script = ExtResource("3_udjpu")
+verb = &"camera_focus"
+args = PackedStringArray("guard", "0.35")
+delay = "0.55"
+
+[sub_resource type="Resource" id="IntroGameplay"]
+script = ExtResource("3_udjpu")
+verb = &"camera_frame"
+args = PackedStringArray("&\"gameplay\"", "0.45")
+delay = "0.85"
+
+[sub_resource type="Resource" id="IntroRelease"]
+script = ExtResource("3_udjpu")
+verb = &"release_input"
+delay = "0.5"
+
+[sub_resource type="Resource" id="IntroCameraRule"]
+script = ExtResource("2_sw6iv")
+id = &"z1_opening_camera"
+trigger = &"intro"
+steps = Array[ExtResource("3_udjpu")]([SubResource("IntroLock"), SubResource("IntroReception"), SubResource("IntroGuard"), SubResource("IntroGameplay"), SubResource("IntroRelease")])
+pos = Vector2(80, -380)
+has_pos = true
+
 [resource]
 script = ExtResource("1_6haco")
 stage_script = ExtResource("2_nih50")
 preview_scene_path = "res://demo/stages/stage_01/stage_01.tscn"
-external_calls = PackedStringArray("arrive", "give:refused", "give:gift", "give:decoy", "relay:treat_out", "file:permit")
+external_calls = PackedStringArray("arrive", "give:refused", "give:gift", "give:decoy", "relay:treat_out", "file:permit", "intro")
 payload_fields = Array[ExtResource("4_payload")]([SubResource("GiftPayload"), SubResource("ReceiptPayload")])
 managed_lifecycle = true
 restoration_bindings = Array[ExtResource("5_binding")]([SubResource("PermitBinding"), SubResource("DuckBinding"), SubResource("BellBinding"), SubResource("GuardBinding"), SubResource("BellPoseBinding")])
 call_positions = {
 "arrive": Vector2(-150, 110),
+"intro": Vector2(-150, -300),
 "give:refused": Vector2(810, 345),
 "give:gift": Vector2(810, 920),
 "file:permit": Vector2(-140, 1140),
@@ -584,6 +645,6 @@ call_positions = {
 "relay:treat_out": Vector2(-150, 530)
 }
 variables = [SubResource("Resource_pm6rk"), SubResource("Resource_crvuy"), SubResource("Resource_f6ula"), SubResource("Resource_cvxcv"), SubResource("delivered_duck"), SubResource("delivered_bell"), SubResource("gifts_delivered"), SubResource("citywide_deliveries")]
-rules = [SubResource("Resource_4c63h"), SubResource("Resource_3q13q"), SubResource("Resource_8fm3u"), SubResource("Resource_v3yqw"), SubResource("Resource_gycwq"), SubResource("Resource_dw20m"), SubResource("Resource_w4bi3"), SubResource("Resource_j5n3i"), SubResource("Resource_og1qp"), SubResource("Resource_j8ley"), SubResource("Resource_cbhw2"), SubResource("Resource_42g1q"), SubResource("Resource_yo4ln"), SubResource("Resource_nqr6r"), SubResource("z1_bell_delivered"), SubResource("z1_missing_gift"), SubResource("z1_office_complete"), SubResource("z1_bell_receipt")]
+rules = [SubResource("Resource_4c63h"), SubResource("Resource_3q13q"), SubResource("Resource_8fm3u"), SubResource("Resource_v3yqw"), SubResource("Resource_gycwq"), SubResource("Resource_dw20m"), SubResource("Resource_w4bi3"), SubResource("Resource_j5n3i"), SubResource("Resource_og1qp"), SubResource("Resource_j8ley"), SubResource("Resource_cbhw2"), SubResource("Resource_42g1q"), SubResource("Resource_yo4ln"), SubResource("Resource_nqr6r"), SubResource("z1_bell_delivered"), SubResource("z1_missing_gift"), SubResource("z1_office_complete"), SubResource("z1_bell_receipt"), SubResource("IntroCameraRule")]
 groups = [SubResource("Resource_t3w14"), SubResource("Resource_6adl1"), SubResource("Resource_xb2ll"), SubResource("Resource_doyit")]
 format_version = 4

@@ -37,6 +37,9 @@ var random_group_states: Dictionary = {} # managed per-group PRNG state
 var shared_vars: Dictionary = {}
 var session_vars: Dictionary = {}
 var state_store: StageStateStore
+## Set before activation. Stages that control the same player or camera use
+## the same host-owned adapter so their requests arbitrate together.
+var control_adapter: StageControlAdapter
 var stage_instance_id: StringName
 var managed_lifecycle := false
 var is_active := false

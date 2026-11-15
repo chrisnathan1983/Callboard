@@ -14,6 +14,15 @@ class AwaitedSignal extends RefCounted:
 	signal cancelled
 	var is_complete := false
 
+# Branches copy their run dictionaries for wait results. They share this
+# lifetime so temporary host effects belong to the whole rule invocation.
+class RunLifetime extends AwaitedSignal:
+	signal ended
+	var is_ended := false
+	var main_done := false
+	var background_branches := 0
+	var cancel_if_watch_id := -1
+
 var rules: Array[Rule] = []
 var fired: Dictionary                 # injected, latches one-shot rules
 var bb: Blackboard
@@ -23,6 +32,7 @@ var random_group_states: Dictionary = {}
 var wait: Callable                    # func(seconds: float) -> Signal; tests swap this
 var _gen := 0
 var _active := {}                      # Rule -> pending payloads and restart request
+var _cancelling_all := false
 var _pending_waits: Dictionary = {}
 var _pending_callbacks: Dictionary = {}
 var _awaited_signals: Dictionary = {}
@@ -43,15 +53,19 @@ func _init(p_bb: Blackboard, p_fired: Dictionary, p_wait: Callable) -> void:
 
 func token() -> int: return _gen
 func cancel_all() -> void:
+	if _cancelling_all:
+		return
+	_cancelling_all = true
 	_gen += 1
 	all_cancelled.emit()
 	for active: Dictionary in _active.values():
 		var run: Dictionary = active.get("run", {})
-		if not run.is_empty():
-			run["cancelled"] = true
-			var cancelled_signal: AwaitedSignal = run.get("cancel_signal") as AwaitedSignal
-			if cancelled_signal != null:
-				cancelled_signal.cancelled.emit()
+		if run.is_empty():
+			continue
+		run["cancelled"] = true
+		var lifetime: RunLifetime = run["cancel_signal"]
+		_end_run_lifetime(lifetime)
+		lifetime.cancelled.emit()
 	_active.clear()
 	_pending_waits.clear()
 	for tracker in _pending_callbacks.values():
@@ -74,6 +88,7 @@ func cancel_all() -> void:
 	for entry: Dictionary in cancelled:
 		_disconnect_wait_connections(entry)
 		entry["completion"].completed.emit()
+	_cancelling_all = false
 
 func fire(event: StringName, payload := {}) -> void:
 	var context := {"path": []}
@@ -86,6 +101,8 @@ func fire_from_context(event: StringName, payload: Dictionary, context: Dictiona
 	_fire(event, payload, context)
 
 func _fire(event: StringName, payload: Dictionary, parent_context: Dictionary) -> void:
+	if _cancelling_all:
+		return
 	var path: Array = parent_context.get("path", []).duplicate()
 	path.append(String(event))
 	var depth := path.size()
@@ -123,9 +140,9 @@ func _dispatch(r: Rule, event: StringName, payload: Dictionary, gen: int, depth:
 				# The suspended dispatch can resume synchronously when cancelled is
 				# emitted, so publish the replacement before waking the old run.
 				_signal_run_cancelled(current_run, r.id)
-				var cancelled_signal: AwaitedSignal = current_run.get("cancel_signal") as AwaitedSignal
-				if cancelled_signal != null:
-					cancelled_signal.cancelled.emit()
+				var lifetime: RunLifetime = current_run["cancel_signal"]
+				_end_run_lifetime(lifetime)
+				lifetime.cancelled.emit()
 			Rule.ReentryPolicy.QUEUE:
 				var pending: Array = active["pending"]
 				if pending.size() >= MAX_PENDING_PER_RULE:
@@ -139,30 +156,25 @@ func _dispatch(r: Rule, event: StringName, payload: Dictionary, gen: int, depth:
 	var active := {"pending": [], "restart": false}
 	_active[r] = active
 	await _run(r, event, payload, gen, depth, context)
-	while gen == _gen and _active.has(r) and not _active[r]["pending"].is_empty():
-		var current_active: Dictionary = _active[r]
-		var next: Dictionary = current_active["pending"].pop_front()
-		current_active["restart"] = false
-		current_active.erase("run")
+	while gen == _gen and is_same(_active.get(r), active) and not active["pending"].is_empty():
+		var next: Dictionary = active["pending"].pop_front()
+		active["restart"] = false
+		active.erase("run")
 		var next_payload: Dictionary = next["payload"]
 		if passes(r, next_payload, event) and alive(r, gen, next_payload):
 			await _run(r, event, next_payload, gen, int(next["depth"]), next["context"])
-	if gen == _gen and _active.has(r):
-		var remaining: Dictionary = _active[r]
-		var completed_run: Dictionary = remaining.get("run", {})
-		if int(completed_run.get("background_branches", 0)) == 0:
-			_active.erase(r)
+	if gen == _gen and is_same(_active.get(r), active):
+		_active.erase(r)
 
 func _run(rule: Rule, event: StringName, payload: Dictionary, generation: int, depth: int,
 		context: Dictionary) -> void:
 	if generation != _gen or rule.cancel_if.any(func(guard: StringName) -> bool:
 		return GuardExpression.evaluate(bb, guard, payload, event, _payload_schema())):
 		return
-	# Non-blocking steps can outlive a successful run, so keep cancellation
-	# on the run itself even after the rule leaves the active table.
+	var lifetime := RunLifetime.new()
 	var run := {
 		"cancelled": false,
-		"cancel_signal": AwaitedSignal.new(),
+		"cancel_signal": lifetime,
 		"payload": payload.duplicate(true),
 		"event": event,
 		"depth": depth,
@@ -186,19 +198,26 @@ func _run(rule: Rule, event: StringName, payload: Dictionary, generation: int, d
 		generation, context, step_payload, run, 0, true)
 	if not outcome.get("completed", false):
 		if outcome.get("timed_out", false):
-			_finish_main_run(rule, run)
+			run["cancelled"] = true
+			_end_run_lifetime(lifetime)
+			lifetime.cancelled.emit()
+			_finish_main_run(lifetime)
 			var timeout_step: Step = outcome.get("step")
 			if timeout_step != null and not timeout_step.emits.is_empty():
 				_fire("relay:" + timeout_step.emits, payload, context)
 			return
 		var failed_step: Step = outcome.get("step")
 		_cancel_run(run, rule.id, event, int(outcome.get("index", -1)), failed_step)
-		_finish_main_run(rule, run)
+		_finish_main_run(lifetime)
 		return
 	if not rule.emits.is_empty():
 		_fire("relay:" + rule.emits, payload, context)
 	_emit_trace("rule_completed", rule.id, event)
-	_finish_main_run(rule, run)
+	_finish_main_run(lifetime)
+	# Keep the dispatch responsible for queued and replacement invocations
+	# while unjoined branches are still using this run.
+	if not lifetime.is_ended:
+		await lifetime.ended
 
 ## Runs a sequential list. Parallel child sequences share the parent's run token,
 ## payload and cancellation signal, so Restart, Cancel If and Stage teardown own
@@ -206,16 +225,17 @@ func _run(rule: Rule, event: StringName, payload: Dictionary, generation: int, d
 func _run_steps(steps: Array, rule: Rule, event: StringName, payload: Dictionary,
 		generation: int, context: Dictionary, step_payload: Dictionary, run: Dictionary,
 		branch_id: int, is_main: bool) -> Dictionary:
+	var lifetime: RunLifetime = run["cancel_signal"]
 	for step_index in steps.size():
 		var step: Step = steps[step_index]
-		if not alive(rule, generation, payload):
+		if lifetime.is_ended or not alive(rule, generation, payload):
 			return {"completed": false, "index": step_index, "step": step}
 		if step.delay > 0.0:
 			_emit_branch_trace("delay_started", rule, event, step_index, step, branch_id, is_main,
 				"%0.2fs" % step.delay)
 			await interruptible(wait_tracked(step.delay, rule.id, "step delay"), Callable(),
-				[(run["cancel_signal"] as AwaitedSignal).cancelled], run, true)
-			if not alive(rule, generation, payload):
+				[lifetime.cancelled], run, true)
+			if lifetime.is_ended or not alive(rule, generation, payload):
 				return {"completed": false, "index": step_index, "step": step}
 		if step.verb == &"conditional":
 			var selected_branch := -1
@@ -268,7 +288,7 @@ func _run_steps(steps: Array, rule: Rule, event: StringName, payload: Dictionary
 				var finished := AwaitedSignal.new()
 				branch_signals.append(finished)
 				if not step.join_parallel:
-					run["background_branches"] = int(run.get("background_branches", 0)) + 1
+					lifetime.background_branches += 1
 				_emit_trace("branch_started", rule.id, event, step_index, step,
 					"branch=%d/%d; join=%s" % [child_index + 1, step.parallel_branches.size(), step.join_parallel])
 				_run_parallel_branch(step.parallel_branches[child_index], rule, event, payload,
@@ -278,19 +298,19 @@ func _run_steps(steps: Array, rule: Rule, event: StringName, payload: Dictionary
 				for branch_finished: AwaitedSignal in branch_signals:
 					if not branch_finished.is_complete:
 						await interruptible(branch_finished.completed, Callable(),
-							[(run["cancel_signal"] as AwaitedSignal).cancelled], run, true)
-				if not alive(rule, generation, payload):
+							[lifetime.cancelled], run, true)
+				if lifetime.is_ended or not alive(rule, generation, payload):
 					return {"completed": false, "index": step_index, "step": step}
 			continue
 		_emit_branch_trace("step_started", rule, event, step_index, step, branch_id, is_main)
 		await step.fn.call(step_payload)
-		if not alive(rule, generation, payload):
+		if lifetime.is_ended or not alive(rule, generation, payload):
 			return {"completed": false, "index": step_index, "step": step}
 		var wait_outcome: String = run.get("wait_outcome", "")
 		if not wait_outcome.is_empty():
 			run.erase("wait_outcome")
 			_emit_branch_trace("wait_" + wait_outcome, rule, event, step_index, step, branch_id, is_main)
-			if not alive(rule, generation, payload):
+			if lifetime.is_ended or not alive(rule, generation, payload):
 				return {"completed": false, "index": step_index, "step": step}
 			if wait_outcome == "timed_out":
 				return {"completed": false, "timed_out": true, "index": step_index, "step": step}
@@ -368,19 +388,24 @@ func _run_parallel_branch(steps: Array, rule: Rule, event: StringName, payload: 
 	finished.is_complete = true
 	finished.completed.emit()
 	if background:
-		run["background_branches"] = maxi(0, int(run.get("background_branches", 1)) - 1)
-		_finish_run_if_idle(rule, run)
+		var lifetime: RunLifetime = run["cancel_signal"]
+		lifetime.background_branches -= 1
+		_finish_run_if_idle(lifetime)
 
-func _finish_main_run(rule: Rule, run: Dictionary) -> void:
-	run["main_done"] = true
-	_finish_run_if_idle(rule, run)
+func _finish_main_run(lifetime: RunLifetime) -> void:
+	lifetime.main_done = true
+	_finish_run_if_idle(lifetime)
 
-func _finish_run_if_idle(rule: Rule, run: Dictionary) -> void:
-	if run.get("main_done", false) and int(run.get("background_branches", 0)) == 0:
-		_release_cancel_if(run)
-		var active: Dictionary = _active.get(rule, {})
-		if active.get("run") == run and active.get("pending", []).is_empty():
-			_active.erase(rule)
+func _finish_run_if_idle(lifetime: RunLifetime) -> void:
+	if lifetime.main_done and lifetime.background_branches == 0:
+		_end_run_lifetime(lifetime)
+
+func _end_run_lifetime(lifetime: RunLifetime) -> void:
+	if lifetime == null or lifetime.is_ended:
+		return
+	lifetime.is_ended = true
+	_release_cancel_if(lifetime)
+	lifetime.ended.emit()
 
 func _emit_branch_trace(kind: String, rule: Rule, event: StringName, step_index: int,
 		step: Step, branch_id: int, is_main: bool, detail := "") -> void:
@@ -392,7 +417,7 @@ func _emit_branch_trace(kind: String, rule: Rule, event: StringName, step_index:
 func _cancel_run(run: Dictionary, rule_id: StringName, event: StringName,
 		step_index := -1, step: Step = null) -> void:
 	run["cancelled"] = true
-	_release_cancel_if(run)
+	_end_run_lifetime(run.get("cancel_signal") as RunLifetime)
 	var cancelled_signal: AwaitedSignal = run.get("cancel_signal") as AwaitedSignal
 	if cancelled_signal != null:
 		cancelled_signal.cancelled.emit()
@@ -411,6 +436,7 @@ func _watch_cancel_if(rule: Rule, run: Dictionary, generation: int,
 		return
 	var watch_id := _next_wait_id
 	_next_wait_id += 1
+	var lifetime: RunLifetime = run["cancel_signal"]
 	var callback := func(_key: StringName, _value: Variant) -> void:
 		if run.get("cancelled", false) or generation != _gen:
 			return
@@ -418,15 +444,14 @@ func _watch_cancel_if(rule: Rule, run: Dictionary, generation: int,
 			return GuardExpression.evaluate(bb, guard, payload, event, _payload_schema())):
 			run["cancelled"] = true
 			_signal_run_cancelled(run, rule.id)
-			var cancelled_signal: AwaitedSignal = run.get("cancel_signal") as AwaitedSignal
-			if cancelled_signal != null:
-				cancelled_signal.cancelled.emit()
-	run["cancel_if_watch_id"] = watch_id
+			_end_run_lifetime(lifetime)
+			lifetime.cancelled.emit()
+	lifetime.cancel_if_watch_id = watch_id
 	_cancel_if_callbacks[watch_id] = {"signal": bb.changed, "callback": callback}
 	bb.changed.connect(callback)
 
-func _release_cancel_if(run: Dictionary) -> void:
-	var watch_id := int(run.get("cancel_if_watch_id", -1))
+func _release_cancel_if(lifetime: RunLifetime) -> void:
+	var watch_id := lifetime.cancel_if_watch_id
 	var watcher: Dictionary = _cancel_if_callbacks.get(watch_id, {})
 	if not watcher.is_empty():
 		var watched_signal: Signal = watcher["signal"]
@@ -434,7 +459,7 @@ func _release_cancel_if(run: Dictionary) -> void:
 		if watched_signal.is_connected(callback):
 			watched_signal.disconnect(callback)
 		_cancel_if_callbacks.erase(watch_id)
-	run.erase("cancel_if_watch_id")
+	lifetime.cancel_if_watch_id = -1
 
 ## Returns the engine's configured wait signal and publishes it to live diagnostics.
 func wait_tracked(seconds: float, rule_id: StringName, label: String) -> Signal:

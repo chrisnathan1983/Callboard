@@ -425,10 +425,55 @@ func _test_game_scene() -> bool:
 	ok = _check("the HUD mounts the hidden live panel when available",
 		(hud.board_panel != null and not hud.board_panel.visible) if has_debug_board
 		else hud.board_panel == null) and ok
+	ok = (await _test_opening_camera(game)) and ok
 	ok = (await _test_touch_controls(game)) and ok
 	ok = (await _test_demo_paths(game)) and ok
 	game.queue_free()
 	await process_frame
+	return ok
+
+func _test_opening_camera(game: GameManager) -> bool:
+	var world := game.get_node("WorldManager") as DemoWorld
+	var player := world.get_node("Player") as Player
+	var camera := world.get_node("Camera") as Camera3D
+	var hud := game.hud
+	var shot := world.controls.camera_request()
+	var ok := _check("the opening starts with a reception shot and a gameplay input lock",
+		shot != null and shot.shot == &"reception" and player.input_locked
+		and not hud._play_controls.visible and hud._actions.is_visible_in_tree())
+
+	var spawn := player.global_position
+	var permit := game.stage.get_node("PermitArea") as TriggerArea
+	player.global_position = permit.global_position
+	var touch_start := root.get_visible_rect().size * Vector2(0.75, 0.5)
+	_send_touch(0, touch_start, true)
+	Input.action_press(&"move_back")
+	for frame in range(3):
+		await physics_frame
+	Input.action_release(&"move_back")
+	_send_touch(0, touch_start, false)
+	ok = _check("the opening blocks keyboard movement, the touch stick and interaction",
+		player.global_position.is_equal_approx(permit.global_position)
+		and hud._stick._pointer == -1 and player.interaction_resolver.selected_trigger == permit
+		and not player.interact()["accepted"] and not game.stage.is_set(&"permit_stamped")) and ok
+	player.global_position = spawn
+
+	var finished := await _wait_for_camera_state(func() -> bool:
+		return world.controls.camera_request() == null and not player.input_locked)
+	ok = _check("the opening returns to the gameplay camera before giving back control",
+		finished and camera.global_transform.is_equal_approx(world._gameplay_pose)
+		and hud._play_controls.visible) and ok
+
+	# Replay the authored call with a finger already down, then interrupt it.
+	_send_touch(0, touch_start, true)
+	game.stage.fire(&"intro")
+	ok = _check("starting a cutscene cancels a held gameplay touch",
+		player.input_locked and hud._stick._pointer == -1) and ok
+	game.clear_stage(false)
+	ok = _check("reload interrupts the intro and restores input without replaying it",
+		not player.input_locked and world.controls.camera_request() == null
+		and hud._play_controls.visible) and ok
+	_send_touch(0, touch_start, false)
 	return ok
 
 func _test_touch_controls(game: GameManager) -> bool:
@@ -618,6 +663,10 @@ func _test_demo_paths(game: GameManager) -> bool:
 		and not stage.decoy.visible and not stage.is_set(&"lamp_on") and game.score == 325) and ok
 	for frame in range(3):
 		await physics_frame
+	var world := game.get_node("WorldManager") as DemoWorld
+	var camera := world.get_node("Camera") as Camera3D
+	var gameplay_pose := camera.global_transform
+	var gameplay_size := camera.size
 	var bell_delivery := player.interact()
 	var duplicate := player.interact()
 	ok = _check("the bell completes the saved counter and repeat attempts dispatch no Call",
@@ -626,12 +675,37 @@ func _test_demo_paths(game: GameManager) -> bool:
 		and stage.has_fired(&"z1_office_complete") and stage.get_var(&"gifts_delivered") == 2
 		and game._offices[GameManager.ANNEX].get_var(&"citywide_deliveries") == 2
 		and game.score == 325) and ok
+	var closeup := world.controls.camera_request()
+	ok = _check("delivering the bell focuses the prop while leaving gameplay input available",
+		closeup != null and closeup.target == stage.bell and not player.input_locked
+		and game.hud._play_controls.visible) and ok
+	var shaking := await _wait_for_camera_state(func() -> bool:
+		return not is_zero_approx(camera.h_offset) or not is_zero_approx(camera.v_offset))
+	ok = _check("the bell close-up moves the camera and applies a shake offset",
+		shaking and not camera.global_transform.is_equal_approx(gameplay_pose)) and ok
 	game.clear_stage(false)
 	stage = game.stage as Stage01
+	ok = _check("reloading during the shake releases both camera layers immediately",
+		world.controls.camera_request() == null and world.controls.shake_request() == null
+		and is_zero_approx(camera.h_offset) and is_zero_approx(camera.v_offset)) and ok
 	ok = _check("both gifts and the final bell transform restore on reload",
 		stage.reward.visible and stage.bell.visible and stage.bell.rotation.is_zero_approx()
 		and stage.get_var(&"gifts_delivered") == 2 and stage.get_var(&"citywide_deliveries") == 2
 		and stage.has_fired(&"z1_office_complete")) and ok
+	var restored_camera := func() -> bool:
+		return camera.global_transform.is_equal_approx(gameplay_pose) and is_equal_approx(camera.size, gameplay_size)
+	var recovered := await _wait_for_camera_state(restored_camera)
+	ok = _check("the interrupted shot blends back to the gameplay pose", recovered) and ok
+	# Replay the authored receipt without changing saved delivery state.
+	stage.fire(&"relay:gift_delivered", {"gift_id": "bell"})
+	var reception := world.get_node("ReceptionShot") as Marker3D
+	var framed := await _wait_for_camera_state(func() -> bool:
+		return camera.global_transform.is_equal_approx(reception.global_transform))
+	ok = _check("the receipt reaches the named reception shot and clears shake",
+		framed and world.controls.shake_request() == null and is_equal_approx(camera.size, 11.0)) and ok
+	var returned := await _wait_for_camera_state(restored_camera)
+	ok = _check("the complete receipt returns to gameplay framing",
+		returned and world.controls.camera_request() == null) and ok
 	game.clear_stage(true)
 	stage = game.stage as Stage01
 	var pad := stage.get_node("BumpPad") as BumpProp
@@ -647,6 +721,12 @@ func _test_demo_paths(game: GameManager) -> bool:
 	ok = _check("the biscuit route can also deliver the duck",
 		stage.reward.visible and stage.has_fired(&"z1_delivered") and game.score == 200) and ok
 	return ok
+
+func _wait_for_camera_state(matches: Callable) -> bool:
+	var deadline := Time.get_ticks_msec() + 2500
+	while not bool(matches.call()) and Time.get_ticks_msec() < deadline:
+		await process_frame
+	return bool(matches.call())
 
 func _check(label: String, condition: bool) -> bool:
 	print(("  ok   " if condition else "  FAIL ") + label)

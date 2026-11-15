@@ -42,6 +42,69 @@ func gameplay_event(event_id: StringName, arguments: Dictionary = {}) -> Step:
 		if is_instance_valid(stage):
 			stage.publish_gameplay_event(event_id, arguments))
 
+## Lock a host input channel for this rule run.
+func lock_input(channel: StringName = &"gameplay") -> Step:
+	return _control_step(func(adapter: StageControlAdapter, owner: RuleEngine.RunLifetime) -> void:
+		adapter._claim_input(owner, channel))
+
+## Release only the running rule's lock on this channel.
+func release_input(channel: StringName = &"gameplay") -> Step:
+	return _control_step(func(adapter: StageControlAdapter, owner: RuleEngine.RunLifetime) -> void:
+		adapter._release_input(owner, channel))
+
+## Ask the host's camera rig to focus on a Stage prop.
+func camera_focus(target: Node3D, blend_seconds: float = 0.0, channel: StringName = &"main") -> Step:
+	return _control_step(func(adapter: StageControlAdapter, owner: RuleEngine.RunLifetime) -> void:
+		if not is_instance_valid(target) or not is_finite(blend_seconds) or blend_seconds < 0.0:
+			push_warning("Callboard camera_focus requires a live target and a finite, nonnegative blend time.")
+			return
+		var request := StageControlAdapter.CameraRequest.new()
+		request.kind = StageControlAdapter.CameraRequest.Kind.FOCUS
+		request._target = weakref(target)
+		request.blend_seconds = blend_seconds
+		adapter._claim_camera(owner, channel, request))
+
+## Select a named shot defined by the host's camera rig.
+func camera_frame(shot: StringName, blend_seconds: float = 0.0, channel: StringName = &"main") -> Step:
+	return _control_step(func(adapter: StageControlAdapter, owner: RuleEngine.RunLifetime) -> void:
+		if shot.is_empty() or not is_finite(blend_seconds) or blend_seconds < 0.0:
+			push_warning("Callboard camera_frame requires a shot name and a finite, nonnegative blend time.")
+			return
+		var request := StageControlAdapter.CameraRequest.new()
+		request.kind = StageControlAdapter.CameraRequest.Kind.FRAME
+		request.shot = shot
+		request.blend_seconds = blend_seconds
+		adapter._claim_camera(owner, channel, request))
+
+## Add a shake layer for this rule run. Use a subsequent wait to hold the effect.
+func camera_shake(strength: float, frequency: float = 12.0, channel: StringName = &"main") -> Step:
+	return _control_step(func(adapter: StageControlAdapter, owner: RuleEngine.RunLifetime) -> void:
+		if not is_finite(strength) or not is_finite(frequency) or strength < 0.0 or frequency <= 0.0:
+			push_warning("Callboard camera_shake requires finite strength >= 0 and frequency > 0.")
+			return
+		var request := StageControlAdapter.CameraRequest.new()
+		request.kind = StageControlAdapter.CameraRequest.Kind.SHAKE
+		request.strength = strength
+		request.frequency = frequency
+		adapter._claim_camera(owner, channel, request))
+
+## Release this rule run's shot and shake on the given camera channel.
+func release_camera(channel: StringName = &"main") -> Step:
+	return _control_step(func(adapter: StageControlAdapter, owner: RuleEngine.RunLifetime) -> void:
+		adapter._release_camera(owner, channel))
+
+func _control_step(apply: Callable) -> Step:
+	var stage := context.host as Stage
+	return Step.new(func(c: Dictionary) -> void:
+		if not is_instance_valid(stage) or stage.control_adapter == null:
+			push_warning("Callboard input and camera verbs require a StageControlAdapter installed by the host.")
+			return
+		var callboard: Dictionary = c.get("_callboard", {})
+		var run: Dictionary = callboard.get("run", {})
+		var owner := run.get("cancel_signal") as RuleEngine.RunLifetime
+		if owner != null and not owner.is_ended:
+			apply.call(stage.control_adapter, owner))
+
 ## Publish a correlated host request and hold this rule until response, timeout, or cancellation.
 func gameplay_request(event_id: StringName, arguments: Dictionary = {}, timeout := 0.0,
 		response_schema: Dictionary = {}, timeout_relay: StringName = &"",

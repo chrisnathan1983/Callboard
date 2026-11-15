@@ -6,6 +6,7 @@ const LAYER_PLAYER := StageCollisionLayers.PLAYER
 const LAYER_TRIGGER := StageCollisionLayers.TRIGGER
 
 var stunned := false
+var input_locked := false
 var touch_movement := Vector2.ZERO
 var _stun_timer: SceneTreeTimer
 var _reach: Area3D
@@ -46,7 +47,7 @@ func _ready() -> void:
 
 func _physics_process(_delta: float) -> void:
 	var dir := Vector3.ZERO
-	if not stunned:
+	if not stunned and not input_locked:
 		var keyboard := Input.get_vector(&"move_left", &"move_right", &"move_forward", &"move_back")
 		var movement := keyboard if not keyboard.is_zero_approx() else touch_movement
 		dir = Vector3(movement.x, 0.0, movement.y)
@@ -58,7 +59,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		interact()
 
 func interact(context: Dictionary = {}) -> Dictionary:
-	if stunned or interaction_resolver == null:
+	if stunned or input_locked or interaction_resolver == null:
 		return {"accepted": false, "event": &"", "payload": {}}
 	return interaction_resolver.interact(context)
 

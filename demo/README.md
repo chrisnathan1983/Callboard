@@ -6,10 +6,12 @@ Open [project.godot](../project.godot) in Godot **4.7** and press **F5**. The pl
 
 City Hall is expecting a rubber duck, Inspector Biscuit is taking his job very seriously, and the clerk requires a permit for indoor quacking.
 
+The opening frames City Hall, cuts closer to Inspector Biscuit, and pulls back to the gameplay view. Movement and interaction unlock when that view returns. **Reload** and **Switch office** can interrupt the opening. It plays once when you launch the demo.
+
 1. Offer a decoy at the red shelter or step on the blue biscuit pad to get Inspector Biscuit off duty.
 2. Get a squeak permit at the yellow desk. You can do this before or after distracting the inspector.
 3. Deliver the duck at City Hall to earn 200 points and meet the new deputy. Try the door early to see what the clerk says when the inspection lamp is on, the inspector is still on duty, or the permit is missing.
-4. Stay at the door and deliver the desk bell when its prompt takes over. Try **Reload** between deliveries to see the duck and the count of one restored while the bell is still available.
+4. Stay at the door and deliver the desk bell when its prompt takes over. Watch the camera move in for the bell, shake as it settles, pull back to frame both gifts, then return to gameplay. Try **Reload** between deliveries to see the duck and the count of one restored while the bell is still available. Reload during the close-up to interrupt it and see the final bell pose restored.
 5. Choose **Switch office** to visit the annex. It uses the same scene with its own permit, deliveries, and one-shot rules. The **Citywide** total carries across both offices.
 
 | Touch or mouse | Keyboard | Action |
@@ -30,10 +32,14 @@ Select `give:gift` and toggle **Isolate** in Callboard to follow delivery routin
 | Context prompts and external writers | In [Stage 01's scene](stages/stage_01/stage_01.tscn), compare the overlapping **DeliveryArea** and **BellArea** priorities. Each [gift target](scripts/props/gift_target.gd) declares and writes its own saved flag. **BumpPad** declares its local relay latch the same way. |
 | Numeric updates and shared state | On `give:gift`, each matching rule uses `add_var` for the saved `gifts_delivered` count and shared `citywide_deliveries` total. The office completion rule checks `gifts_delivered >= 2`. |
 | Staging verbs and re-entry | The guard loop drives a timed light. The calming paths converge on `calm_guard`, which moves Biscuit to a marker and plays his nap. Tap the permit desk rapidly to queue extra stamp requests. Each queued stamp starts after a short step delay. The bell receipt rotates the bell upright. |
+| Camera focus, framing, and shake | In `z1_bell_receipt`, `camera_focus` targets the bell prop. `camera_shake` adds a short wobble, then `release_camera` clears it. `camera_frame` requests the `reception` shot, and a final release returns to the gameplay camera. |
+| Optional input lock | The game manager fires `intro` after the first Stage activates. In `z1_opening_camera`, `lock_input` blocks movement and interaction, then `release_input` restores them after the return blend. The bell receipt leaves movement and interaction available. |
 | Managed stages and restoration | The [game manager](scripts/game_manager.gd) loads each office by stable ID, keeps the other office dormant, and binds listeners before activation. Inspect **Restoration Bindings** on [Stage 01's definition](stages/stage_01/stage_01.tres) to see how the saved flags restore both gifts, the permit, and Biscuit's marker and animation pose. |
 | Stage prewarming | The game manager prewarms the office scene by path at startup and keeps the resulting `PackedScene` so both offices can reuse it. The same demo runs in a single-threaded Web export using Godot's Compatibility renderer. |
 
 The [annotated stage script](stages/stage_01/stage_01.gd) shows how to expose scene nodes to the graph and build the biscuit and decoy at scene markers. Press **F1** during play and open **DEBUG** to see rule activity, queued permit requests, and waits. Open **Blackboard** to see each variable's scope and most recent writer. The store lives in the running demo, so closing the game resets the offices.
+
+Both offices use the adapter owned by the [demo world](scripts/world_manager.gd). The world maps the `reception` request to the **ReceptionShot** marker in [the main scene](game.tscn) and applies shake as camera-local offsets while the shot tween runs. When **Reload** or **Switch office** unloads a Stage mid-shot, Callboard releases its requests and the world blends back from the current view. The bell's delivery and restored pose come from saved state, so reloading skips the celebration.
 
 ## Inspect the graph
 

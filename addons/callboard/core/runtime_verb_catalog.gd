@@ -29,7 +29,7 @@ static func from_factory(factory: CoreVerbs) -> Array:
 static func props_of(stage: Stage) -> Array:
 	var out: Array = []
 	for property in stage.get_property_list():
-		if property["name"] in [&"definition", &"bb", &"engine", &"verbs"]:
+		if property["name"] in [&"definition", &"bb", &"engine", &"verbs", &"control_adapter"]:
 			continue
 		if ((property["usage"] & PROPERTY_USAGE_SCRIPT_VARIABLE)
 				and property["type"] == TYPE_OBJECT

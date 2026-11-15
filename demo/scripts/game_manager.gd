@@ -13,11 +13,13 @@ var score := 0
 var _stage_scene: PackedScene
 var _offices: Dictionary[StringName, Stage] = {}
 @onready var hud: GameHud = $HUD
+@onready var _world: DemoWorld = $WorldManager
 @onready var _player: Player = $WorldManager/Player
 
 func _ready() -> void:
 	hud.manager = self
 	hud.bind_player(_player)
+	_world.controls.state_changed.connect(_sync_player_input)
 	hud.set_stage_loading("Loading City Hall…")
 	# Load only the resource here. Retaining it lets both offices reuse it
 	# for swaps and reloads. On Web, prewarming yields before the resource
@@ -29,6 +31,10 @@ func _ready() -> void:
 		hud.set_stage_loading("City Hall could not be loaded.")
 		return
 	_open_office()
+	# The opening is a separate authored Call so office swaps and reloads
+	# can interrupt it without starting it again.
+	if stage != null:
+		stage.fire(&"intro")
 
 func _get_office(id: StringName) -> Stage:
 	if _offices.has(id):
@@ -43,6 +49,8 @@ func _get_office(id: StringName) -> Stage:
 	_offices[id] = loaded
 	# Bind once for this instance so returning to an office cannot double the score
 	# or apply the same gameplay event twice. A managed Stage is still dormant here.
+	# Both offices request shots from the same rig, which outlives either Stage.
+	loaded.control_adapter = _world.controls
 	loaded.scored.connect(_on_scored)
 	loaded.gameplay_event.connect(_on_gameplay_event)
 	return loaded
@@ -93,6 +101,17 @@ func _unload_current_office() -> void:
 
 func _on_scored(points: int) -> void:
 	score += points
+
+func _sync_player_input() -> void:
+	# Input ownership is independent of camera ownership. Only graph rules
+	# that ask for a lock disable the player's movement and interactions.
+	var locked := _world.controls.is_input_locked()
+	if locked == _player.input_locked:
+		return
+	_player.input_locked = locked
+	if locked:
+		_player.touch_movement = Vector2.ZERO
+	hud.set_player_input_locked(locked)
 
 func _on_gameplay_event(event_id: StringName, arguments: Dictionary) -> void:
 	# The rule requests an effect with gameplay_event(id, args). The host

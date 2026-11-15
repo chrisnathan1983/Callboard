@@ -171,9 +171,9 @@ The first five items retain the high priority assigned in `TODO.md`.
   - [x] The resolver reevaluates eligibility, notices changes to the configured prompt on refresh, and resolves again before dispatch. Triggers expose prompt text, icon, and priority.
   - [x] Let authors derive prompt text/icon and availability from Blackboard state or host-provided context such as the held item. Keep one-argument eligibility callbacks compatible, and refresh the selected target and prompt immediately when `set_interaction_enabled` changes while the actor remains in range.
 
-- [ ] **Add cancellation-safe input and camera control.**
-  - [ ] Define generic `lock_input` and `release_input` requests with ownership, support for overlapping locks, and automatic release on cancellation or Stage teardown. Use host adapters for projects with their own controls.
-  - [ ] Add camera focus, shake, and framing controls or typed host requests, with restoration when ownership changes or a sequence is interrupted.
+- [x] **Add cancellation-safe input and camera control.** See [StageControlAdapter](addons/callboard/core/stage_control_adapter.gd).
+  - [x] Add `lock_input` and `release_input` with run-scoped ownership, overlapping locks, and automatic release. A shared host adapter coordinates Stages that control the same player or rig.
+  - [x] Add typed camera focus, framing, and shake requests. Release restores the previous live request or returns control to the host. Cover explicit release, completion, timeout, Restart, Cancel If, and Stage teardown.
 
 - [ ] **Expand staging verbs.** See [StagingVerbs](addons/callboard/core/staging_verbs.gd).
   - [x] Built-ins cover visibility, timed light on/off, audio playback, translation, rotation, animation playback, and animation posing, alongside existing speech and mesh/prop effects.
