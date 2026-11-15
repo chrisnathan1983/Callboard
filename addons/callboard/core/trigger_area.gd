@@ -6,6 +6,8 @@ class_name TriggerArea extends Area3D
 
 enum Mode { ENTER, INTERACT }
 
+const CallboardLocalizationScript := preload("res://addons/callboard/core/callboard_localization.gd")
+
 signal interaction_completed(actor: Node, result: Dictionary)
 signal interaction_state_changed
 
@@ -26,6 +28,11 @@ const LAYER_COMPANION := StageCollisionLayers.COMPANION
 @export var trigger_groups: Array[StringName] = [&"Player", &"Companion"]
 @export var ctx: Dictionary = {}
 @export_multiline var prompt_text := "Interact"
+## Optional translation key. When set, this takes precedence over prompt_text.
+@export var prompt_translation_key: StringName
+## Literal fallback used when the active locale has no translation for the key.
+@export_multiline var prompt_fallback_text := ""
+@export var prompt_substitutions: Dictionary = {}
 @export var prompt_icon: Texture2D
 @export var interaction_priority := 0
 @export var interaction_enabled := true:
@@ -122,7 +129,10 @@ func can_interact(actor: Node, interaction_context: Dictionary = {}) -> bool:
 
 ## Resolve dynamic prompt values using host context and current Stage state.
 func resolve_prompt(actor: Node, interaction_context: Dictionary = {}) -> Dictionary:
-	var resolved := {"text": prompt_text, "icon": prompt_icon}
+	var default_text := prompt_text
+	if not prompt_translation_key.is_empty():
+		default_text = CallboardLocalizationScript.resolve(prompt_translation_key, prompt_substitutions, prompt_fallback_text)
+	var resolved := {"text": default_text, "icon": prompt_icon}
 	if not _prompt_provider.is_valid():
 		return resolved
 	var supplied: Variant = _prompt_provider.call(actor, interaction_context.duplicate(true))
@@ -134,6 +144,17 @@ func resolve_prompt(actor: Node, interaction_context: Dictionary = {}) -> Dictio
 			resolved["text"] = supplied["text"]
 		else:
 			push_warning("TriggerArea '%s' prompt text must be a String." % name)
+	elif supplied.has("translation_key"):
+		var key: Variant = supplied["translation_key"]
+		var substitutions: Variant = supplied.get("substitutions", {})
+		var fallback: Variant = supplied.get("fallback", "")
+		if key is String or key is StringName:
+			if substitutions is Dictionary and fallback is String:
+				resolved["text"] = CallboardLocalizationScript.resolve(StringName(key), substitutions, fallback)
+			else:
+				push_warning("TriggerArea '%s' prompt substitutions and fallback have invalid types." % name)
+		else:
+			push_warning("TriggerArea '%s' prompt translation_key must be a String or StringName." % name)
 	if supplied.has("icon"):
 		if supplied["icon"] == null or supplied["icon"] is Texture2D:
 			resolved["icon"] = supplied["icon"]

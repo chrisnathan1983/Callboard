@@ -56,7 +56,7 @@ Add a `show_node` or `move_to` step to make a scene prop respond. Step arguments
 
 ### Contextual interactions
 
-Use `InteractionResolver` to choose one prompt and one interactable trigger from an actor's overlapping `TriggerArea`s. Set each INTERACT area's `prompt_text`, optional `prompt_icon`, and `interaction_priority`. The resolver selects by priority, distance, then node path, and refreshes as the actor or host state changes.
+Use `InteractionResolver` to choose one prompt and one interactable trigger from an actor's overlapping `TriggerArea`s. Set each INTERACT area's `prompt_text`, optional `prompt_icon`, and `interaction_priority`. For localization, set `prompt_translation_key`, `prompt_fallback_text`, and named `prompt_substitutions`; dynamic prompt providers can return the same key/fallback/substitutions fields. The resolver selects by priority, distance, then node path, and refreshes as the actor or host state changes.
 
 ```gdscript
 resolver.prompt_changed.connect(_show_prompt) # text, icon, priority
@@ -78,7 +78,7 @@ trigger.set_interaction_handler(func(actor: Node, context: Dictionary) -> Dictio
 trigger.set_interaction_enabled(false) # immediately refreshes an in-range resolver
 ```
 
-The host's eligibility and prompt providers decide whether an option is offered and what it displays. They can read Blackboard values and the resolver's current host context, such as the held item. The interaction handler decides acceptance, performs inventory policy, and supplies the Call payload. Accepted outcomes dispatch `event`; rejected outcomes can dispatch `rejected_event`. See the [TriggerArea and InteractionResolver API](addons/callboard/docs/api.md#triggerarea) for setup and signals.
+The host's eligibility and prompt providers decide whether an option is offered and what it displays. They can read Blackboard values and the resolver's current host context, such as the held item. Use `say_key()` for localized authored speech; ordinary `say()` and `prompt_text` remain literal. `CallboardLocalization.resolve()` is also available to host code for localized messages with named substitutions and a fallback. The interaction handler decides acceptance, performs inventory policy, and supplies the Call payload. Accepted outcomes dispatch `event`; rejected outcomes can dispatch `rejected_event`. See the [TriggerArea and InteractionResolver API](addons/callboard/docs/api.md#triggerarea) for setup and signals.
 
 For reusable item handoffs, `DeliveryTarget` accepts host inventory callbacks for reading, atomically consuming, and returning a held item. It tracks target capacity and reports accepted or rejected outcomes without storing inventory itself. Hosts can expose inventory facts to rules through typed Boolean Blackboard variables. See the [DeliveryTarget API](addons/callboard/docs/api.md#deliverytarget).
 

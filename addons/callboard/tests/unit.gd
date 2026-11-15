@@ -3,6 +3,7 @@ extends SceneTree
 
 const CrossStageValidator := preload("res://addons/callboard/model/cross_stage_event_validator.gd")
 const DeliveryTargetScript := preload("res://addons/callboard/core/delivery_target.gd")
+const CallboardLocalizationScript := preload("res://addons/callboard/core/callboard_localization.gd")
 
 signal clock_tick
 signal two_argument_tick(value: int, label: String)
@@ -10,6 +11,30 @@ signal animation_finished_tick(animation_name: StringName)
 
 func _initialize() -> void:
 	var ok := true
+	var localized_fallback := CallboardLocalizationScript.resolve(&"Callboard.Tests.Missing", {"item": "kite"}, "Take the {item}")
+	var prompt := TriggerArea.new()
+	prompt.prompt_translation_key = &"Callboard.Tests.MissingPrompt"
+	prompt.prompt_fallback_text = "Open the {target}"
+	prompt.prompt_substitutions = {"target": "gate"}
+	var authored_prompt := prompt.resolve_prompt(null).get("text", "")
+	prompt.set_prompt_provider(func(_actor: Node, _context: Dictionary) -> Dictionary:
+		return {"translation_key": &"Callboard.Tests.DynamicPrompt", "fallback": "Use {item}",
+			"substitutions": {"item": "key"}}
+	)
+	var host_prompt := prompt.resolve_prompt(null).get("text", "")
+	var speech_target := Node3D.new()
+	root.add_child(speech_target)
+	var speech_context := StepContext.new(Blackboard.new(), null, null, Callable())
+	var speech_step := StagingVerbs.new(speech_context).say_key(speech_target, &"Callboard.Tests.MissingSpeech",
+		{"name": "Ari"}, 1.0, "Hello, {name}!")
+	speech_step.fn.call({})
+	var speech_label := speech_target.get_node_or_null("CallboardSpeech") as Label3D
+	var localized_speech := speech_label != null and speech_label.text == "Hello, Ari!"
+	speech_target.queue_free()
+	prompt.free()
+	ok = _check("localized messages preserve literals and format speech, authored prompts, and host prompts",
+		localized_fallback == "Take the kite" and authored_prompt == "Open the gate"
+		and host_prompt == "Use key" and localized_speech) and ok
 	var attach_store := StageStateStore.new()
 	var attach_stage := Stage.new()
 	var attached_before_build := attach_store.attach(attach_stage, &"attach_before_build")

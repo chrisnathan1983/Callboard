@@ -356,7 +356,8 @@ func _evaluate_step_delay(source: String, inputs: Dictionary, base: Object) -> V
 	return value
 
 func _supports_runtime_input(verb: String, index: int) -> bool:
-	return ((verb in ["set_var", "add_var", "say"] and index == 1)
+	return ((verb in ["set_var", "add_var", "say", "say_key"] and index == 1)
+		or (verb == "say_key" and index == 2)
 		or (verb == "score" and index == 0)
 		or (verb in ["gameplay_event", "emit_relay", "emit_cross_stage"] and index == 1))
 

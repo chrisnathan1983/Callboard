@@ -973,6 +973,7 @@ func _arg_widget(step: StepData, i: int, param: Dictionary) -> Control:
 func _runtime_input_options(step: StepData, index: int, param: Dictionary) -> Array[Dictionary]:
 	var options: Array[Dictionary] = []
 	var supported := ((step.verb in [&"set_var", &"add_var", &"say"] and index == 1)
+		or (step.verb == &"say_key" and index in [1, 2])
 		or (step.verb == &"score" and index == 0)
 		or (step.verb in [&"gameplay_event", &"emit_relay"] and index == 1))
 	if not supported:
@@ -991,7 +992,7 @@ func _runtime_input_options(step: StepData, index: int, param: Dictionary) -> Ar
 			sources.append({"label": "Blackboard.%s" % writer.key, "key": writer.key,
 				"type": writer_type, "source": "blackboard"})
 	if param["type"] == TYPE_DICTIONARY:
-		if step.verb == &"gameplay_event" and index == 1:
+		if step.verb in [&"gameplay_event", &"say_key"] and index == (1 if step.verb == &"gameplay_event" else 2):
 			for source: Dictionary in sources:
 				if source["type"] == TYPE_DICTIONARY:
 					_add_runtime_input_option(options, source["label"], source, param["type"])

@@ -2,6 +2,7 @@
 class_name StagingVerbs extends CoreVerbs
 ## Steps that stage props and actors in the scene.
 
+const CallboardLocalizationScript := preload("res://addons/callboard/core/callboard_localization.gd")
 const COLOR_TWEEN_META := &"_callboard_color_tween"
 const BASE_COLOR_META := &"_callboard_base_color"
 const ISOLATED_MATERIAL_META := &"_callboard_isolated_effect_material"
@@ -721,7 +722,18 @@ func _light(n: Node3D, on: bool, duration: float, key: StringName) -> Step:
 
 ## Floating text over a prop. Non-blocking.
 func say(n: Node3D, text: String, seconds := 1.0) -> Step:
+	return _say_text(n, func() -> String: return text, seconds)
+
+## Floating text resolved through TranslationServer when the rule runs.
+## Substitutions use named String.format placeholders such as {item}.
+func say_key(n: Node3D, key: StringName, substitutions: Dictionary = {}, seconds := 1.0, fallback := "") -> Step:
+	return _say_text(n, func() -> String:
+		return CallboardLocalizationScript.resolve(key, substitutions, fallback), seconds)
+
+func _say_text(n: Node3D, resolve_text: Callable, seconds: float) -> Step:
 	var f := func(_c: Dictionary) -> void:
+		if not is_instance_valid(n) or not resolve_text.is_valid():
+			return
 		var label := n.get_node_or_null(NodePath(SPEECH_LABEL_NAME)) as Label3D
 		if label == null:
 			label = Label3D.new()
@@ -731,7 +743,7 @@ func say(n: Node3D, text: String, seconds := 1.0) -> Step:
 			var previous: Tween = label.get_meta(SPEECH_TWEEN_META) if label.has_meta(SPEECH_TWEEN_META) else null
 			if previous and previous.is_running():
 				previous.kill()
-		label.text = text
+		label.text = str(resolve_text.call())
 		label.font_size = 96
 		label.pixel_size = 0.01
 		label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
@@ -996,7 +1008,7 @@ func validate_step(rule_id: StringName, step: Step, bb: Blackboard) -> Array[Str
 	if step.args.is_empty():
 		return problems
 	var target: Variant = step.args[0]
-	if step.verb in [&"light", &"show_node", &"pop", &"bounce", &"say", &"move_to", &"snap_to_marker"]:
+	if step.verb in [&"light", &"show_node", &"pop", &"bounce", &"say", &"say_key", &"move_to", &"snap_to_marker"]:
 		if not target is Node3D or not is_instance_valid(target):
 			problems.append("rule '%s' '%s' step requires a valid Node3D target" % [rule_id, step.verb])
 	if step.verb == &"move_to" and step.args.size() > 1:

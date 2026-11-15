@@ -134,7 +134,7 @@ The first five items retain the high priority assigned in `TODO.md`.
   - [x] Use `&"session"` as the scope identifier for per-session Blackboard variables such as `ambient_level` and `sequence_reversed`. Expose `reset_session()` as the host hook to restore those variables to their declared defaults at a session boundary.
   - [x] Define host-controlled session start/reset, session counters and flags across Stage reloads, and how session state interacts with durable profile progression and one-shot latches. Make scope, reset rules, and serialization behavior explicit in the UI and API.
 
-- [ ] **Extend declarative restoration.** See [StageRestorationBinding](addons/callboard/core/stage_restoration_binding.gd) and [Stage](addons/callboard/core/stage.gd).
+- [x] **Extend declarative restoration.** See [StageRestorationBinding](addons/callboard/core/stage_restoration_binding.gd) and [Stage](addons/callboard/core/stage.gd).
   - [x] Saved/Shared keys can restore visibility, a local `Transform3D`, or a marker's global transform. Marker restoration can optionally seek and pause an `AnimationPlayer` at a resolved pose. Bindings run after `_restore_state()` and before activation, with runtime and validation coverage.
   - [x] Add standalone animation pose binding. A saved/shared/session Boolean key gates a resolved `AnimationPlayer` pose without requiring a marker or moving its target; the binding validates the key and clip and restores after `_restore_state()`.
   - [x] Add typed variant bindings for integer child selection and a generic type-checked property binding. Child choices are explicit Stage-relative paths; property bindings require a writable property compatible with the Blackboard key type.
@@ -189,8 +189,10 @@ The first five items retain the high priority assigned in `TODO.md`.
   - [x] Add custom blend/speed to `play_animation` and a `set_animation_speed` control.
   - [x] Add spawn, despawn, and reparent with explicit ownership and transform preservation options. Validate targets and parameters; these verbs do not block and need no wait cancellation handling.
 
-- [ ] **Support localization.** See [`StagingVerbs.say()`](addons/callboard/core/staging_verbs.gd) and [TriggerArea](addons/callboard/core/trigger_area.gd).
-  - [ ] Add explicit translation-key support for authored speech, prompts, and host-supplied messages, with substitutions and fallback behavior. Preserve authored literal strings.
+- [x] **Support localization.** See [`StagingVerbs.say_key()`](addons/callboard/core/staging_verbs.gd), [CallboardLocalization](addons/callboard/core/callboard_localization.gd), and [TriggerArea](addons/callboard/core/trigger_area.gd).
+  - [x] Add `say_key()` and `CallboardLocalization.resolve()` for explicit translation keys, named substitutions, and fallback text. Resolve speech when the rule runs; keep `say()` literal.
+  - [x] Add authored and dynamic localized prompts to `TriggerArea`, with fallback and substitutions. Preserve literal `prompt_text` and existing literal prompt-provider values.
+  - [x] Document host-supplied localization, speech, prompt configuration, and behavior in the API reference and README; add focused unit coverage.
 
 ## 5. Board authoring and diagnostics
 

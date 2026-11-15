@@ -289,7 +289,7 @@ Add `StageRestorationBinding` resources to a StageDefinition. `VISIBILITY` maps 
 
 `TriggerArea` defaults to collision layer `TRIGGER` and mask `PLAYER | COMPANION`, preserving the addon's previous runtime behavior. These defaults are set before scene data is applied, so authored `collision_layer` and `collision_mask` values remain in effect. Set `collision_mask_override` to a nonnegative mask to replace the authored mask at runtime; `-1` means no override, and `0` intentionally disables all collision-mask matches. The override does not change the collision layer. Use [`StageCollisionLayers`](../core/collision_layers.gd) for the standard bit masks, or call `stage.fire()` directly from your own interaction system.
 
-Interactable triggers expose `prompt_text`, optional `prompt_icon`, and `interaction_priority`. The resolver chooses the eligible trigger with the highest priority, then the shortest distance from the actor, then the lexicographically first node path. It polls while the actor remains in range, so Blackboard or host state can update availability and prompt values without an area exit/re-entry. `set_interaction_enabled(false)` emits a state-change signal that refreshes connected resolvers immediately.
+Interactable triggers expose `prompt_text`, optional `prompt_icon`, and `interaction_priority`. Set `prompt_translation_key` to resolve the prompt through `TranslationServer`; `prompt_fallback_text` is used when that key has no translation, and `prompt_substitutions` fills named placeholders such as `{item}`. Literal `prompt_text` remains the default when no key is authored. A dynamic prompt provider can return `text: String`, or `translation_key` with optional `fallback` and `substitutions` for a localized host-dependent prompt. The resolver chooses the eligible trigger with the highest priority, then the shortest distance from the actor, then the lexicographically first node path. It polls while the actor remains in range, so Blackboard or host state can update availability and prompt values without an area exit/re-entry. `set_interaction_enabled(false)` emits a state-change signal that refreshes connected resolvers immediately.
 
 ```gdscript
 var resolver := InteractionResolver.new()
@@ -305,7 +305,8 @@ trigger.set_eligibility_hook(func(interacting_actor: Node, context: Dictionary) 
     return context.get("held_item") == &"permit" and stage.get_var(&"permit_stamped")
 )
 trigger.set_prompt_provider(func(interacting_actor: Node, context: Dictionary) -> Dictionary:
-    return {"text": "Use %s" % context.get("held_item", ""), "icon": trigger.prompt_icon}
+    return {"translation_key": &"PROMPT_USE_ITEM", "fallback": "Use {item}",
+        "substitutions": {"item": context.get("held_item", "")}, "icon": trigger.prompt_icon}
 )
 trigger.set_interaction_handler(func(interacting_actor: Node, context: Dictionary) -> Dictionary:
     inventory.erase("permit")
@@ -315,7 +316,7 @@ var result: Dictionary = resolver.interact({"source": "door_ui"})
 trigger.set_interaction_enabled(false) # immediately updates the in-range prompt
 ```
 
-`InteractionResolver.configure(actor, reach_area, context_provider)` accepts an optional Callable that receives the actor and returns a Dictionary. You can also call `set_context_provider()` later. The returned context is reevaluated during each resolver refresh and is passed to eligibility and prompt callbacks; explicit context passed to `refresh()` or `interact()` overrides provider fields. A one-argument `set_eligibility_hook(actor)` remains supported; the two-argument form receives `(actor, context)`. The eligibility hook controls whether a trigger is offered. Override `is_interaction_eligible(actor)` for reusable actor-only eligibility. `set_prompt_provider()` receives `(actor, context)` and returns a Dictionary with optional `text: String` and `icon: Texture2D` fields; omitted fields use `prompt_text` and `prompt_icon`. The prompt signal carries the resolved text, icon, and priority; read `resolver.selected_trigger` when the subscriber needs the trigger itself. `selected_trigger_changed` has no arguments and fires when selection changes.
+`InteractionResolver.configure(actor, reach_area, context_provider)` accepts an optional Callable that receives the actor and returns a Dictionary. You can also call `set_context_provider()` later. The returned context is reevaluated during each resolver refresh and is passed to eligibility and prompt callbacks; explicit context passed to `refresh()` or `interact()` overrides provider fields. A one-argument `set_eligibility_hook(actor)` remains supported; the two-argument form receives `(actor, context)`. The eligibility hook controls whether a trigger is offered. Override `is_interaction_eligible(actor)` for reusable actor-only eligibility. `set_prompt_provider()` receives `(actor, context)` and returns a Dictionary with optional `text: String`, `translation_key`, `fallback`, `substitutions`, and `icon: Texture2D` fields; a literal `text` takes precedence, otherwise a supplied key is localized. Omitted fields use the authored prompt defaults. The prompt signal carries the resolved text, icon, and priority; read `resolver.selected_trigger` when the subscriber needs the trigger itself. `selected_trigger_changed` has no arguments and fires when selection changes.
 
 Use `set_interaction_enabled(false)` to remove a target while it remains overlapped. The resolver subscribes to trigger state changes and immediately selects the next eligible target or clears the prompt. Blackboard- and inventory-backed eligibility can also change between frames; the resolver's normal refresh polling picks up those updates. Callbacks should be side-effect free because prompt and eligibility callbacks can be evaluated repeatedly.
 
@@ -343,6 +344,8 @@ If later host work rolls back a delivery, call `return_delivery(delivery_id, act
 
 The default factory is [`StagingVerbs`](../core/staging_verbs.gd), which inherits [`CoreVerbs`](../core/core_verbs.gd). Each method returns a `Step`. Optional arguments are shown with their defaults.
 
+`CallboardLocalization.resolve(key, substitutions = {}, fallback = "")` is also available to host code. It asks `TranslationServer` for an explicit key and locale, uses the fallback when the key has no translation, then formats named placeholders such as `{item}`. Authored `say()` strings and literal prompt text are not translated implicitly.
+
 | Factory | Verb | Effect |
 | --- | --- | --- |
 | Core | `set_var(key, value = true)` | Write a Blackboard value. |
@@ -365,6 +368,7 @@ The default factory is [`StagingVerbs`](../core/staging_verbs.gd), which inherit
 | Staging | `reparent(n, new_parent, expected_owner, new_owner, keep_global_transform = true)` | Require an expected current owner and an explicit new owner (null clears ownership), reject cycles, and optionally preserve Node2D/Node3D world transforms. |
 | Staging | `pop(n)`, `bounce(n)` | Play a scale animation. |
 | Staging | `say(n, text, seconds = 1.0)` | Show temporary text at a node. |
+| Staging | `say_key(n, key, substitutions = {}, seconds = 1.0, fallback = "")` | Resolve a translation key when the rule runs, apply named substitutions, and use the fallback when no translation exists. |
 | Staging | `move_to(n, dest, offset = Vector3.ZERO, duration = 0.7, transition = Tween.TRANS_LINEAR, ease = Tween.EASE_IN_OUT)` | Tween a node to a target with an offset. Duration zero snaps immediately; otherwise the rule waits for completion. |
 | Staging | `snap_to_marker(n, marker, animation_player = null, animation_name = &"", animation_time = 0.0)` | Immediately copy a Marker3D world transform; optionally seek and pause an animation at a resolved pose. |
 | Staging | `follow_path(n, path, duration = 1.0, orient_to_path = false, wait_for_completion = true, transition = Tween.TRANS_LINEAR, ease = Tween.EASE_IN_OUT)` | Follow the baked Curve3D of a Path3D by distance, optionally matching its orientation. |
