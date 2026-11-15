@@ -4,6 +4,9 @@ extends EditorExportPlugin
 
 var _debug_export := false
 
+func _get_name() -> String:
+	return "CallboardExportPlugin"
+
 func _export_begin(_features: PackedStringArray, is_debug: bool, _path: String, _flags: int) -> void:
 	_debug_export = is_debug
 
