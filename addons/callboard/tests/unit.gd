@@ -160,7 +160,7 @@ func _initialize() -> void:
 	var redo_state := order_history.redo(undo_draft.snapshot())
 	var redo_draft := GraphDraft.new()
 	redo_draft.restore(redo_state)
-	var route_save_path := "user://routing_order_test.tres"
+	var route_save_path := "res://.godot/routing_order_test.tres"
 	var route_save_error := ResourceSaver.save(saved_order_definition, route_save_path)
 	var loaded_order_definition := ResourceLoader.load(route_save_path, "", ResourceLoader.CACHE_MODE_IGNORE) as StageDefinition
 	var route_round_trip: bool = route_save_error == OK and loaded_order_definition != null \

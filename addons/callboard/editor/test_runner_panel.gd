@@ -263,7 +263,25 @@ func _start_next_suite() -> void:
 	var executable := _headless_executable_path()
 	var project_path := ProjectSettings.globalize_path("res://")
 	var script_path: String = _suites[_active_suite]["path"]
-	var error := _thread.start(_execute_suite.bind(executable, project_path, script_path))
+	var log_directory := project_path.path_join(".godot").path_join("test_runner_logs")
+	var log_directory_error := DirAccess.make_dir_recursive_absolute(log_directory)
+	if log_directory_error != OK:
+		var log_error := "Could not prepare the test log directory: %s" % error_string(log_directory_error)
+		var failed_to_prepare_logs := {
+			"exit_code": -1,
+			"duration_ms": 0,
+			"output": log_error,
+			"display_output": log_error,
+			"passed": false,
+			"failures": [log_error],
+		}
+		_results[_active_suite] = failed_to_prepare_logs
+		_show_suite_result(_active_suite, failed_to_prepare_logs)
+		_active_suite = -1
+		_start_next_suite()
+		return
+	var log_path := log_directory.path_join(script_path.get_file().get_basename() + ".log")
+	var error := _thread.start(_execute_suite.bind(executable, project_path, script_path, log_path))
 	if error != OK:
 		var start_error_output := "Could not start the headless Godot process: %s" % error_string(error)
 		var failed_to_start := {
@@ -287,10 +305,11 @@ func _headless_executable_path() -> String:
 			return console_executable
 	return executable
 
-static func _execute_suite(executable: String, project_path: String, script_path: String) -> Dictionary:
+static func _execute_suite(executable: String, project_path: String, script_path: String,
+		log_path: String) -> Dictionary:
 	var output: Array = []
 	var args := PackedStringArray([
-		"--headless", "--path", project_path, "--script", script_path,
+		"--headless", "--log-file", log_path, "--path", project_path, "--script", script_path,
 	])
 	var started := Time.get_ticks_msec()
 	var exit_code := OS.execute(executable, args, output, true)

@@ -65,7 +65,8 @@ jobs:
           TEST_SCRIPT: ${{ matrix.suite.script }}
         run: |
           set -o pipefail
-          timeout 120s godot --headless --path . --script "res://$TEST_SCRIPT" 2>&1 | tee "$RUNNER_TEMP/godot-suite.log"
+          timeout 120s godot --headless --log-file "$RUNNER_TEMP/godot-suite-engine.log" \
+            --path . --script "res://$TEST_SCRIPT" 2>&1 | tee "$RUNNER_TEMP/godot-suite.log"
           if grep -F 'SCRIPT ERROR' "$RUNNER_TEMP/godot-suite.log"; then
             exit 1
           fi
