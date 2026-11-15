@@ -171,7 +171,7 @@ To add a Blackboard numeric guard, enter a comparison such as `score >= 10` belo
 
 ![The running demo with the live Callboard, active guard rule, pending timer, and recent event trace](addons/callboard/docs/screenshots/live-debugger.png)
 
-Press **F1** in the demo to inspect the running Stage. The **DEBUG** panel shows active rules, queued or restarting runs, pending waits, and recent event and step activity. Open **Blackboard** to inspect current values or **Calls & relays** to fire a declared Call while testing. The live graph uses the loaded Stage definition and highlights rules as they run.
+Press **F1** in the demo to inspect the running Stage. The **DEBUG** panel shows active rules, queued or restarting runs, pending waits, and recent event and step activity. Failed guards show their observed Blackboard or payload values, one-shot latch state, re-entry decisions, and order among rules for that Call. Open **Blackboard** to inspect current values or **Calls & relays** to fire a declared Call while testing; Calls with a payload schema show typed test fields, which can be unchecked to omit them. The live graph uses the loaded Stage definition and highlights rules as they run.
 
 Use `CallboardDebugPanel.create()` to add the live board to your own HUD. See [Embedding the live debugger](addons/callboard/docs/api.md#embedding-the-live-debugger).
 

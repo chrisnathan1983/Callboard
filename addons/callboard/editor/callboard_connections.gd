@@ -148,18 +148,36 @@ func _make_card(data: GraphDraft, editable: bool, id: String) -> PanelContainer:
 			expanded.erase(id))
 	card.add_child(details)
 	if not editable and not is_relay and id != "on_change":
+		var payload_fields: Array[PayloadFieldData] = []
+		for field: PayloadFieldData in data.payload_fields:
+			if field.event_id == StringName(id):
+				payload_fields.append(field)
+		var payload_controls: Array[Dictionary] = []
+		if not payload_fields.is_empty():
+			var payload_button := Button.new()
+			payload_button.name = "TestPayload"
+			payload_button.text = "Test payload (%d fields)" % payload_fields.size()
+			payload_button.toggle_mode = true
+			payload_button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+			payload_button.tooltip_text = "Choose typed values to send with this live Call. Uncheck a field to omit it."
+			var payload_form := _payload_form(payload_fields, payload_controls)
+			payload_form.name = "TestPayloadForm"
+			payload_form.hide()
+			payload_button.toggled.connect(func(open: bool) -> void: payload_form.visible = open)
+			card.add_child(payload_button)
+			card.add_child(payload_form)
 		var fire_row := HBoxContainer.new()
-		var fire_hint := Style.label("Trigger this Call", Style.MUTED, 12)
+		var fire_hint := Style.label("Send test Call", Style.MUTED, 12)
 		fire_hint.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		fire_row.add_child(fire_hint)
 		var fire := Button.new()
 		fire.name = "FireCall"
 		fire.text = "Fire"
-		fire.tooltip_text = "Fire '%s' on the live Stage" % id
+		fire.tooltip_text = "Send '%s' to the live Stage with the selected payload" % id
 		fire.disabled = not _fire_handler.is_valid()
 		fire.pressed.connect(func() -> void:
 			if _fire_handler.is_valid():
-				_fire_handler.call(id))
+				_fire_handler.call(id, _collect_payload(payload_controls)))
 		fire_row.add_child(fire)
 		card.add_child(fire_row)
 
@@ -184,6 +202,67 @@ func _make_card(data: GraphDraft, editable: bool, id: String) -> PanelContainer:
 	name_edit.text_submitted.connect(func(_value: String) -> void: commit.call())
 	rename.pressed.connect(commit)
 	return Style.entry(card)
+
+func _payload_form(fields: Array[PayloadFieldData], controls: Array[Dictionary]) -> VBoxContainer:
+	var form := VBoxContainer.new()
+	form.add_theme_constant_override("separation", 4)
+	for field: PayloadFieldData in fields:
+		var row := HBoxContainer.new()
+		var include := CheckBox.new()
+		include.name = "Include_%s" % field.key
+		include.button_pressed = true
+		include.tooltip_text = "Uncheck to omit this payload field"
+		row.add_child(include)
+		var label := Style.label("%s (%s)" % [field.key, field.type_name], Style.TEXT, 12)
+		label.custom_minimum_size.x = 130
+		row.add_child(label)
+		var editor: Control
+		match field.value_type():
+			TYPE_BOOL:
+				var boolean := CheckBox.new()
+				boolean.name = "Payload_%s" % field.key
+				boolean.text = "true" if boolean.button_pressed else "false"
+				boolean.toggled.connect(func(value: bool) -> void:
+					boolean.text = "true" if value else "false")
+				editor = boolean
+			TYPE_INT, TYPE_FLOAT:
+				var number := SpinBox.new()
+				number.name = "Payload_%s" % field.key
+				number.min_value = -2147483647.0
+				number.max_value = 2147483647.0
+				number.step = 1.0 if field.value_type() == TYPE_INT else 0.01
+				number.value = 0
+				editor = number
+			_:
+				var string_value := LineEdit.new()
+				string_value.name = "Payload_%s" % field.key
+				string_value.placeholder_text = "String value"
+				editor = string_value
+		editor.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(editor)
+		form.add_child(row)
+		controls.append({"key": field.key, "type": field.value_type(),
+			"include": include, "editor": editor})
+	return form
+
+func _collect_payload(controls: Array[Dictionary]) -> Dictionary:
+	var payload: Dictionary = {}
+	for entry: Dictionary in controls:
+		if not (entry["include"] as CheckBox).button_pressed:
+			continue
+		var editor: Control = entry["editor"]
+		var value: Variant
+		match int(entry["type"]):
+			TYPE_BOOL:
+				value = (editor as CheckBox).button_pressed
+			TYPE_INT:
+				value = int((editor as SpinBox).value)
+			TYPE_FLOAT:
+				value = (editor as SpinBox).value
+			_:
+				value = (editor as LineEdit).text
+		payload[entry["key"]] = value
+	return payload
 
 func _delete_selected() -> void:
 	var error: String = _delete_handler.call(_pending_delete)

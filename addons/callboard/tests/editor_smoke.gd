@@ -20,6 +20,7 @@ func _initialize() -> void:
 	ok = _test_debug_panel() and ok
 	ok = await _test_connection_focus() and ok
 	ok = _test_on_change_authoring() and ok
+	ok = _test_live_payload_form() and ok
 	ok = _test_emit_relay_authoring() and ok
 	ok = _test_project_settings() and ok
 	print("ADDON EDITOR: ", "PASS" if ok else "FAIL")
@@ -666,6 +667,61 @@ func _test_on_change_authoring() -> bool:
 		immutable_builtin and RuleConnections.remove(data, "on_change") != "") and ok
 	inspector.free()
 	graph.free()
+	return ok
+
+func _test_live_payload_form() -> bool:
+	var data := GraphDraft.new()
+	data.external_calls = PackedStringArray(["test_payload"])
+	data.payload_fields = [
+		PayloadFieldData.from_dictionary({"event_id": "test_payload", "key": "name", "type": "String"}),
+		PayloadFieldData.from_dictionary({"event_id": "test_payload", "key": "count", "type": "int"}),
+		PayloadFieldData.from_dictionary({"event_id": "test_payload", "key": "ratio", "type": "float"}),
+		PayloadFieldData.from_dictionary({"event_id": "test_payload", "key": "enabled", "type": "bool"}),
+	]
+	var parent := Control.new()
+	root.add_child(parent)
+	var sent := {}
+	var connections := CallboardConnections.new()
+	connections.setup(parent, Button.new(), func() -> void: pass,
+		func(_id: String, _new_name: String) -> String: return "",
+		func(_id: String) -> String: return "",
+		func(_message: String) -> void: pass,
+		func(id: String, payload: Dictionary) -> void:
+			sent["id"] = id
+			sent["payload"] = payload.duplicate(true))
+	parent.add_child(connections.panel)
+	connections.refresh(data, false, "test_payload")
+	var card: Control = connections.cards.get("test_payload")
+	var payload_button := card.find_child("TestPayload", true, false) as Button if card != null else null
+	var fire_button := card.find_child("FireCall", true, false) as Button if card != null else null
+	if payload_button == null or fire_button == null:
+		parent.free()
+		return _check("live Call tester creates a schema-backed payload form", false)
+	payload_button.button_pressed = true
+	payload_button.toggled.emit(true)
+	var form := card.find_child("TestPayloadForm", true, false) as VBoxContainer
+	var name_edit := form.find_child("Payload_name", true, false) as LineEdit
+	var count_edit := form.find_child("Payload_count", true, false) as SpinBox
+	var ratio_edit := form.find_child("Payload_ratio", true, false) as SpinBox
+	var enabled_edit := form.find_child("Payload_enabled", true, false) as CheckBox
+	var enabled_include := form.find_child("Include_enabled", true, false) as CheckBox
+	var inputs_found := form != null and form.visible and name_edit != null and count_edit != null \
+		and ratio_edit != null and enabled_edit != null and enabled_include != null
+	if inputs_found:
+		name_edit.text = "door"
+		count_edit.value = 4
+		ratio_edit.value = 1.25
+		enabled_edit.button_pressed = true
+		enabled_include.button_pressed = false
+		fire_button.pressed.emit()
+	var sent_payload: Dictionary = sent.get("payload", {})
+	var ok := _check("live Call tester sends typed values and omits unchecked schema fields",
+		inputs_found and sent.get("id") == "test_payload" and sent_payload.get("name") == "door"
+		and typeof(sent_payload.get("count")) == TYPE_INT and sent_payload.get("count") == 4
+		and typeof(sent_payload.get("ratio")) == TYPE_FLOAT
+		and is_equal_approx(sent_payload.get("ratio", 0.0), 1.25)
+		and not sent_payload.has("enabled"))
+	parent.free()
 	return ok
 
 func _test_emit_relay_authoring() -> bool:

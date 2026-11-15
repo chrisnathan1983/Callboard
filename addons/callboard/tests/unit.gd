@@ -35,6 +35,31 @@ func _initialize() -> void:
 	ok = _check("localized messages preserve literals and format speech, authored prompts, and host prompts",
 		localized_fallback == "Take the kite" and authored_prompt == "Open the gate"
 		and host_prompt == "Use key" and localized_speech) and ok
+	var diagnostic_bb := Blackboard.new()
+	diagnostic_bb.define(&"coins", &"local", 3)
+	var diagnostic_engine := RuleEngine.new(diagnostic_bb, {&"already_seen": true},
+		func(_seconds: float) -> Signal: return clock_tick)
+	var guarded_rule := Rule.new(&"guarded", &"diagnose")
+	guarded_rule.one_shot = true
+	guarded_rule.requires = [&"coins >= 5"]
+	var latched_rule := Rule.new(&"already_seen", &"diagnose")
+	latched_rule.one_shot = true
+	diagnostic_engine.rules = [guarded_rule, latched_rule]
+	var diagnostics: Array[Dictionary] = []
+	diagnostic_engine.trace_event.connect(func(entry: Dictionary) -> void:
+		if entry.get("kind") == "rule_rejected":
+			diagnostics.append(entry.duplicate(true)))
+	diagnostic_engine.fire(&"diagnose")
+	var failed_guard_trace: Dictionary = diagnostics[0] if diagnostics.size() > 0 else {}
+	var latched_trace: Dictionary = diagnostics[1] if diagnostics.size() > 1 else {}
+	ok = _check("rule rejection traces expose guard values, trigger order, and one-shot latch state",
+		diagnostics.size() == 2 and failed_guard_trace.get("order") == 1
+		and failed_guard_trace.get("trigger_rule_count") == 2
+		and failed_guard_trace.get("guard") == "coins >= 5"
+		and failed_guard_trace.get("observations", []).any(func(item: Dictionary) -> bool:
+			return "observed 3" in item.get("detail", ""))
+		and latched_trace.get("order") == 2 and latched_trace.get("latch_set", false)
+		and latched_trace.get("reason") == "one-shot latch is already set") and ok
 	var attach_store := StageStateStore.new()
 	var attach_stage := Stage.new()
 	var attached_before_build := attach_store.attach(attach_stage, &"attach_before_build")
@@ -2896,6 +2921,10 @@ func _test_restart() -> bool:
 	repeated.reentry = Rule.ReentryPolicy.RESTART
 	repeated.cancel_if = [&"stop"]
 	var starts: Array[int] = []
+	var restart_decisions: Array[Dictionary] = []
+	engine.trace_event.connect(func(entry: Dictionary) -> void:
+		if entry.get("kind") == "reentry_decision":
+			restart_decisions.append(entry.duplicate(true)))
 	repeated.steps.append(Step.new(func(c: Dictionary) -> void: starts.append(c["id"])))
 	repeated.steps.append(factory.repeat_emit(1.0, &"tick"))
 	var listener := Rule.new(&"listener", &"relay:tick")
@@ -2907,8 +2936,13 @@ func _test_restart() -> bool:
 	engine.fire(&"start", {"id": 2})
 	engine.fire(&"start", {"id": 3})
 	await process_frame
+	var restart_trace_valid := restart_decisions.size() == 2
+	for decision: Dictionary in restart_decisions:
+		restart_trace_valid = restart_trace_valid and decision.get("decision") == "restart" \
+			and decision.get("order") == 1 and decision.get("reentry_policy") == "Restart"
 	var ok := _check("restart releases the old wait and starts the latest run immediately",
-		starts == [1, 3] and engine.pending_snapshot().size() == 1)
+		starts == [1, 3] and engine.pending_snapshot().size() == 1
+		and restart_trace_valid)
 	clock_tick.emit()
 	ok = _check("the replacement repeat emits only its own tick", ticks == [3]) and ok
 	bb.write(&"stop", true)
@@ -2923,6 +2957,10 @@ func _test_queue() -> bool:
 	queued.reentry = Rule.ReentryPolicy.QUEUE
 	queued.requires = [&"enabled"]
 	var received: Array[int] = []
+	var queue_decisions: Array[Dictionary] = []
+	engine.trace_event.connect(func(entry: Dictionary) -> void:
+		if entry.get("kind") == "reentry_decision":
+			queue_decisions.append(entry.duplicate(true)))
 	queued.steps.append(Step.new(func(c: Dictionary) -> void: received.append(c["id"])).after(1.0))
 	engine.rules.append(queued)
 
@@ -2933,6 +2971,13 @@ func _test_queue() -> bool:
 	engine.fire(&"start", {"id": 3})
 	clock_tick.emit()
 	var ok := _check("queued triggers wait for the active run", received == [1])
+	var queue_trace_valid := queue_decisions.size() == 2
+	for decision: Dictionary in queue_decisions:
+		queue_trace_valid = queue_trace_valid and decision.get("decision") == "queue" \
+			and decision.get("order") == 1 and decision.get("trigger_rule_count") == 1 \
+			and decision.get("reentry_policy") == "Queue"
+	ok = _check("queued re-entry traces decisions and authored trigger order",
+		queue_trace_valid) and ok
 	clock_tick.emit()
 	ok = _check("queue keeps the original payload and trigger order", received == [1, 2]) and ok
 	clock_tick.emit()
@@ -3039,8 +3084,25 @@ func _test_queue() -> bool:
 	engine.fire(&"start", {"id": 9})
 	clock_tick.emit()
 	clock_tick.emit()
-	return _check("deactivation drops pending triggers and leaves later runs intact",
+	ok = _check("deactivation drops pending triggers and leaves later runs intact",
 		received == [1, 2, 3, 4, 8, 9]) and ok
+
+	var ignore_engine := RuleEngine.new(Blackboard.new(), {}, func(_seconds: float) -> Signal: return clock_tick)
+	var ignored_rule := Rule.new(&"ignored_reentry", &"ignore_start")
+	ignored_rule.steps.append(Step.new(func(_context: Dictionary) -> void: pass).after(1.0))
+	ignore_engine.rules.append(ignored_rule)
+	var ignore_decision: Dictionary = {}
+	ignore_engine.trace_event.connect(func(entry: Dictionary) -> void:
+		if entry.get("kind") == "reentry_decision":
+			ignore_decision = entry.duplicate(true))
+	ignore_engine.fire(&"ignore_start")
+	await process_frame
+	ignore_engine.fire(&"ignore_start")
+	var ignored_and_traced: bool = ignore_decision.get("decision") == "ignore" \
+		and ignore_decision.get("reentry_policy") == "Ignore"
+	ignore_engine.cancel_all()
+	ok = _check("ignored re-entry is visible in the live trace", ignored_and_traced) and ok
+	return ok
 
 func _test_conditional_groups() -> bool:
 	var bb := Blackboard.new()

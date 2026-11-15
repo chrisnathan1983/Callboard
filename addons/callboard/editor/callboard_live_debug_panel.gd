@@ -190,8 +190,10 @@ func _trace_color(kind: String) -> Color:
 			return Style.RELAY
 		"rule_completed":
 			return Style.SUCCESS
-		"rule_cancelled":
+		"rule_cancelled", "rule_rejected":
 			return Style.ERROR
+		"reentry_decision":
+			return Style.WARNING
 		_:
 			return Style.MUTED
 
@@ -226,6 +228,11 @@ func _format_trace(entry: Dictionary) -> String:
 		label += " - " + event
 	elif not rule.is_empty():
 		label += " - " + rule
+		if entry.has("order") and entry.has("trigger_rule_count"):
+			label += " - order %d/%d" % [entry["order"], entry["trigger_rule_count"]]
+		if entry.get("one_shot", false):
+			label += " - latch %s=%s" % [entry.get("latch_key", ""),
+				"set" if entry.get("latch_set", false) else "clear"]
 		if step > 0:
 			label += " - step %d" % step
 		if not verb.is_empty():

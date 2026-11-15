@@ -466,13 +466,15 @@ Declare a Boolean Blackboard key `door_open` and assign a typed `Node3D` propert
 | `wait_tracked(seconds, rule_id, label)` | Use the configured clock and surface the wait in the live debugger. Returns the wait signal. |
 | `track_signal(signal_to_track, rule_id, label, seconds = -1.0)` | Show a pending operation until its signal fires. A negative duration means the remaining time is unknown. |
 | `active_snapshot()`, `pending_snapshot()` | Read active rules and queued counts, or pending waits and their remaining times. |
-| `trace_event(entry)` | Observe lifecycle events. Entries include `time_ms`, `kind`, `rule`, `event`, `step`, `verb`, and `detail`. |
+| `trace_event(entry)` | Observe lifecycle events. Entries include `time_ms`, `kind`, `rule`, `event`, `step`, `verb`, and `detail`. Rule starts and rejections also include authored `order` and `trigger_rule_count`; rejection records include reason, guard observations, one-shot latch state, and re-entry policy. `reentry_decision` records Ignore, Restart, Queue, or a dropped full-queue attempt. |
 | `pending_changed(entries)`, `run_cancelled(rule_id)`, `all_cancelled` | Observe wait changes and cancellation. |
 | `dispatch_limit_reached(limit, event_chain, rule_id)` | Observe recursion, per-frame work, or pending-queue limits. The engine also reports the limit with the event chain. |
 
 The engine stops event ancestry deeper than 64, caps pending work per rule at 128, and allows 256 rule dispatches per engine per process frame. Excess queue entries are dropped; later triggers may still be accepted after the queue drains. The limit signal and error include the event chain to help locate cycles.
 
-The rule engine dispatches matching rules in authored order. A rule's steps run in order and await their completion when applicable. A rule's own relay fires after its final step completes. Different rules can overlap. The re-entry policy governs repeated triggers of the same rule.
+The rule engine dispatches matching rules in authored order. A rule's steps run in order and await their completion when applicable. A rule's own relay fires after its final step completes. Different rules can overlap. The re-entry policy governs repeated triggers of the same rule. The live DEBUG trace explains failed required, forbidden, and initial Cancel If guards with the observed Blackboard or payload values; it also shows one-shot latch state, policy decisions, and each rule's order among listeners for the Call.
+
+In the live **Calls & relays** panel, **Test payload** appears for Calls with declared payload fields. Each editor matches the declared Boolean, integer, float, or String type. Uncheck a field to omit it from the test Call.
 
 Graph compilation errors block editor saves and runtime `activate()`. `Stage.check()` reports advisory findings such as relay cycles and shared-trigger overlap. In a debug build, `activate()` logs those findings as warnings and still dispatches `arrive` if compilation succeeded. A direct call to `fire()` dispatches without running `activate()`.
 

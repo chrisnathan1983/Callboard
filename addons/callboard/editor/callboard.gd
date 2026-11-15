@@ -721,10 +721,10 @@ func _setup_connections_panel() -> void:
 	_connections_panel = _connections_ui.setup(self, _button("+ Call", _open_call_dialog),
 		_layout_overlays, rename_connection, delete_connection, _show_connection_error, fire_live_call)
 
-func fire_live_call(call_id: String) -> void:
+func fire_live_call(call_id: String, payload: Dictionary = {}) -> void:
 	if _live == null or not is_instance_valid(_live) or _live.engine == null:
 		return
-	_live.fire(StringName(call_id))
+	_live.fire(StringName(call_id), payload)
 
 func _refresh_connections(preferred := "") -> void:
 	_connections_ui.refresh(_data, _editable, preferred)

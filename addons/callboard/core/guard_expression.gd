@@ -228,6 +228,76 @@ static func evaluate(blackboard: Blackboard, expression: StringName,
 	var parsed := parse(String(expression))
 	return _evaluate_node(blackboard, parsed, payload, event_id, schema) if parsed.get("ok", false) else false
 
+## Evaluate a guard and report the observed values for each leaf term.
+static func diagnose(blackboard: Blackboard, expression: StringName,
+		payload: Dictionary = {}, event_id: StringName = &"", schema: Dictionary = {}) -> Dictionary:
+	var parsed := parse(String(expression))
+	if not parsed.get("ok", false):
+		return {"passed": false, "observations": [{"expression": String(expression),
+			"passed": false, "detail": "invalid guard expression"}]}
+	var observations: Array[Dictionary] = []
+	_collect_diagnostics(blackboard, parsed, payload, event_id, schema, observations)
+	return {"passed": _evaluate_node(blackboard, parsed, payload, event_id, schema),
+		"observations": observations}
+
+static func _collect_diagnostics(blackboard: Blackboard, node: Dictionary,
+		payload: Dictionary, event_id: StringName, schema: Dictionary,
+		observations: Array[Dictionary]) -> void:
+	if node.get("kind", "term") in ["and", "or"]:
+		for child: Dictionary in node["children"]:
+			_collect_diagnostics(blackboard, child, payload, event_id, schema, observations)
+		return
+	var expression := _format_guard_term(node)
+	observations.append({"expression": expression,
+		"passed": _evaluate_node(blackboard, node, payload, event_id, schema),
+		"detail": _describe_guard_term(blackboard, node, payload)})
+
+static func _format_guard_term(node: Dictionary) -> String:
+	var key := String(node.get("key", &""))
+	var left := "payload." + key if node.get("payload", false) else key
+	if not String(node.get("presence", "")).is_empty():
+		return "%s(payload.%s)" % [node["presence"], key]
+	if not node.get("comparison", false):
+		return left
+	var right := String(node.get("literal", str(node.get("value", ""))))
+	if node.has("rhs_key"):
+		right = ("payload." if node.get("rhs_payload", false) else "") + String(node["rhs_key"])
+	return "%s %s %s" % [left, node.get("operator", ""), right]
+
+static func _describe_guard_term(blackboard: Blackboard, node: Dictionary,
+		payload: Dictionary) -> String:
+	var key: StringName = node.get("key", &"")
+	if not String(node.get("presence", "")).is_empty():
+		var present := payload.has(key) or payload.has(String(key))
+		return "payload.%s is %s" % [key, "present" if present else "missing"]
+	var left: Variant = "<missing>"
+	if node.get("payload", false):
+		if payload.has(key):
+			left = payload[key]
+		elif payload.has(String(key)):
+			left = payload[String(key)]
+	elif blackboard.has(key):
+		left = blackboard.get_var(key)
+	if not node.get("comparison", false):
+		return "%s observed %s" % [String(key), str(left)]
+	var right: Variant = node.get("value", "<missing>")
+	var right_label := "expected"
+	if node.has("rhs_key"):
+		var rhs_key: StringName = node["rhs_key"]
+		right_label = ("payload." if node.get("rhs_payload", false) else "") + String(rhs_key)
+		if node.get("rhs_payload", false):
+			if payload.has(rhs_key):
+				right = payload[rhs_key]
+			elif payload.has(String(rhs_key)):
+				right = payload[String(rhs_key)]
+			else:
+				right = "<missing>"
+		elif blackboard.has(rhs_key):
+			right = blackboard.get_var(rhs_key)
+		else:
+			right = "<missing>"
+	return "%s observed %s; %s %s" % [String(key), str(left), right_label, str(right)]
+
 static func _evaluate_node(blackboard: Blackboard, node: Dictionary, payload: Dictionary,
 		event_id: StringName, schema: Dictionary) -> bool:
 	var kind: String = node.get("kind", "term")

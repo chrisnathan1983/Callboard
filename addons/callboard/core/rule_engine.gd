@@ -115,26 +115,39 @@ func _fire(event: StringName, payload: Dictionary, parent_context: Dictionary) -
 	_event_received.emit(event, payload)
 	_emit_trace("event_fired", &"", event)
 	_event_context_stack.pop_back()
+	var matching_rule_count := 0
+	for candidate: Rule in rules:
+		if candidate.trigger == event:
+			matching_rule_count += 1
+	var rule_order := 0
 	for r in rules:
 		if gen != _gen:
 			return
-		if r.trigger == event and passes(r, payload, event):
-			if not _consume_dispatch_budget(context):
-				return
-			_dispatch(r, event, payload.duplicate(true), gen, depth, context)
+		if r.trigger != event:
+			continue
+		rule_order += 1
+		if not _evaluate_rule(r, payload, event, rule_order, matching_rule_count):
+			continue
+		if not _consume_dispatch_budget(context):
+			return
+		_dispatch(r, event, payload.duplicate(true), gen, depth, context,
+			rule_order, matching_rule_count)
 
 func _dispatch(r: Rule, event: StringName, payload: Dictionary, gen: int, depth: int,
-		context: Dictionary) -> void:
+		context: Dictionary, rule_order: int, matching_rule_count: int) -> void:
 	if _active.has(r):
 		var active: Dictionary = _active[r]
 		match r.reentry:
 			Rule.ReentryPolicy.RESTART:
+				_trace_reentry_decision(r, event, rule_order, matching_rule_count,
+					"restart", "active run cancelled and latest Call will replace it")
 				active["restart"] = true
 				var current_run: Dictionary = active.get("run", {})
 				current_run["cancelled"] = true
 				var pending: Array = active["pending"]
 				pending.clear()
-				pending.append({"payload": payload.duplicate(true), "depth": depth, "context": context})
+				pending.append({"payload": payload.duplicate(true), "depth": depth,
+					"context": context, "event": event})
 				active["pending"] = pending
 				_active[r] = active
 				# The suspended dispatch can resume synchronously when cancelled is
@@ -146,28 +159,40 @@ func _dispatch(r: Rule, event: StringName, payload: Dictionary, gen: int, depth:
 			Rule.ReentryPolicy.QUEUE:
 				var pending: Array = active["pending"]
 				if pending.size() >= MAX_PENDING_PER_RULE:
+					_trace_reentry_decision(r, event, rule_order, matching_rule_count,
+						"drop", "pending queue is full (%d)" % MAX_PENDING_PER_RULE)
 					_report_dispatch_limit("pending queue", context.get("path", []), r.id)
 					return
-				pending.append({"payload": payload.duplicate(true), "depth": depth, "context": context})
+				pending.append({"payload": payload.duplicate(true), "depth": depth,
+					"context": context, "event": event})
 				active["pending"] = pending
 				_active[r] = active
+				_trace_reentry_decision(r, event, rule_order, matching_rule_count,
+					"queue", "queued Call %d of %d" % [pending.size(), MAX_PENDING_PER_RULE])
+			Rule.ReentryPolicy.IGNORE:
+				_trace_reentry_decision(r, event, rule_order, matching_rule_count,
+					"ignore", "active run kept; new Call discarded")
 		return
 
 	var active := {"pending": [], "restart": false}
 	_active[r] = active
-	await _run(r, event, payload, gen, depth, context)
+	await _run(r, event, payload, gen, depth, context, rule_order, matching_rule_count)
 	while gen == _gen and is_same(_active.get(r), active) and not active["pending"].is_empty():
 		var next: Dictionary = active["pending"].pop_front()
 		active["restart"] = false
 		active.erase("run")
 		var next_payload: Dictionary = next["payload"]
-		if passes(r, next_payload, event) and alive(r, gen, next_payload):
-			await _run(r, event, next_payload, gen, int(next["depth"]), next["context"])
+		var next_event: StringName = next.get("event", event)
+		var queued_order := _rule_order(r, next_event)
+		var queued_total := _matching_rule_count(next_event)
+		if _evaluate_rule(r, next_payload, next_event, queued_order, queued_total) and alive(r, gen, next_payload):
+			await _run(r, next_event, next_payload, gen, int(next["depth"]), next["context"],
+				queued_order, queued_total)
 	if gen == _gen and is_same(_active.get(r), active):
 		_active.erase(r)
 
 func _run(rule: Rule, event: StringName, payload: Dictionary, generation: int, depth: int,
-		context: Dictionary) -> void:
+		context: Dictionary, rule_order: int, matching_rule_count: int) -> void:
 	if generation != _gen or rule.cancel_if.any(func(guard: StringName) -> bool:
 		return GuardExpression.evaluate(bb, guard, payload, event, _payload_schema())):
 		return
@@ -185,7 +210,11 @@ func _run(rule: Rule, event: StringName, payload: Dictionary, generation: int, d
 	if rule.one_shot:
 		fired[rule.latch_key()] = true
 	_event_context_stack.append(context)
-	_emit_trace("rule_started", rule.id, event)
+	_emit_trace("rule_started", rule.id, event, -1, null, "",
+		{"order": rule_order, "trigger_rule_count": matching_rule_count,
+			"latch_key": String(rule.latch_key()), "latch_set": rule.one_shot and fired.has(rule.latch_key()),
+			"one_shot": rule.one_shot,
+			"reentry_policy": _reentry_policy_name(rule.reentry)})
 	rule_fired.emit(rule.id, event)
 	_event_context_stack.pop_back()
 	if not alive(rule, generation):
@@ -651,8 +680,8 @@ func _finish_tracked_signal(id: int) -> void:
 		pending_changed.emit(pending_snapshot())
 
 func _emit_trace(kind: String, rule_id: StringName, event: StringName,
-		step_index := -1, step: Step = null, detail := "") -> void:
-	trace_event.emit({
+		step_index := -1, step: Step = null, detail := "", metadata: Dictionary = {}) -> void:
+	var entry := {
 		"time_ms": Time.get_ticks_msec(),
 		"kind": kind,
 		"rule": String(rule_id),
@@ -662,7 +691,9 @@ func _emit_trace(kind: String, rule_id: StringName, event: StringName,
 		"relay": String(step.emits) if step != null else "",
 		"relay_argument": step.emit_arg if step != null else -1,
 		"detail": detail,
-	})
+	}
+	entry.merge(metadata, true)
+	trace_event.emit(entry)
 
 ## Record the result of a store-mediated event send on the source Stage's trace.
 func trace_cross_stage_dispatch(event_id: StringName, rule_id: StringName,
@@ -689,6 +720,94 @@ func _report_dispatch_limit(limit: String, path: Array, rule_id: StringName = &"
 	dispatch_limit_reached.emit(limit, chain, rule_id)
 	var suffix := " while dispatching rule '%s'" % rule_id if not rule_id.is_empty() else ""
 	push_error("Callboard stopped %s%s. Event chain: %s" % [limit, suffix, " -> ".join(chain)])
+
+func _evaluate_rule(r: Rule, payload: Dictionary, event: StringName,
+		rule_order: int, matching_rule_count: int) -> bool:
+	var latch_key := r.latch_key()
+	var latch_set := r.one_shot and fired.has(latch_key)
+	if latch_set:
+		_trace_rule_rejection(r, event, rule_order, matching_rule_count,
+			"one-shot latch is already set", "", [])
+		return false
+	for guard: StringName in r.requires:
+		var diagnostic := GuardExpression.diagnose(bb, guard, payload, event, _payload_schema())
+		if not diagnostic["passed"]:
+			_trace_rule_rejection(r, event, rule_order, matching_rule_count,
+				"required guard failed", String(guard), diagnostic["observations"])
+			return false
+	for guard: StringName in r.forbids:
+		var diagnostic := GuardExpression.diagnose(bb, guard, payload, event, _payload_schema())
+		if diagnostic["passed"]:
+			_trace_rule_rejection(r, event, rule_order, matching_rule_count,
+				"forbidden guard matched", String(guard), diagnostic["observations"])
+			return false
+	for guard: StringName in r.cancel_if:
+		var diagnostic := GuardExpression.diagnose(bb, guard, payload, event, _payload_schema())
+		if diagnostic["passed"]:
+			_trace_rule_rejection(r, event, rule_order, matching_rule_count,
+				"Cancel If guard matched before start", String(guard), diagnostic["observations"])
+			return false
+	return true
+
+func _trace_rule_rejection(r: Rule, event: StringName, rule_order: int,
+		matching_rule_count: int, reason: String, guard: String,
+		observations: Array) -> void:
+	var detail := reason
+	if not guard.is_empty():
+		detail += ": %s" % guard
+	var observed: PackedStringArray = []
+	for item: Dictionary in observations:
+		observed.append("%s [%s]" % [item.get("detail", ""),
+			"pass" if item.get("passed", false) else "fail"])
+	if not observed.is_empty():
+		detail += " (%s)" % "; ".join(observed)
+	_emit_trace("rule_rejected", r.id, event, -1, null, detail, {
+		"order": rule_order,
+		"trigger_rule_count": matching_rule_count,
+		"reason": reason,
+		"guard": guard,
+		"observations": observations.duplicate(true),
+		"latch_key": String(r.latch_key()),
+		"latch_set": r.one_shot and fired.has(r.latch_key()),
+		"one_shot": r.one_shot,
+		"reentry_policy": _reentry_policy_name(r.reentry),
+	})
+
+func _trace_reentry_decision(r: Rule, event: StringName, rule_order: int,
+		matching_rule_count: int, decision: String, detail: String) -> void:
+	_emit_trace("reentry_decision", r.id, event, -1, null,
+		"%s: %s" % [decision, detail], {
+			"order": rule_order,
+			"trigger_rule_count": matching_rule_count,
+			"decision": decision,
+			"latch_key": String(r.latch_key()),
+			"latch_set": r.one_shot and fired.has(r.latch_key()),
+			"one_shot": r.one_shot,
+			"reentry_policy": _reentry_policy_name(r.reentry),
+		})
+
+func _reentry_policy_name(policy: int) -> String:
+	match policy:
+		Rule.ReentryPolicy.RESTART: return "Restart"
+		Rule.ReentryPolicy.QUEUE: return "Queue"
+		_: return "Ignore"
+
+func _matching_rule_count(event: StringName) -> int:
+	var count := 0
+	for candidate: Rule in rules:
+		if candidate.trigger == event:
+			count += 1
+	return count
+
+func _rule_order(rule: Rule, event: StringName) -> int:
+	var order := 0
+	for candidate: Rule in rules:
+		if candidate.trigger != event:
+			continue
+		order += 1
+		if candidate == rule:
+			return order
+	return 0
 
 func passes(r: Rule, payload: Dictionary = {}, event: StringName = &"") -> bool:
 	if r.one_shot and fired.has(r.latch_key()): return false

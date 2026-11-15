@@ -198,8 +198,9 @@ The first five items retain the high priority assigned in `TODO.md`.
 
 - [ ] **Explain why a rule did not run, and supply typed test payloads.** See [RuleEngine](addons/callboard/core/rule_engine.gd), [Callboard](addons/callboard/editor/callboard.gd), and [RuleInspector](addons/callboard/editor/rule_inspector.gd).
   - [x] Live traces cover fired events, starts, waits, steps, and cancellation. The inspector can edit payload field declarations.
-  - [ ] Report failed guards with observed values, one-shot latch state, and Ignore/Restart/Queue decisions. Make order and rejection visible when several rules share a trigger.
-  - [ ] Build a typed payload form from the trigger schema for live Call testing, with support for omitted fields. The current tester calls `fire(call_id)` with the default empty payload.
+  - [x] Report failed required, forbidden, and initial Cancel If guards with observed values, one-shot latch state, and Ignore/Restart/Queue decisions. Include authored rule order and rejection in the live trace when several rules share a trigger.
+  - [x] Build a typed payload form from each Call's declared trigger schema for live testing. Permit individual fields to be omitted; preserve empty-payload testing for Calls without a declared schema.
+  - [ ] Run the unit and editor smoke suites with these additions and confirm the emitted trace metadata and payload-form interaction.
 
 - [ ] **Expose and edit same-trigger rule order.** See [RuleEngine](addons/callboard/core/rule_engine.gd) and [RuleInspector](addons/callboard/editor/rule_inspector.gd).
   - [x] Rules are evaluated in authored array order. A synchronous write from an earlier rule can affect a later guard. The inspector can already reorder steps within a rule.
