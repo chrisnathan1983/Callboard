@@ -1,0 +1,8 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://addons/callboard/core/stage.gd" id="1_stage"]
+[ext_resource type="Resource" path="res://demo/stages/city_records/city_records.tres" id="2_definition"]
+
+[node name="CityRecords" type="Node3D"]
+script = ExtResource("1_stage")
+definition = ExtResource("2_definition")

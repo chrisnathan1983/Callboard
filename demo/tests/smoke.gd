@@ -448,6 +448,7 @@ func _test_game_scene() -> bool:
 	ok = (await _test_opening_camera(game)) and ok
 	ok = (await _test_touch_controls(game)) and ok
 	ok = (await _test_demo_paths(game)) and ok
+	ok = (await _test_dispatch_desk(game)) and ok
 	game.queue_free()
 	await process_frame
 	return ok
@@ -478,7 +479,7 @@ func _test_opening_camera(game: GameManager) -> bool:
 		and not player.interact()["accepted"] and not game.stage.is_set(&"permit_stamped")) and ok
 	player.global_position = spawn
 
-	var finished := await _wait_for_camera_state(func() -> bool:
+	var finished := await _wait_for_state(func() -> bool:
 		return world.controls.camera_request() == null and not player.input_locked)
 	ok = _check("the opening returns to the gameplay camera before giving back control",
 		finished and camera.global_transform.is_equal_approx(world._gameplay_pose)
@@ -705,7 +706,7 @@ func _test_demo_paths(game: GameManager) -> bool:
 	ok = _check("delivering the bell focuses the prop while leaving gameplay input available",
 		closeup != null and closeup.target == stage.bell and not player.input_locked
 		and game.hud._play_controls.visible) and ok
-	var shaking := await _wait_for_camera_state(func() -> bool:
+	var shaking := await _wait_for_state(func() -> bool:
 		return not is_zero_approx(camera.h_offset) or not is_zero_approx(camera.v_offset))
 	ok = _check("the bell close-up moves the camera and applies a shake offset",
 		shaking and not camera.global_transform.is_equal_approx(gameplay_pose)) and ok
@@ -720,16 +721,16 @@ func _test_demo_paths(game: GameManager) -> bool:
 		and stage.has_fired(&"z1_office_complete")) and ok
 	var restored_camera := func() -> bool:
 		return camera.global_transform.is_equal_approx(gameplay_pose) and is_equal_approx(camera.size, gameplay_size)
-	var recovered := await _wait_for_camera_state(restored_camera)
+	var recovered := await _wait_for_state(restored_camera)
 	ok = _check("the interrupted shot blends back to the gameplay pose", recovered) and ok
 	# Replay the authored receipt without changing saved delivery state.
 	stage.fire(&"relay:gift_delivered", {"gift_id": "bell"})
 	var reception := world.get_node("ReceptionShot") as Marker3D
-	var framed := await _wait_for_camera_state(func() -> bool:
+	var framed := await _wait_for_state(func() -> bool:
 		return camera.global_transform.is_equal_approx(reception.global_transform))
 	ok = _check("the receipt reaches the named reception shot and clears shake",
 		framed and world.controls.shake_request() == null and is_equal_approx(camera.size, 11.0)) and ok
-	var returned := await _wait_for_camera_state(restored_camera)
+	var returned := await _wait_for_state(restored_camera)
 	ok = _check("the complete receipt returns to gameplay framing",
 		returned and world.controls.camera_request() == null) and ok
 	game.clear_stage(true)
@@ -748,7 +749,79 @@ func _test_demo_paths(game: GameManager) -> bool:
 		stage.reward.visible and stage.has_fired(&"z1_delivered") and game.score == 200) and ok
 	return ok
 
-func _wait_for_camera_state(matches: Callable) -> bool:
+func _test_dispatch_desk(game: GameManager) -> bool:
+	game.clear_stage(true)
+	var stage := game.stage as Stage01
+	var records := game.get_node("CityRecords") as Stage
+	var desk := stage.get_node("DispatchArea") as TriggerArea
+	var player := game.get_node("WorldManager/Player") as Player
+	player.global_position = desk.global_position
+	await physics_frame
+	await physics_frame
+	var acknowledgments: Array[Dictionary] = []
+	stage.gameplay_request_finished.connect(func(_id: int, event: StringName,
+			outcome: StringName, data: Dictionary) -> void:
+		if event == &"stamp_dispatch" and outcome == &"accepted":
+			acknowledgments.append(data))
+
+	var original_locale := TranslationServer.get_locale()
+	TranslationServer.set_locale("fr")
+	var ok := _check("the dispatch desk resolves the French prompt from the demo catalog",
+		desk.resolve_prompt(player)["text"] == "Préparer un envoi")
+	TranslationServer.set_locale("en")
+	player.interaction_resolver.refresh()
+	ok = _check("the courier can select the dispatch desk and see its fallback prompt",
+		player.interaction_resolver.selected_trigger == desk
+		and desk.resolve_prompt(player)["text"] == "Prepare dispatch") and ok
+	player.interact()
+	ok = _check("the first press arms the Call wait and lights the beacon",
+		stage.get_var(&"dispatch_state") == &"awaiting" and stage.dispatch_beacon.light_energy > 1.0
+		and desk.resolve_prompt(null)["text"] == "Confirm dispatch") and ok
+	player.interact()
+	var launched := await _wait_for_state(func() -> bool: return stage.dispatch_parcel.visible)
+	ok = _check("confirmation sends a typed cross-Stage receipt and receives the host stamp",
+		launched and stage.get_var(&"dispatch_route") == "standard"
+		and records.is_set(&"filed_dispatch") and acknowledgments.size() == 1
+		and acknowledgments[0].get("stamp") == "OUTBOUND"
+		and desk.resolve_prompt(null)["text"] == "Cancel dispatch") and ok
+	player.interact()
+	ok = _check("cancelling during the parallel launch hides the parcel and clears the prompt",
+		not stage.dispatch_parcel.visible and stage.get_var(&"dispatch_state") == &"idle"
+		and stage.get_var(&"dispatch_count") == 0) and ok
+	await process_frame
+
+	stage.write_var(&"permit_stamped", true)
+	stage.write_var(&"lamp_on", false)
+	desk.interact()
+	desk.interact()
+	var filed := await _wait_for_state(func() -> bool: return stage.get_var(&"dispatch_count") == 1)
+	ok = _check("the express branch finishes the path and counts exactly one completed dispatch",
+		filed and stage.get_var(&"dispatch_route") == "express"
+		and stage.dispatch_parcel.global_position.is_equal_approx(
+			stage.dispatch_path.to_global(stage.dispatch_path.curve.get_point_position(2)))
+		and not stage.dispatch_parcel.visible and stage.get_var(&"dispatch_state") == &"idle") and ok
+	game.clear_stage(false)
+	ok = _check("reload retains the session count and resets dispatch desk state",
+		game.stage.get_var(&"dispatch_count") == 1 and game.stage.get_var(&"dispatch_state") == &"idle") and ok
+	game.switch_office()
+	stage = game.stage as Stage01
+	ok = _check("the annex shares the session count but has its own dispatch desk",
+		stage.get_var(&"dispatch_count") == 1 and stage.get_var(&"dispatch_state") == &"idle") and ok
+
+	records.deactivate()
+	stage.fire(&"dispatch:desk")
+	stage.fire(&"dispatch:desk")
+	var expired := await _wait_for_state(func() -> bool: return stage.get_var(&"dispatch_state") == &"idle")
+	ok = _check("the desk recovers when the dormant Records Stage misses a live request",
+		expired and stage.get_var(&"dispatch_route") == "" and stage.get_var(&"dispatch_count") == 1) and ok
+	records.activate()
+	game.clear_stage(true)
+	ok = _check("Start fresh resets the session dispatch count and filing objective",
+		game.stage.get_var(&"dispatch_count") == 0 and not records.is_set(&"filed_dispatch")) and ok
+	TranslationServer.set_locale(original_locale)
+	return ok
+
+func _wait_for_state(matches: Callable) -> bool:
 	var deadline := Time.get_ticks_msec() + 2500
 	while not bool(matches.call()) and Time.get_ticks_msec() < deadline:
 		await process_frame

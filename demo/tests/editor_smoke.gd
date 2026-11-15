@@ -27,12 +27,19 @@ func _test_authored_resource_graph() -> bool:
 	var definition := load(DEFINITION_PATH) as StageDefinition
 	var data := RuleGraphReader.inspect_definition(DEFINITION_PATH)
 	ok = _check("resource stores events, variables, rules and groups",
-		definition.external_calls.has("file:permit") and definition.variables.size() == 8
+		definition.external_calls.has("file:permit") and definition.external_calls.has("dispatch:desk")
+		and definition.variables.any(func(variable: VariableData) -> bool: return variable.key == &"dispatch_count")
 		and not definition.rules.is_empty() and definition.rules.size() == data.rules.size()
-		and definition.groups.size() == 4 and definition.variables[0] is VariableData
+		and definition.groups.size() == 5 and definition.variables[0] is VariableData
 		and definition.rules[0] is RuleData and definition.rules[0].steps[0] is StepData
 		and definition.groups[0] is GroupData) and ok
 	ok = _check("reader: compiles with no problems", data.errors.is_empty() and data.warnings.is_empty()) and ok
+	var records := RuleGraphReader.inspect_definition_resources(
+		"res://demo/stages/city_records/city_records.tres")
+	ok = _check("City Records validates its receipt and explains the objective's host dependency",
+		records.errors.is_empty() and records.warnings.size() == 1
+		and "file_first_dispatch" in records.warnings[0]
+		and "records:file" in records.warnings[0] and "emit_cross_stage" in records.warnings[0]) and ok
 	ok = _check("reader: every rule has a saved position", data.rules.all(func(rule: RuleData) -> bool: return rule.has_pos)) and ok
 	ok = _check("reader: step text keeps source expressions", ExprText.step_text(data.rules[1].steps[1].to_dictionary()) == 'light(lamp, true, 3.5, &"lamp_on").after(0.25)') and ok
 	ok = _check("reader: step emits come from runtime Steps", data.relay_for(data.rules[0].steps[0]) == "standoff_tick") and ok
@@ -96,8 +103,9 @@ func _test_authored_resource_graph() -> bool:
 	gv._rule_nodes["z1_bark"].position_offset = Vector2(999, 777)
 	gv.auto_arrange()
 	var arranged_pos: Vector2 = gv._rule_nodes["z1_bark"].position_offset
-	ok = _check("the Arrange command explicitly repositions saved rules",
-		arranged_pos != Vector2(999, 777)) and ok
+	ok = _check("Arrange repositions saved rules and the built-in Blackboard Change card",
+		arranged_pos != Vector2(999, 777)
+		and gv._event_nodes["on_change"].position_offset != definition.call_positions["on_change"]) and ok
 	gv.pulse("z1_bark")
 	gv.queue_free()
 

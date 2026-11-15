@@ -85,6 +85,10 @@ strike_show={
 
 pointing/emulate_touch_from_mouse=true
 
+[internationalization]
+
+locale/translations=PackedStringArray("res://demo/stages/stage_01/dispatch.fr.po")
+
 [layer_names]
 
 3d_physics/layer_1="World"

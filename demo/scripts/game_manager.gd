@@ -3,6 +3,8 @@ class_name GameManager extends Node3D
 
 const MAIN_OFFICE := &"city_hall"
 const ANNEX := &"annex"
+const RECORDS := &"city_records"
+const RECORDS_SCENE := preload("res://demo/stages/city_records/city_records.tscn")
 
 @export_file("*.tscn") var stage_scene_path: String
 
@@ -30,6 +32,9 @@ func _ready() -> void:
 	if _stage_scene == null:
 		hud.set_stage_loading("City Hall could not be loaded.")
 		return
+	var records := state_store.load_stage(RECORDS_SCENE, RECORDS, self)
+	if records != null:
+		records.activate()
 	_open_office()
 	# The opening is a separate authored Call so office swaps and reloads
 	# can interrupt it without starting it again.
@@ -53,6 +58,7 @@ func _get_office(id: StringName) -> Stage:
 	loaded.control_adapter = _world.controls
 	loaded.scored.connect(_on_scored)
 	loaded.gameplay_event.connect(_on_gameplay_event)
+	loaded.gameplay_request.connect(_on_gameplay_request.bind(loaded))
 	return loaded
 
 func _open_office() -> void:
@@ -89,6 +95,7 @@ func clear_stage(reset: bool) -> void:
 		_offices.clear()
 		state_store.stage_states.clear()
 		state_store.shared_values.clear()
+		state_store.reset_session()
 		score = 0
 	else:
 		_unload_current_office()
@@ -119,3 +126,9 @@ func _on_gameplay_event(event_id: StringName, arguments: Dictionary) -> void:
 	# the Stage. The graph can be validated without a Player in the preview.
 	if event_id == &"stun_courier":
 		_player.stun(float(arguments.get("seconds", 0.0)))
+
+func _on_gameplay_request(request_id: int, event_id: StringName, arguments: Dictionary,
+		requesting_stage: Stage) -> void:
+	if event_id == &"stamp_dispatch":
+		var desk: String = arguments.get("desk", "")
+		requesting_stage.respond_gameplay_request(request_id, desk == "outbound", {"stamp": desk.to_upper()})

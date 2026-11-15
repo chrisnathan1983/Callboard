@@ -4,6 +4,7 @@ extends EditorPlugin
 ## "Create New Stage..." entry under Project -> Tools.
 
 const MENU_ITEM := "Create New Stage..."
+const ICON_PATH := "res://addons/callboard/editor/callboard_icon.svg"
 const ExportPlugin := preload("res://addons/callboard/editor/export_plugin.gd")
 const TestRunnerPanelScript := preload("res://addons/callboard/editor/test_runner_panel.gd")
 const Settings := preload("res://addons/callboard/core/callboard_settings.gd")
@@ -18,6 +19,7 @@ var _stage_preview: Label
 var _stage_error: Label
 var _pending_navigate_path := ""
 var _export_plugin: EditorExportPlugin
+var _icon: Texture2D
 
 func _enter_tree() -> void:
 	Settings.register_project_settings()
@@ -69,7 +71,15 @@ func _get_plugin_name() -> String:
 	return "Callboard"
 
 func _get_plugin_icon() -> Texture2D:
-	return EditorInterface.get_editor_theme().get_icon("GraphEdit", "EditorIcons")
+	if _icon == null:
+		# Godot enables the plugin before importing textures in a fresh project.
+		var svg := FileAccess.get_file_as_string(ICON_PATH)
+		var image := Image.new()
+		if not svg.is_empty() and image.load_svg_from_string(svg, EditorInterface.get_editor_scale()) == OK:
+			_icon = ImageTexture.create_from_image(image)
+		else:
+			_icon = EditorInterface.get_editor_theme().get_icon("GraphEdit", "EditorIcons")
+	return _icon
 
 func _save_external_data() -> void:
 	if is_instance_valid(board) and board.is_dirty():

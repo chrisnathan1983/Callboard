@@ -1,0 +1,58 @@
+[gd_resource type="Resource" script_class="StageDefinition" format=3]
+
+[ext_resource type="Script" path="res://addons/callboard/core/stage_definition.gd" id="definition"]
+[ext_resource type="Script" path="res://addons/callboard/core/stage.gd" id="stage"]
+[ext_resource type="Script" path="res://addons/callboard/core/rule_data.gd" id="2_sw6iv"]
+[ext_resource type="Script" path="res://addons/callboard/core/step_data.gd" id="3_udjpu"]
+[ext_resource type="Script" path="res://addons/callboard/core/payload_field_data.gd" id="4_payload"]
+[ext_resource type="Script" path="res://addons/callboard/core/variable_data.gd" id="5_variable"]
+[ext_resource type="Script" path="res://addons/callboard/core/objective_data.gd" id="6_objective"]
+
+[sub_resource type="Resource" id="FiledService"]
+script = ExtResource("4_payload")
+event_id = &"records:file"
+key = &"service"
+type_name = "String"
+
+[sub_resource type="Resource" id="PostReceipt"]
+script = ExtResource("3_udjpu")
+verb = &"emit_cross_stage"
+args = PackedStringArray("&\"records:receipt\"", "{\"service\": callboard_payload(\"service\")}")
+
+[sub_resource type="Resource" id="HasFiledDispatch"]
+script = ExtResource("5_variable")
+key = &"filed_dispatch"
+scope = "session"
+note = "City Records has received at least one dispatch this session."
+
+[sub_resource type="Resource" id="FirstFiling"]
+script = ExtResource("6_objective")
+id = &"file_first_dispatch"
+condition = "filed_dispatch"
+
+[sub_resource type="Resource" id="MarkFiled"]
+script = ExtResource("3_udjpu")
+verb = &"set_var"
+args = PackedStringArray("&\"filed_dispatch\"", "true")
+
+[sub_resource type="Resource" id="file_dispatch"]
+script = ExtResource("2_sw6iv")
+id = &"file_dispatch"
+trigger = &"records:file"
+steps = Array[ExtResource("3_udjpu")]([SubResource("MarkFiled"), SubResource("PostReceipt")])
+pos = Vector2(160, 40)
+has_pos = true
+
+[resource]
+script = ExtResource("definition")
+stage_script = ExtResource("stage")
+preview_scene_path = "res://demo/stages/city_records/city_records.tscn"
+managed_lifecycle = true
+cross_stage_instance_ids = PackedStringArray("city_records")
+external_calls = PackedStringArray("arrive", "records:file")
+payload_fields = Array[ExtResource("4_payload")]([SubResource("FiledService")])
+call_positions = {"records:file": Vector2(-95, 44)}
+variables = [SubResource("HasFiledDispatch")]
+rules = [SubResource("file_dispatch")]
+objectives = Array[ExtResource("6_objective")]([SubResource("FirstFiling")])
+format_version = 4

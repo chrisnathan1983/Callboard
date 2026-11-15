@@ -229,9 +229,9 @@ func _process(_delta: float) -> void:
 		return
 	_score.text = "Score: %d" % manager.score
 	var stage := manager.stage
-	_objective_text.text = "%s  ·  Gifts %d/2  ·  Citywide %d\n%s" % [
+	_objective_text.text = "%s  ·  Gifts %d/2  ·  Citywide %d\n%s\nDispatch desk  ·  %d filed this session" % [
 		manager.office_name(), stage.get_var(&"gifts_delivered"),
-		stage.get_var(&"citywide_deliveries"), _objective(stage)]
+		stage.get_var(&"citywide_deliveries"), _objective(stage), stage.get_var(&"dispatch_count")]
 
 func _objective(stage: Stage) -> String:
 	if stage.get_var(&"gifts_delivered") >= 2:

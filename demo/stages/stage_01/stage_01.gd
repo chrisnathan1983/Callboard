@@ -38,11 +38,31 @@ class_name Stage01 extends Stage
 @onready var guard_animation: AnimationPlayer = $Guard/AnimationPlayer
 @onready var bell: MeshInstance3D = $Bell
 @onready var stamp_sound: AudioStreamPlayer3D = $PermitDesk/StampSound
+@onready var dispatch_desk: MeshInstance3D = $DispatchDesk
+@onready var dispatch_beacon: OmniLight3D = $DispatchDesk/Beacon
+@onready var dispatch_sound: AudioStreamPlayer3D = $DispatchDesk/DispatchSound
+@onready var dispatch_puff: CPUParticles3D = $DispatchDesk/LaunchPuff
+@onready var dispatch_parcel: MeshInstance3D = $DispatchParcel
+@onready var dispatch_path: Path3D = $DispatchPath
+@onready var dispatch_origin: Marker3D = $DispatchOrigin
 
 # Option 3: Declare a typed field here and assign it in _build_props(). These props
 # are absent from the scene tree in the editor, but available in the rule graph.
 var treat: MeshInstance3D
 var decoy: MeshInstance3D
+
+func _ready() -> void:
+	super()
+	if not Engine.is_editor_hint():
+		($DispatchArea as TriggerArea).set_prompt_provider(_dispatch_prompt)
+
+func _dispatch_prompt(_actor: Node, _context: Dictionary) -> Dictionary:
+	match get_var(&"dispatch_state"):
+		&"awaiting":
+			return {"translation_key": &"DEMO_DISPATCH_CONFIRM", "fallback": "Confirm dispatch"}
+		&"sending":
+			return {"translation_key": &"DEMO_DISPATCH_CANCEL", "fallback": "Cancel dispatch"}
+	return {}
 
 func _build_props() -> void:
 	# Stage calls this hook before compiling rule arguments, both during gameplay

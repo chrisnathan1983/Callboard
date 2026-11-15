@@ -1,0 +1,21 @@
+msgid ""
+msgstr ""
+"Language: fr\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+msgid "DEMO_DISPATCH_PREPARE"
+msgstr "Préparer un envoi"
+
+msgid "DEMO_DISPATCH_CONFIRM"
+msgstr "Confirmer l’envoi"
+
+msgid "DEMO_DISPATCH_CANCEL"
+msgstr "Annuler l’envoi"
+
+msgid "DEMO_DISPATCH_FILED"
+msgstr "Envoi {route} enregistré !"
+
+msgid "DEMO_DISPATCH_LOGGED"
+msgstr "Les archives ont enregistré l’envoi {route}."

@@ -752,7 +752,7 @@ func auto_arrange() -> void:
 		var node: GraphNode = _rule_nodes.get(rd.id)
 		if node:
 			node.position_offset = rd.pos
-	var call_positions := _event_positions(_last_data.external_calls, rules, {}, true)
+	var call_positions := _event_positions(_event_ids(_last_data.external_calls, rules), rules, {}, true)
 	for id in _event_nodes:
 		(_event_nodes[id] as GraphNode).position_offset = call_positions[id]
 	layout_changed.emit()
