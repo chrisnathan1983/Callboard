@@ -210,13 +210,13 @@ godot --headless --path . --script res://demo/tests/editor_smoke.gd
 godot --headless --path . --script res://demo/tests/smoke.gd
 ```
 
-[GitHub Actions](.github/workflows/test.yml) runs the four suites separately and checks that the demo runtime works without the editor and authoring model.
+[GitHub Actions](.github/workflows/test.yml) runs the four suites separately and checks that the demo runtime works without the editor and authoring model. The package integration job then installs the versioned ZIP into a blank project, checks editor plugin startup and teardown, and runs debug and release exports.
 
 The repository-only scenario harness in `addons/callboard/tests/scenario_runner.gd` can drive ordered Calls and explicit host callbacks against a built Stage. It supports lifecycle actions, Blackboard and latch assertions, trace and gameplay outcome checks, and rule/branch coverage. Supply `scenario_clock.gd` to advance engine waits deterministically. This virtual clock does not complete audio, animation, tween, physics, or host-owned timers; scenarios must emit or invoke those external results themselves. When attached to a Stage using the manual clock, the live debugger's **+1s test time** button advances it by one second.
 
 ### Releases and PR builds
 
-After all tests pass, a default-branch run publishes the addon ZIP to [GitHub Releases](https://github.com/chrisnathan1983/director_blackboard_demo_4/releases). To try a pull request, open its **Checks** tab, then follow **Package Callboard** to the workflow run and download the ZIP from the run summary or **Artifacts**.
+Set the GitHub Actions repository variable `CALLBOARD_PUBLISH_PACKAGES` to `true` to enable downloadable PR builds and default-branch releases. Both wait for the four test suites and the package integration check to pass. Download a pull request build from **Package Callboard** in its **Checks** tab, or download a default-branch build from [GitHub Releases](https://github.com/chrisnathan1983/Callboard/releases).
 
 Packages and releases use `0.YYMM.DD.increment`, with the date taken from the workflow creation time in UTC and `increment` taken from the GitHub Actions workflow run number. For example, run 42 created on November 14, 2026 produces `callboard-0.2611.14.42.zip` and, on the default branch, the tag `v0.2611.14.42`. Pull request packages use the same numeric format. Rerunning a workflow keeps its run number and version; a new run gets a higher increment. The packaged `plugin.cfg` carries the same version as the ZIP.
 
