@@ -181,7 +181,12 @@ The first five items retain the high priority assigned in `TODO.md`.
   - [x] Add configurable Tween transition/ease settings to movement and rotation, with finite duration and enum validation.
   - [x] Add `follow_path` over a `Path3D`'s baked `Curve3D`, including optional path orientation, immediate zero-duration placement, and validated curve/options.
   - [x] Add a typed generic `tween_property` for compatible interpolatable values and writable property paths, with optional waiting and validated settings.
-  - [ ] Add light color, energy, and flicker; `restart_particles`; audio stop, pitch, and bus; shader parameter changes; and animation speed and blend.
+  - [x] Add `set_light_color` and `set_light_energy` for validated Light3D state.
+  - [x] Add bounded `flicker_light`, restoring the original energy when complete and releasing rule waits safely on cancellation.
+  - [x] Add `restart_particles` for CPU/GPU emitters in 2D/3D.
+  - [x] Add `stop_audio`, `set_audio_pitch`, and `set_audio_bus`, including release of playback waits when stopped.
+  - [x] Add typed `ShaderMaterial` uniform changes with name/type validation.
+  - [x] Add custom blend/speed to `play_animation` and a `set_animation_speed` control.
   - [ ] Add spawn, despawn, and reparent with explicit ownership and transform preservation options. Validate targets and parameters and use §1 cancellation and wait semantics for verbs that can block.
 
 - [ ] **Support localization.** See [`StagingVerbs.say()`](addons/callboard/core/staging_verbs.gd) and [TriggerArea](addons/callboard/core/trigger_area.gd).

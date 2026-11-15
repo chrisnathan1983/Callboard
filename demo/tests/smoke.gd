@@ -5,6 +5,9 @@ const STAGE_SCENE_PATH := "res://demo/stages/stage_01/stage_01.tscn"
 const GAME_SCENE_PATH := "res://demo/game.tscn"
 
 func _initialize() -> void:
+	if "--startup-exit" in OS.get_cmdline_user_args():
+		await _test_startup_exit()
+		return
 	var packed := load(STAGE_SCENE_PATH) as PackedScene
 	var stage := packed.instantiate() as Stage01
 	var ok := _check("the packed scene owns its set, guard, and pad",
@@ -403,16 +406,33 @@ func _test_staging_verbs(stage: Stage) -> bool:
 	mesh.queue_free()
 	return ok
 
+func _test_startup_exit() -> void:
+	var main_scene_path := String(ProjectSettings.get_setting("application/run/main_scene"))
+	if not _check("the configured main scene loads", change_scene_to_file(main_scene_path) == OK):
+		quit(1)
+		return
+	await scene_changed
+	# Quit with the active scene still mounted to exercise normal shutdown.
+	# A fixed headless frame count could exit during the threaded scene read.
+	var ready := await _wait_for_active_stage(current_scene as GameManager)
+	quit(0 if _check("the demo activates its initial Stage before shutdown", ready) else 1)
+
+func _wait_for_active_stage(game: GameManager) -> bool:
+	if game == null:
+		return false
+	var deadline := Time.get_ticks_msec() + 5000
+	while (game.stage == null or not game.stage.is_active) and Time.get_ticks_msec() < deadline:
+		await process_frame
+	return game.stage != null and game.stage.is_active
+
 func _test_game_scene() -> bool:
 	var packed := load(GAME_SCENE_PATH) as PackedScene
 	if not _check("the main scene loads", packed != null):
 		return false
 	var game := packed.instantiate() as GameManager
 	root.add_child(game)
-	var deadline := Time.get_ticks_msec() + 5000
-	while game.stage == null and Time.get_ticks_msec() < deadline:
-		await process_frame
-	if not _check("the manager prewarms and activates the initial Stage", game.stage != null and game.stage.is_active):
+	var ready := await _wait_for_active_stage(game)
+	if not _check("the manager prewarms and activates the initial Stage", ready):
 		game.queue_free()
 		return false
 	var hud := game.get_node("HUD") as GameHud

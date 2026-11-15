@@ -600,6 +600,7 @@ func _initialize() -> void:
 	ok = _test_signal_callbacks_accept_arguments() and ok
 	ok = _test_snap_to_marker() and ok
 	ok = await _test_staging_tweens() and ok
+	ok = await _test_staging_controls() and ok
 	ok = await _test_playback_wait_exits() and ok
 	ok = await _test_cancel_if_interrupts_a_wait() and ok
 	ok = _test_shared_write_order() and ok
@@ -751,6 +752,80 @@ func _test_staging_tweens() -> bool:
 	ok = _check("zero-duration follow_path snaps to the path endpoint", immediate_path_snapped) and ok
 	ok = _check("immediate move invalidates a previous position tween", immediate_move_wins) and ok
 	return ok
+
+func _test_staging_controls() -> bool:
+	var stage := Stage.new()
+	root.add_child(stage)
+	var factory := StagingVerbs.new(StepContext.new(Blackboard.new(), null, stage, Callable()))
+	var light := OmniLight3D.new()
+	light.light_energy = 2.0
+	stage.add_child(light)
+	factory.set_light_color(light, Color(0.2, 0.4, 0.8)).fn.call({})
+	factory.set_light_energy(light, 1.5).fn.call({})
+	var color_set := light.light_color.is_equal_approx(Color(0.2, 0.4, 0.8))
+	var energy_set := is_equal_approx(light.light_energy, 1.5)
+	var flicker := factory.flicker_light(light, 0.1, 2.0, 0.02, 0.08)
+	await flicker.fn.call({})
+	var flicker_restored := is_equal_approx(light.light_energy, 1.5)
+	var particles := CPUParticles3D.new()
+	stage.add_child(particles)
+	factory.restart_particles(particles).fn.call({})
+	var particles_restarted := particles.emitting
+	var audio := AudioStreamPlayer.new()
+	stage.add_child(audio)
+	factory.set_audio_pitch(audio, 1.5).fn.call({})
+	factory.set_audio_bus(audio, &"Master").fn.call({})
+	factory.stop_audio(audio).fn.call({})
+	var audio_configured := is_equal_approx(audio.pitch_scale, 1.5) and audio.bus == "Master" and not audio.playing
+	var shader := Shader.new()
+	shader.code = "shader_type spatial; uniform float glow_strength = 0.0; void fragment() { ALBEDO = vec3(glow_strength); }"
+	var material := ShaderMaterial.new()
+	material.shader = shader
+	factory.set_shader_parameter(material, &"glow_strength", 0.75).fn.call({})
+	var shader_set := is_equal_approx(float(material.get_shader_parameter(&"glow_strength")), 0.75)
+	var animation_player := AnimationPlayer.new()
+	stage.add_child(animation_player)
+	var library := AnimationLibrary.new()
+	var animation := Animation.new()
+	animation.length = 0.2
+	library.add_animation(&"resolve", animation)
+	animation_player.add_animation_library(&"", library)
+	var play_animation := factory.play_animation(animation_player, &"resolve", false, 0.0, 0.05, 1.5)
+	play_animation.fn.call({})
+	factory.set_animation_speed(animation_player, 0.75).fn.call({})
+	var animation_controls := animation_player.assigned_animation == &"resolve" \
+		and is_equal_approx(animation_player.speed_scale, 0.75)
+	var valid_shader_step := factory.set_shader_parameter(material, &"glow_strength", 1.0)
+	valid_shader_step.verb = &"set_shader_parameter"
+	valid_shader_step.args = [material, &"glow_strength", 1.0]
+	var shader_validation := factory.validate_step(&"glow", valid_shader_step, factory.context.bb).is_empty()
+	var invalid_shader_step := Step.new()
+	invalid_shader_step.verb = &"set_shader_parameter"
+	invalid_shader_step.args = [material, &"missing_uniform", 1.0]
+	var shader_rejected := factory.validate_step(&"bad_glow", invalid_shader_step,
+		factory.context.bb).any(func(problem: String) -> bool: return "was not found" in problem)
+	var invalid_pitch_step := Step.new()
+	invalid_pitch_step.verb = &"set_audio_pitch"
+	invalid_pitch_step.args = [audio, 0.0]
+	var pitch_rejected := factory.validate_step(&"bad_pitch", invalid_pitch_step,
+		factory.context.bb).any(func(problem: String) -> bool: return "pitch must be finite" in problem)
+	var invalid_flicker_step := Step.new()
+	invalid_flicker_step.verb = &"flicker_light"
+	invalid_flicker_step.args = [light, 2.0, 1.0, 0.0, 0.0]
+	var flicker_rejected := factory.validate_step(&"bad_flicker", invalid_flicker_step,
+		factory.context.bb).size() >= 2
+	root.remove_child(stage)
+	stage.free()
+	var ok := _check("light color and energy setters validate and apply", color_set and energy_set)
+	ok = _check("light flicker restores its original energy after finishing", flicker_restored) and ok
+	ok = _check("restart_particles restarts a CPU particle emitter", particles_restarted) and ok
+	ok = _check("audio stop, pitch, and bus controls apply", audio_configured) and ok
+	ok = _check("shader parameter setter checks and applies declared uniforms",
+		shader_set and shader_validation and shader_rejected) and ok
+	ok = _check("audio pitch and flicker validators reject invalid settings",
+		pitch_rejected and flicker_rejected) and ok
+	return _check("AnimationPlayer speed, custom playback speed, and blend settings apply",
+		animation_controls) and ok
 
 func _test_signal_callbacks_accept_arguments() -> bool:
 	var engine := RuleEngine.new(Blackboard.new(), {}, Callable())

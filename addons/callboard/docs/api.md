@@ -355,6 +355,11 @@ The default factory is [`StagingVerbs`](../core/staging_verbs.gd), which inherit
 | Core | `repeat_emit(interval, tick = &"")` | Repeat at the interval until cancelled. If `tick` is supplied, emit `relay:<tick>` each interval; omit it for a relay-free ambient lifetime loop. |
 | Staging | `show_node(n, should_be_visible = true)` | Set a `Node3D`'s visibility. |
 | Staging | `light(n, on, duration = 0.0, key = &"")` | Set visibility immediately. A positive duration turns it off at timeout, rule cancellation, or Stage deactivation. The optional key mirrors the Boolean state and must be declared as a Boolean Blackboard value. |
+| Staging | `set_light_color(light, color)`, `set_light_energy(light, energy)` | Set a `Light3D` color or a finite, nonnegative energy value. |
+| Staging | `flicker_light(light, low_energy, high_energy, interval = 0.06, duration = 0.6)` | Alternate light energy for a bounded duration, then restore its original energy. The rule wait releases on completion or cancellation. |
+| Staging | `restart_particles(particles)` | Restart CPU or GPU particle emitters in 2D or 3D. |
+| Staging | `stop_audio(player)`, `set_audio_pitch(player, pitch_scale)`, `set_audio_bus(player, bus)` | Stop playback (releasing any wait for that playback), set positive pitch, or route to an existing AudioServer bus. |
+| Staging | `set_shader_parameter(material, parameter, value)` | Set a declared `ShaderMaterial` uniform after checking its name and value type. |
 | Staging | `pop(n)`, `bounce(n)` | Play a scale animation. |
 | Staging | `say(n, text, seconds = 1.0)` | Show temporary text at a node. |
 | Staging | `move_to(n, dest, offset = Vector3.ZERO, duration = 0.7, transition = Tween.TRANS_LINEAR, ease = Tween.EASE_IN_OUT)` | Tween a node to a target with an offset. Duration zero snaps immediately; otherwise the rule waits for completion. |
@@ -363,7 +368,8 @@ The default factory is [`StagingVerbs`](../core/staging_verbs.gd), which inherit
 | Staging | `tween_property(target, property, value, duration = 0.25, wait_for_completion = true, transition = Tween.TRANS_LINEAR, ease = Tween.EASE_IN_OUT)` | Tween a writable property when the current and destination values use compatible interpolatable types, including numeric, vector, transform, and color values. |
 | Staging | `play_audio(player, wait_for_completion = false, timeout = 0.0)` | Play an `AudioStreamPlayer`, `AudioStreamPlayer2D`, or `AudioStreamPlayer3D`. Waiting holds the rule for this playback instance. A positive timeout releases the wait and cancels the run. |
 | Staging | `rotate_to(n, target_rotation, duration = 0.25, wait_for_completion = true, transition = Tween.TRANS_LINEAR, ease = Tween.EASE_IN_OUT)` | Rotate a `Node3D` to Euler angles in radians. Set duration to zero for an immediate change or disable waiting to let the tween continue in the background. |
-| Staging | `play_animation(player, animation, wait_for_completion = true, timeout = 0.0)` | Play a named `AnimationPlayer` clip. Waiting checks the completed clip name and the Callboard playback token. A positive timeout releases the wait and cancels the run. |
+| Staging | `play_animation(player, animation, wait_for_completion = true, timeout = 0.0, custom_blend = -1.0, custom_speed = 1.0)` | Play a named `AnimationPlayer` clip with optional custom blend and speed. Waiting checks the completed clip name and the Callboard playback token. A positive timeout releases the wait and cancels the run. |
+| Staging | `set_animation_speed(player, speed_scale)` | Set a finite, positive `AnimationPlayer.speed_scale` without changing its current clip. |
 | Staging | `pose_animation(player, animation, time = 0.0)` | Seek to a time in a named clip and pause there. |
 | Staging | `gameplay_event(event_id, arguments = {})` | Emit `Stage.gameplay_event` for host-owned behavior such as doors, quests, or inventory. |
 | Staging | `gameplay_request(event_id, arguments = {}, timeout = 0.0, response_schema = {}, timeout_relay = &"", request_id = 0)` | Emit a correlated host request and wait for an accepted or rejected acknowledgment. Timeout ends the run and can fire a recovery relay; cancellation releases the request. |

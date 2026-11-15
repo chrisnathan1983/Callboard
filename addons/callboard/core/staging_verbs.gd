@@ -150,14 +150,14 @@ func gameplay_request(event_id: StringName, arguments: Dictionary = {}, timeout 
 ## Play a stream. A positive timeout cancels a wait that runs too long.
 func play_audio(player: Node, wait_for_completion := false, timeout := 0.0) -> Step:
 	var f := func(payload: Dictionary) -> Variant:
-		if not _is_audio_player(player):
+		if not is_instance_valid(player) or not _is_audio_player(player):
 			push_warning("Callboard play_audio skipped: target must be an AudioStreamPlayer, AudioStreamPlayer2D, or AudioStreamPlayer3D.")
 			return null
 		if player.get("stream") == null:
 			push_warning("Callboard play_audio skipped: the target has no AudioStream assigned.")
 			return null
-		if timeout < 0.0:
-			push_warning("Callboard play_audio skipped: timeout must be zero or greater.")
+		if not is_finite(timeout) or timeout < 0.0:
+			push_warning("Callboard play_audio skipped: timeout must be finite and zero or greater.")
 			return null
 		var previous_ticket: PlaybackTicket = player.get_meta(AUDIO_PLAYBACK_META) as PlaybackTicket if player.has_meta(AUDIO_PLAYBACK_META) else null
 		if previous_ticket != null:
@@ -180,6 +180,108 @@ func play_audio(player: Node, wait_for_completion := false, timeout := 0.0) -> S
 			return wait_signal
 		return null
 	return Step.new(f)
+
+## Stop playback and release any rule waiting for this audio instance.
+func stop_audio(player: Node) -> Step:
+	return Step.new(func(_payload: Dictionary) -> void:
+		if not is_instance_valid(player) or not _is_audio_player(player):
+			push_warning("Callboard stop_audio requires a live AudioStreamPlayer target.")
+			return
+		var ticket := player.get_meta(AUDIO_PLAYBACK_META, null) as PlaybackTicket
+		if ticket != null:
+			ticket.cancel(&"stopped")
+		player.call("stop"))
+
+## Set an audio player's pitch scale; values must be finite and greater than zero.
+func set_audio_pitch(player: Node, pitch_scale: float) -> Step:
+	return Step.new(func(_payload: Dictionary) -> void:
+		if not is_instance_valid(player) or not _is_audio_player(player):
+			push_warning("Callboard set_audio_pitch requires a live AudioStreamPlayer target.")
+			return
+		if not is_finite(pitch_scale) or pitch_scale <= 0.0:
+			push_warning("Callboard set_audio_pitch requires a finite pitch scale greater than zero.")
+			return
+		player.set("pitch_scale", pitch_scale))
+
+## Route an audio player's output to an existing AudioServer bus.
+func set_audio_bus(player: Node, bus: StringName) -> Step:
+	return Step.new(func(_payload: Dictionary) -> void:
+		if not is_instance_valid(player) or not _is_audio_player(player):
+			push_warning("Callboard set_audio_bus requires a live AudioStreamPlayer target.")
+			return
+		if bus.is_empty() or AudioServer.get_bus_index(bus) < 0:
+			push_warning("Callboard set_audio_bus requires a bus present on the AudioServer.")
+			return
+		player.set("bus", bus))
+
+## Set the color of a Light3D, including OmniLight3D, SpotLight3D, and DirectionalLight3D.
+func set_light_color(light_node: Light3D, color: Color) -> Step:
+	return Step.new(func(_payload: Dictionary) -> void:
+		if not is_instance_valid(light_node):
+			push_warning("Callboard set_light_color requires a live Light3D target.")
+			return
+		if not _is_finite_color(color):
+			push_warning("Callboard set_light_color requires finite color components.")
+			return
+		light_node.light_color = color)
+
+## Set a Light3D's nonnegative energy.
+func set_light_energy(light_node: Light3D, energy: float) -> Step:
+	return Step.new(func(_payload: Dictionary) -> void:
+		if not is_instance_valid(light_node):
+			push_warning("Callboard set_light_energy requires a live Light3D target.")
+			return
+		if not is_finite(energy) or energy < 0.0:
+			push_warning("Callboard set_light_energy requires finite energy >= 0.")
+			return
+		light_node.light_energy = energy)
+
+## Flicker a light between low and high energy, then restore its original energy.
+## Cancellation releases the rule wait while the short visual effect finishes.
+func flicker_light(light_node: Light3D, low_energy: float, high_energy: float,
+		interval := 0.06, duration := 0.6) -> Step:
+	var host := context.host
+	return Step.new(func(payload: Dictionary) -> Variant:
+		if not is_instance_valid(light_node):
+			push_warning("Callboard flicker_light requires a live Light3D target.")
+			return null
+		if not is_finite(low_energy) or not is_finite(high_energy) or low_energy < 0.0 or high_energy < low_energy:
+			push_warning("Callboard flicker_light requires finite energies with 0 <= low <= high.")
+			return null
+		if not is_finite(interval) or interval <= 0.0 or not is_finite(duration) or duration <= 0.0:
+			push_warning("Callboard flicker_light requires finite interval and duration values greater than zero.")
+			return null
+		if not is_instance_valid(host) or not host is Node or not host.is_inside_tree():
+			push_warning("Callboard flicker_light requires an in-tree Stage host.")
+			return null
+		var initial_energy := light_node.light_energy
+		var tween := host.create_tween()
+		var flicker := func(elapsed: float) -> void:
+			if is_instance_valid(light_node):
+				var phase := fposmod(elapsed, interval * 2.0)
+				light_node.light_energy = low_energy if phase < interval else high_energy
+		tween.tween_method(flicker, 0.0, duration, duration).set_trans(Tween.TRANS_LINEAR)
+		tween.tween_callback(func() -> void:
+			if is_instance_valid(light_node):
+				light_node.light_energy = initial_energy)
+		return _animation_completion(payload, tween.finished))
+
+## Restart CPU or GPU particles in 2D or 3D.
+func restart_particles(particles: Node) -> Step:
+	return Step.new(func(_payload: Dictionary) -> void:
+		if not is_instance_valid(particles) or not _is_particle_node(particles):
+			push_warning("Callboard restart_particles requires a CPU or GPU particles node in 2D or 3D.")
+			return
+		particles.call("restart"))
+
+## Change an existing ShaderMaterial uniform after checking its declared name and type.
+func set_shader_parameter(material: ShaderMaterial, parameter: StringName, value: Variant) -> Step:
+	return Step.new(func(_payload: Dictionary) -> void:
+		var problem := _shader_parameter_problem(material, parameter, value)
+		if not problem.is_empty():
+			push_warning("Callboard set_shader_parameter skipped: %s" % problem)
+			return
+		material.set_shader_parameter(parameter, value))
 
 func _watch_audio_playback(player_id: int, ticket: PlaybackTicket,
 		completion: RuleEngine.AwaitedSignal, tree: SceneTree, finished: Signal,
@@ -324,6 +426,12 @@ func _valid_tween_options(duration: float, transition: int, ease: int, verb: Str
 func _is_finite_vector3(value: Vector3) -> bool:
 	return is_finite(value.x) and is_finite(value.y) and is_finite(value.z)
 
+func _is_nonnegative_finite_number(value: Variant) -> bool:
+	return (value is int or value is float) and is_finite(float(value)) and float(value) >= 0.0
+
+func _is_positive_finite_number(value: Variant) -> bool:
+	return (value is int or value is float) and is_finite(float(value)) and float(value) > 0.0
+
 func _apply_path_pose(n: Node3D, path: Path3D, distance: float, orient_to_path: bool,
 		set_position := Callable()) -> void:
 	var sample := path.curve.sample_baked_with_rotation(distance, true, false)
@@ -398,20 +506,27 @@ func snap_to_marker(n: Node3D, marker: Marker3D,
 
 ## Play an AnimationPlayer clip. A positive timeout cancels a wait that runs too long.
 func play_animation(player: AnimationPlayer, animation: StringName,
-		wait_for_completion := true, timeout := 0.0) -> Step:
+		wait_for_completion := true, timeout := 0.0, custom_blend := -1.0,
+		custom_speed := 1.0) -> Step:
 	var f := func(payload: Dictionary) -> Variant:
 		if player == null or not is_instance_valid(player) or not player.has_animation(animation):
 			push_warning("Callboard play_animation skipped: animation '%s' is missing from its AnimationPlayer." % animation)
 			return null
-		if timeout < 0.0:
-			push_warning("Callboard play_animation skipped: timeout must be zero or greater.")
+		if not is_finite(timeout) or timeout < 0.0:
+			push_warning("Callboard play_animation skipped: timeout must be finite and zero or greater.")
+			return null
+		if not is_finite(custom_blend) or custom_blend < -1.0:
+			push_warning("Callboard play_animation skipped: custom blend must be finite and at least -1.")
+			return null
+		if not is_finite(custom_speed) or custom_speed <= 0.0:
+			push_warning("Callboard play_animation skipped: custom speed must be finite and greater than zero.")
 			return null
 		if not wait_for_completion:
 			_supersede_animation_playback(player)
-			player.play(animation)
+			player.play(animation, custom_blend, custom_speed)
 			return null
 		var ticket := _supersede_animation_playback(player)
-		player.play(animation)
+		player.play(animation, custom_blend, custom_speed)
 		var playback_matches := func(finished_animation: StringName) -> bool:
 			var matches: bool = (finished_animation == animation and is_instance_valid(player)
 				and player.get_meta(ANIMATION_PLAYBACK_META, null) == ticket)
@@ -422,6 +537,17 @@ func play_animation(player: AnimationPlayer, animation: StringName,
 		return _animation_completion(payload, player.animation_finished, playback_matches,
 			[ticket.interrupted])
 	return Step.new(f)
+
+## Change the AnimationPlayer speed scale without changing its current clip.
+func set_animation_speed(player: AnimationPlayer, speed_scale: float) -> Step:
+	return Step.new(func(_payload: Dictionary) -> void:
+		if not is_instance_valid(player):
+			push_warning("Callboard set_animation_speed requires a live AnimationPlayer.")
+			return
+		if not is_finite(speed_scale) or speed_scale <= 0.0:
+			push_warning("Callboard set_animation_speed requires a finite value greater than zero.")
+			return
+		player.speed_scale = speed_scale)
 
 ## Pose an AnimationPlayer at a time without starting a playback wait.
 func pose_animation(player: AnimationPlayer, animation: StringName, time := 0.0) -> Step:
@@ -736,6 +862,38 @@ func _color_setter(mesh: MeshInstance3D, material: BaseMaterial3D, tween: Tween)
 func _is_audio_player(node: Node) -> bool:
 	return node is AudioStreamPlayer or node is AudioStreamPlayer2D or node is AudioStreamPlayer3D
 
+func _is_particle_node(node: Variant) -> bool:
+	return node is CPUParticles2D or node is GPUParticles2D \
+		or node is CPUParticles3D or node is GPUParticles3D
+
+func _is_finite_color(color: Color) -> bool:
+	return is_finite(color.r) and is_finite(color.g) and is_finite(color.b) and is_finite(color.a)
+
+func _shader_parameter_problem(material: ShaderMaterial, parameter: StringName,
+		value: Variant) -> String:
+	if not is_instance_valid(material):
+		return "target must be a live ShaderMaterial"
+	if material.shader == null:
+		return "ShaderMaterial has no Shader assigned"
+	if parameter.is_empty():
+		return "parameter name must not be empty"
+	for uniform in material.shader.get_shader_uniform_list():
+		if StringName(uniform.get("name", &"")) != parameter:
+			continue
+		var expected_type := int(uniform.get("type", TYPE_NIL))
+		if expected_type == TYPE_OBJECT:
+			if not value is Resource:
+				return "value must be a Resource for shader parameter '%s'" % parameter
+			var expected_class := StringName(uniform.get("class_name", &""))
+			if not expected_class.is_empty() and not value.is_class(expected_class):
+				return "value must be a %s for shader parameter '%s'" % [expected_class, parameter]
+			return ""
+		if typeof(value) == expected_type \
+				or expected_type in [TYPE_INT, TYPE_FLOAT] and typeof(value) in [TYPE_INT, TYPE_FLOAT]:
+			return ""
+		return "value type does not match shader parameter '%s'" % parameter
+	return "shader parameter '%s' was not found" % parameter
+
 func _audio_finished_signal(node: Node) -> Signal:
 	if node is AudioStreamPlayer:
 		return (node as AudioStreamPlayer).finished
@@ -788,8 +946,53 @@ func validate_step(rule_id: StringName, step: Step, bb: Blackboard) -> Array[Str
 			problems.append("rule '%s' play_audio target must be an AudioStreamPlayer, AudioStreamPlayer2D, or AudioStreamPlayer3D" % rule_id)
 		elif target.get("stream") == null:
 			problems.append("rule '%s' play_audio target has no AudioStream assigned" % rule_id)
-		if step.args.size() > 2 and float(step.args[2]) < 0.0:
-			problems.append("rule '%s' play_audio timeout must be zero or greater" % rule_id)
+		if step.args.size() > 2 and not _is_nonnegative_finite_number(step.args[2]):
+			problems.append("rule '%s' play_audio timeout must be finite and zero or greater" % rule_id)
+	if step.verb == &"stop_audio":
+		if not _is_audio_player(target) or not is_instance_valid(target):
+			problems.append("rule '%s' stop_audio target must be a valid AudioStreamPlayer" % rule_id)
+	if step.verb == &"set_audio_pitch":
+		if not _is_audio_player(target) or not is_instance_valid(target):
+			problems.append("rule '%s' set_audio_pitch target must be a valid AudioStreamPlayer" % rule_id)
+		if step.args.size() < 2 or not _is_positive_finite_number(step.args[1]):
+			problems.append("rule '%s' set_audio_pitch pitch must be finite and greater than zero" % rule_id)
+	if step.verb == &"set_audio_bus":
+		if not _is_audio_player(target) or not is_instance_valid(target):
+			problems.append("rule '%s' set_audio_bus target must be a valid AudioStreamPlayer" % rule_id)
+		if step.args.size() < 2 or not step.args[1] is StringName or step.args[1].is_empty():
+			problems.append("rule '%s' set_audio_bus requires a nonempty StringName bus" % rule_id)
+		elif AudioServer.get_bus_index(step.args[1]) < 0:
+			problems.append("rule '%s' set_audio_bus bus '%s' does not exist" % [rule_id, step.args[1]])
+	if step.verb in [&"set_light_color", &"set_light_energy", &"flicker_light"]:
+		if not target is Light3D or not is_instance_valid(target):
+			problems.append("rule '%s' '%s' target must be a valid Light3D" % [rule_id, step.verb])
+	if step.verb == &"set_light_color" and (step.args.size() < 2 or not step.args[1] is Color
+			or not _is_finite_color(step.args[1])):
+		problems.append("rule '%s' set_light_color requires a Color value" % rule_id)
+	if step.verb == &"set_light_energy" and (step.args.size() < 2
+			or not _is_nonnegative_finite_number(step.args[1])):
+		problems.append("rule '%s' set_light_energy requires finite energy >= 0" % rule_id)
+	if step.verb == &"flicker_light":
+		if step.args.size() < 3 or not _is_nonnegative_finite_number(step.args[1]) \
+				or not _is_nonnegative_finite_number(step.args[2]) or float(step.args[2]) < float(step.args[1]):
+			problems.append("rule '%s' flicker_light requires finite 0 <= low_energy <= high_energy" % rule_id)
+		if step.args.size() > 3 and not _is_positive_finite_number(step.args[3]):
+			problems.append("rule '%s' flicker_light interval must be finite and greater than zero" % rule_id)
+		if step.args.size() > 4 and not _is_positive_finite_number(step.args[4]):
+			problems.append("rule '%s' flicker_light duration must be finite and greater than zero" % rule_id)
+	if step.verb == &"restart_particles" and not _is_particle_node(target):
+		problems.append("rule '%s' restart_particles target must be a CPU or GPU particles node" % rule_id)
+	if step.verb == &"set_shader_parameter":
+		if not target is ShaderMaterial or not is_instance_valid(target):
+			problems.append("rule '%s' set_shader_parameter target must be a live ShaderMaterial" % rule_id)
+		elif step.args.size() < 3:
+			problems.append("rule '%s' set_shader_parameter requires a parameter name and value" % rule_id)
+		elif not step.args[1] is StringName or step.args[1].is_empty():
+			problems.append("rule '%s' set_shader_parameter name must be a nonempty StringName" % rule_id)
+		else:
+			var shader_problem := _shader_parameter_problem(target, step.args[1], step.args[2])
+			if not shader_problem.is_empty():
+				problems.append("rule '%s' set_shader_parameter: %s" % [rule_id, shader_problem])
 	if step.verb == &"rotate_to":
 		if not target is Node3D or not is_instance_valid(target):
 			problems.append("rule '%s' rotate_to target must be a valid Node3D" % rule_id)
@@ -817,8 +1020,19 @@ func validate_step(rule_id: StringName, step: Step, bb: Blackboard) -> Array[Str
 			problems.append("rule '%s' '%s' target must be a valid AnimationPlayer" % [rule_id, step.verb])
 		elif step.args.size() > 1 and (not step.args[1] is StringName or not target.has_animation(step.args[1])):
 			problems.append("rule '%s' '%s' names an animation not found on its AnimationPlayer" % [rule_id, step.verb])
-		if step.verb == &"play_animation" and step.args.size() > 3 and float(step.args[3]) < 0.0:
-			problems.append("rule '%s' play_animation timeout must be zero or greater" % rule_id)
+		if step.verb == &"play_animation":
+			if step.args.size() > 3 and not _is_nonnegative_finite_number(step.args[3]):
+				problems.append("rule '%s' play_animation timeout must be finite and zero or greater" % rule_id)
+			if step.args.size() > 4 and (not (step.args[4] is int or step.args[4] is float)
+					or not is_finite(float(step.args[4])) or float(step.args[4]) < -1.0):
+				problems.append("rule '%s' play_animation blend must be finite and at least -1" % rule_id)
+			if step.args.size() > 5 and not _is_positive_finite_number(step.args[5]):
+				problems.append("rule '%s' play_animation speed must be finite and greater than zero" % rule_id)
+	if step.verb == &"set_animation_speed":
+		if not target is AnimationPlayer or not is_instance_valid(target):
+			problems.append("rule '%s' set_animation_speed target must be a valid AnimationPlayer" % rule_id)
+		if step.args.size() < 2 or not _is_positive_finite_number(step.args[1]):
+			problems.append("rule '%s' set_animation_speed value must be finite and greater than zero" % rule_id)
 	if step.verb == &"flash" or step.verb == &"jump":
 		if not target is MeshInstance3D or not is_instance_valid(target):
 			problems.append("rule '%s' '%s' target must be a valid MeshInstance3D" % [rule_id, step.verb])
