@@ -215,9 +215,9 @@ The first five items retain the high priority assigned in `TODO.md`.
   - [x] Cover reusable interaction outcomes, repeating ambient behavior, conditional sequences, and objective completion. Define bindings for props, keys, Calls, relays, and payload fields.
   - [x] Give instantiated rules fresh rule IDs, latch identities, storage keys, and internal relay names by default; allow explicitly shared storage or latch identities. Validate missing and incompatible bindings, and preserve internal relay, variable, and nested group references when instantiating or duplicating.
 
-- [ ] **Validate across Stages.** See [StageStateStore](addons/callboard/core/stage_state_store.gd) and [RuleValidator](addons/callboard/core/rule_validator.gd).
+- [x] **Validate across Stages.** See [StageStateStore](addons/callboard/core/stage_state_store.gd) and [RuleValidator](addons/callboard/core/rule_validator.gd).
   - [x] The store checks Shared type conflicts among loaded boards. Per-Stage validation checks declared producers, listeners, cycles, and overlapping rules.
-  - [ ] Scan authored Stage definitions, including unloaded Stages, for conflicting Shared types, Shared reads with no declared producer, and unresolved cross-Stage event targets and payload contracts. Reuse the resource-only validation path where possible and account for declared host writers.
+  - [x] Scan authored Stage definitions, including unloaded Stages, for conflicting Shared types, Shared reads with no declared producer, and unresolved cross-Stage event targets and payload contracts. Reuse the resource-only validation path where possible and account for declared host writers.
 
 - [ ] **Analyze objective reachability.**
   - [ ] Let authors declare completion conditions, then check whether plausible Call and state sequences can reach them. Flag one-shot paths that can be consumed before their prerequisites are met.

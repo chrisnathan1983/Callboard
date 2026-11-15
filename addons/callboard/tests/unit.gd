@@ -2948,7 +2948,7 @@ func _test_cross_stage_route_validation() -> bool:
 	var broadcast_uses_declared_recipients: bool = broadcast_report.errors.is_empty()
 	route.args.append('&"unregistered_sensor"')
 	var missing_route_report: Dictionary = CrossStageValidator.validate(data, [target])
-	var missing_route_is_actionable: bool = missing_route_report.warnings.any(
+	var missing_route_is_actionable: bool = missing_route_report.errors.any(
 		func(problem: String) -> bool: return "cross_stage_instance_ids" in problem)
 	var saved_definition := RuleGraphReader.make_definition(data)
 	var route_ids_survive_callboard_save := saved_definition.cross_stage_instance_ids == PackedStringArray(["sensor_source"])

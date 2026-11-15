@@ -601,7 +601,8 @@ func _test_rename_saved_state() -> bool:
 		original.state_key != copy.state_key) and ok
 	board.blackboard._on_add(0)
 	var rows := board.blackboard._rows
-	var reused_key := rows.get_child(rows.get_child_count() - 1).find_children("*", "LineEdit", true, false).front() as LineEdit
+	var variable_row := rows.get_child(board._data.variables.size() - 1)
+	var reused_key := variable_row.find_children("*", "LineEdit", true, false).front() as LineEdit
 	reused_key.text = "guard_calmed"
 	reused_key.text_submitted.emit(reused_key.text)
 	board._data.variables.back().scope = "saved"
@@ -625,7 +626,7 @@ func _test_numeric_undo() -> bool:
 	_open_analyzed(board, DEFINITION_PATH)
 	await process_frame
 	board.blackboard._on_add(1)
-	var row := board.blackboard._rows.get_child(board.blackboard._rows.get_child_count() - 1)
+	var row := board.blackboard._rows.get_child(board._data.variables.size() - 1)
 	var spin := row.find_children("*", "SpinBox", true, false).front() as SpinBox
 	var mouse := InputEventMouseButton.new()
 	mouse.button_index = MOUSE_BUTTON_LEFT

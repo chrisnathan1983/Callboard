@@ -531,10 +531,17 @@ func _test_touch_controls(game: GameManager) -> bool:
 	ok = _check("the first drag dismisses the idle hint",
 		hud._stick.has_moved and hud._stick._pointer == -1 and not hud._move_hint.visible) and ok
 
-	player.global_position = (game.stage.get_node("DecoyArea") as TriggerArea).global_position
+	var decoy := game.stage.get_node("DecoyArea") as TriggerArea
+	player.global_position = decoy.global_position
 	for frame in range(3):
 		await physics_frame
-	var action_center := hud._interact.get_global_rect().get_center()
+	# A headless run can advance several physics ticks before the next idle update.
+	player.interaction_resolver.refresh()
+	await process_frame
+	if not _check("the decoy interaction is available before testing its touch button",
+			player.interaction_resolver.selected_trigger == decoy and hud._interact.is_visible_in_tree()):
+		return false
+	var action_center := hud._interact.get_global_transform_with_canvas() * (hud._interact.size * 0.5)
 	_send_touch(1, action_center, true)
 	ok = _check("the action button takes priority over starting the stick",
 		hud._stick._pointer == -1 and hud._button_pointer == 1) and ok
@@ -550,13 +557,12 @@ func _test_touch_controls(game: GameManager) -> bool:
 		and knob.is_equal_approx(drag.position)) and ok
 	_send_touch(1, action_center, true)
 	# Use the same real resolver while keeping the gameplay smoke test's score intact.
-	var selected := player.interaction_resolver.selected_trigger
 	var interactions: Array[bool] = []
-	selected.set_interaction_handler(func(_actor: Node, _context: Dictionary) -> Dictionary:
+	decoy.set_interaction_handler(func(_actor: Node, _context: Dictionary) -> Dictionary:
 		interactions.append(true)
 		return {"accepted": false})
 	_send_touch(1, action_center, false)
-	selected.set_interaction_handler(Callable())
+	decoy.set_interaction_handler(Callable())
 	ok = _check("a second finger taps the selected interaction while holding movement",
 		interactions == [true] and player.touch_movement.is_equal_approx(Vector2.RIGHT)) and ok
 	_send_touch(0, drag.position, false, true)

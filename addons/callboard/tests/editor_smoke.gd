@@ -7,6 +7,7 @@ const TMP_RESTORATION_SCENE_PATH := "res://.godot/addon_restoration_picker_tmp.t
 const ExportFilter := preload("res://addons/callboard/editor/export_plugin.gd")
 const RuleTemplateLibraryScript := preload("res://addons/callboard/model/rule_template_library.gd")
 const RuleTemplateDataScript := preload("res://addons/callboard/core/rule_template_data.gd")
+const CrossStageValidatorScript := preload("res://addons/callboard/model/cross_stage_event_validator.gd")
 
 func _initialize() -> void:
 	await process_frame
@@ -16,6 +17,7 @@ func _initialize() -> void:
 	ok = _test_stage_authoring_controls() and ok
 	ok = _test_restoration_picker_options() and ok
 	ok = _test_rule_templates() and ok
+	ok = _test_cross_stage_shared_validation() and ok
 	ok = _test_parallel_group_authoring() and ok
 	ok = _test_conditional_group_authoring() and ok
 	ok = _test_guard_expression_authoring() and ok
@@ -36,6 +38,75 @@ func _initialize() -> void:
 	await process_frame
 	await process_frame
 	quit(0 if ok else 1)
+
+func _test_cross_stage_shared_validation() -> bool:
+	var reader := GraphDraft.new()
+	var shared := VariableData.new()
+	shared.key = &"door_open"
+	shared.scope = "shared"
+	shared.default_value = false
+	shared.state_key = &"house.door_open"
+	reader.variables = [shared]
+	var read_rule := RuleData.new()
+	read_rule.id = &"check_door"
+	read_rule.trigger = &"enter"
+	read_rule.requires = [&"door_open"]
+	reader.rules = [read_rule]
+
+	var producer := StageDefinition.new()
+	producer.variables = [shared.duplicate(true)]
+	var write_rule := RuleData.new()
+	write_rule.id = &"open_door"
+	write_rule.trigger = &"open"
+	var write_step := StepData.new()
+	write_step.verb = &"set_var"
+	write_step.args = PackedStringArray(['&"door_open"', "true"])
+	write_rule.steps = [write_step]
+	producer.rules = [write_rule]
+	var no_writer := CrossStageValidatorScript.validate(reader, [])
+	var reports_missing_writer: bool = no_writer["errors"].any(func(message: String) -> bool: return message.contains("reads Shared key 'house.door_open'") and message.contains("no Stage or declared host writer produces it"))
+	var matched_writer := CrossStageValidatorScript.validate(reader, [producer])
+	var matched: bool = matched_writer["errors"].all(func(message: String) -> bool:
+		return not message.contains("no Stage or declared host writer produces it"))
+
+	var host_writer := BlackboardWriterData.new()
+	host_writer.key = &"door_open"
+	host_writer.source = &"house_controller"
+	producer.rules.clear()
+	producer.external_writers = [host_writer]
+	var declared_host := CrossStageValidatorScript.validate(reader, [producer])
+	var host_counts: bool = declared_host["errors"].all(func(message: String) -> bool:
+		return not message.contains("no Stage or declared host writer produces it"))
+
+	var conflict := StageDefinition.new()
+	var conflicting_shared := VariableData.new()
+	conflicting_shared.key = &"other_door"
+	conflicting_shared.scope = "shared"
+	conflicting_shared.default_value = 0
+	conflicting_shared.state_key = &"house.door_open"
+	conflict.variables = [conflicting_shared]
+	var type_check := CrossStageValidatorScript.validate(reader, [producer, conflict])
+	var found_conflict: bool = type_check["errors"].any(func(message: String) -> bool:
+		return message.contains("Shared key 'house.door_open' has conflicting types"))
+	var route_reader := GraphDraft.new()
+	var route_rule := RuleData.new()
+	route_rule.id = &"send_to_missing_house"
+	var route_step := StepData.new()
+	route_step.verb = &"emit_cross_stage"
+	route_step.args = PackedStringArray(['&"door_opened"', "{}", '&"missing_house"'])
+	route_rule.steps = [route_step]
+	route_reader.rules = [route_rule]
+	var registered_stage := StageDefinition.new()
+	registered_stage.cross_stage_instance_ids = PackedStringArray(["known_house"])
+	var route_check := CrossStageValidatorScript.validate(route_reader, [registered_stage])
+	var missing_target_error: bool = route_check["errors"].any(func(message: String) -> bool: return message.contains("targets 'missing_house'") and message.contains("not registered"))
+	var ok := _check("project validation reports Shared reads without producers and accepts Stage and host writers",
+		reports_missing_writer and matched and host_counts)
+	ok = _check("project validation finds Shared type conflicts across authored StageDefinitions",
+		found_conflict) and ok
+	ok = _check("project validation rejects unresolved cross-Stage targets",
+		missing_target_error) and ok
+	return ok
 
 func _test_scene_assigned_props() -> bool:
 	var definition := StageDefinition.new()
@@ -247,6 +318,9 @@ func _test_stage_authoring_controls() -> bool:
 		value_editor.text_submitted.emit(value_editor.text)
 		complex_types_preserved = complex_types_preserved and typeof(variable.default_value) == typeof(complex_values[index]) \
 			and variable.default_value == complex_values[index]
+		value_editor.free()
+	editor.free()
+	settings.free()
 	var ok := _check("board exposes lifecycle, external-writer, and restoration controls",
 		draft.managed_lifecycle and draft.external_writers.size() == 1
 		and draft.restoration_bindings.size() == 1

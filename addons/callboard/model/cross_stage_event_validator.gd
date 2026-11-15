@@ -1,12 +1,12 @@
 @tool
 class_name CrossStageEventValidator extends RefCounted
-## Resource-only checks for authored cross-Stage event routes.
+## Resource-only checks for project-wide Stage contracts and cross-Stage event routes.
 
 const Settings := preload("res://addons/callboard/core/callboard_settings.gd")
 const RuntimeInputRefScript := preload("res://addons/callboard/core/runtime_input_ref.gd")
 
 static func apply(data: GraphDraft) -> void:
-	if data == null or not _has_routes(data.rules):
+	if data == null:
 		return
 	var result := validate(data)
 	data.errors.append_array(result["errors"])
@@ -17,13 +17,11 @@ static func apply(data: GraphDraft) -> void:
 static func validate(data: GraphDraft, definitions: Array = []) -> Dictionary:
 	var errors: Array[String] = []
 	var warnings: Array[String] = []
-	if data == null or not _has_routes(data.rules):
+	if data == null:
 		return {"errors": errors, "warnings": warnings}
-	var known_definitions := definitions
-	if known_definitions.is_empty():
-		known_definitions = _load_project_definitions()
 	var source_info := _info_from_draft(data)
 	var infos: Array[Dictionary] = []
+	var known_definitions: Array = _load_project_definitions() if definitions.is_empty() else definitions
 	for definition: StageDefinition in known_definitions:
 		if definition == null:
 			continue
@@ -41,11 +39,13 @@ static func validate(data: GraphDraft, definitions: Array = []) -> Dictionary:
 		if route_owners[target_id].size() > 1:
 			errors.append("cross-Stage instance ID '%s' is declared by multiple StageDefinitions" % target_id)
 
-	for rule: RuleData in data.rules:
-		for step: StepData in _flatten_steps(rule.steps):
-			if step.verb != &"emit_cross_stage":
-				continue
-			_validate_route(data, rule, step, infos, route_owners, errors, warnings)
+	_validate_shared_contracts(infos, errors)
+	if _has_routes(data.rules):
+		for rule: RuleData in data.rules:
+			for step: StepData in _flatten_steps(rule.steps):
+				if step.verb != &"emit_cross_stage":
+					continue
+				_validate_route(data, rule, step, infos, route_owners, errors, warnings)
 	return {"errors": errors, "warnings": warnings}
 
 static func _validate_route(data: GraphDraft, rule: RuleData, step: StepData,
@@ -77,7 +77,7 @@ static func _validate_route(data: GraphDraft, rule: RuleData, step: StepData,
 			errors.append("rule '%s' broadcasts '%s', but no configured StageDefinition declares or listens for it" % [rule.id, event_id])
 	else:
 		if not route_owners.has(target_id):
-			warnings.append("rule '%s' targets '%s', which is not registered in any configured StageDefinition; add it to cross_stage_instance_ids for offline validation" % [rule.id, target_id])
+			errors.append("rule '%s' targets '%s', which is not registered in any configured StageDefinition; add it to cross_stage_instance_ids for offline validation" % [rule.id, target_id])
 			return
 		for info: Dictionary in route_owners[target_id]:
 			if not _event_is_known(info, event_id):
@@ -153,13 +153,11 @@ static func _info_from_draft(data: GraphDraft) -> Dictionary:
 		if not schemas.has(field.event_id):
 			schemas[field.event_id] = {}
 		schemas[field.event_id][field.key] = field.value_type()
-	return {
-		"path": base.resource_path if base != null else "",
-		"instance_ids": PackedStringArray(base.cross_stage_instance_ids) if base != null else PackedStringArray(),
-		"calls": PackedStringArray(data.external_calls),
-		"rules": data.rules,
-		"schemas": schemas,
-	}
+	return _build_info(base.resource_path if base != null else "",
+		PackedStringArray(base.cross_stage_instance_ids) if base != null else PackedStringArray(),
+		PackedStringArray(data.external_calls), data.rules, schemas, data.variables,
+		PackedStringArray(data.external_vars), data.external_writers,
+		base.preview_scene_path if base != null else "")
 
 static func _info_from_definition(definition: StageDefinition) -> Dictionary:
 	definition._migrate()
@@ -168,13 +166,9 @@ static func _info_from_definition(definition: StageDefinition) -> Dictionary:
 		if not schemas.has(field.event_id):
 			schemas[field.event_id] = {}
 		schemas[field.event_id][field.key] = field.value_type()
-	return {
-		"path": definition.resource_path,
-		"instance_ids": definition.cross_stage_instance_ids,
-		"calls": definition.external_calls,
-		"rules": definition.rules,
-		"schemas": schemas,
-	}
+	return _build_info(definition.resource_path, definition.cross_stage_instance_ids,
+		definition.external_calls, definition.rules, schemas, definition.variables,
+		definition.external_vars, definition.external_writers, definition.preview_scene_path)
 
 static func _event_is_known(info: Dictionary, event_id: StringName) -> bool:
 	if info["calls"].has(event_id):
@@ -227,6 +221,113 @@ static func _load_project_definitions() -> Array[StageDefinition]:
 				definitions.append(definition)
 	return definitions
 
+static func _build_info(path: String, instance_ids: PackedStringArray,
+		calls: PackedStringArray, rules: Array, schemas: Dictionary,
+		variables: Array, external_vars: PackedStringArray,
+		external_writers: Array, preview_scene_path: String) -> Dictionary:
+	var shared_keys := {}
+	var shared_types := {}
+	for variable: VariableData in variables:
+		if variable == null or variable.scope != "shared":
+			continue
+		var storage_key: StringName = variable.state_key if not variable.state_key.is_empty() else variable.key
+		if not shared_types.has(storage_key):
+			shared_types[storage_key] = []
+		shared_types[storage_key].append(typeof(variable.default_value))
+		shared_keys[variable.key] = storage_key
+		for alias: StringName in variable.aliases:
+			shared_keys[alias] = storage_key
+	var producers := {}
+	for key: StringName in external_vars:
+		if shared_keys.has(key):
+			producers[shared_keys[key]] = true
+	for writer: BlackboardWriterData in external_writers:
+		if writer != null and shared_keys.has(writer.key):
+			producers[shared_keys[writer.key]] = true
+	for writer: BlackboardWriterData in _scene_writers(preview_scene_path):
+		if writer != null and shared_keys.has(writer.key):
+			producers[shared_keys[writer.key]] = true
+	var reads := {}
+	for rule: RuleData in rules:
+		for expression: StringName in rule.requires + rule.forbids + rule.cancel_if:
+			for key: StringName in GuardExpression.referenced_keys(expression):
+				if shared_keys.has(key):
+					reads[shared_keys[key]] = true
+		for step: StepData in _flatten_steps(rule.steps):
+			if step.verb == &"wait_until" and not step.args.is_empty():
+				var condition := ExprText.parse_literal(step.args[0])
+				if condition.ok and (condition.value is String or condition.value is StringName):
+					for key: StringName in GuardExpression.referenced_keys(StringName(condition.value)):
+						if shared_keys.has(key):
+							reads[shared_keys[key]] = true
+			if step.verb in [&"conditional"]:
+				for expression: StringName in step.branch_conditions:
+					for key: StringName in GuardExpression.referenced_keys(expression):
+						if shared_keys.has(key):
+							reads[shared_keys[key]] = true
+			for argument: String in step.args:
+				for key: StringName in _blackboard_expression_reads(argument):
+					if shared_keys.has(key):
+						reads[shared_keys[key]] = true
+			if step.verb in [&"set_var", &"add_var"] and not step.args.is_empty():
+				var target := ExprText.parse_literal(step.args[0])
+				if target.ok and (target.value is String or target.value is StringName):
+					var target_key := StringName(String(target.value))
+					if shared_keys.has(target_key):
+						producers[shared_keys[target_key]] = true
+	return {
+		"path": path, "instance_ids": instance_ids, "calls": calls,
+		"rules": rules, "schemas": schemas, "shared_types": shared_types,
+		"shared_reads": reads, "shared_producers": producers,
+	}
+
+static func _blackboard_expression_reads(expression: String) -> Array[StringName]:
+	var result: Array[StringName] = []
+	var pattern := RegEx.create_from_string('callboard_blackboard\\s*\\(\\s*&?"([^"\\\\]+)"\\s*\\)')
+	for match: RegExMatch in pattern.search_all(expression):
+		var key := StringName(match.get_string(1))
+		if not result.has(key):
+			result.append(key)
+	return result
+
+static func _validate_shared_contracts(infos: Array[Dictionary], errors: Array[String]) -> void:
+	var type_owners := {}
+	var producers := {}
+	for info: Dictionary in infos:
+		for storage_key: StringName in info["shared_types"]:
+			for value_type: int in info["shared_types"][storage_key]:
+				if type_owners.has(storage_key) and type_owners[storage_key]["type"] != value_type:
+					errors.append("Shared key '%s' has conflicting types in StageDefinitions '%s' and '%s'" % [
+						storage_key, type_owners[storage_key]["path"], info["path"]])
+				elif not type_owners.has(storage_key):
+					type_owners[storage_key] = {"type": value_type, "path": info["path"]}
+		for storage_key: StringName in info["shared_producers"]:
+			producers[storage_key] = true
+	for info: Dictionary in infos:
+		for storage_key: StringName in info["shared_reads"]:
+			if not producers.has(storage_key):
+				errors.append("StageDefinition '%s' reads Shared key '%s', but no Stage or declared host writer produces it" % [
+					info["path"], storage_key])
+
+static func _scene_writers(scene_path: String) -> Array[BlackboardWriterData]:
+	var result: Array[BlackboardWriterData] = []
+	if scene_path.is_empty():
+		return result
+	var scene := ResourceLoader.load(scene_path, "", ResourceLoader.CACHE_MODE_IGNORE) as PackedScene
+	if scene == null:
+		return result
+	var state := scene.get_state()
+	for node_index in state.get_node_count():
+		for property_index in state.get_node_property_count(node_index):
+			if state.get_node_property_name(node_index, property_index) != &"callboard_writers":
+				continue
+			var declarations: Variant = state.get_node_property_value(node_index, property_index)
+			if declarations is Array:
+				for writer: Variant in declarations:
+					if writer is BlackboardWriterData:
+						result.append(writer)
+	return result
+
 static func _definition_paths(directory: String) -> Array[String]:
 	var paths: Array[String] = []
 	if not DirAccess.dir_exists_absolute(directory):
@@ -241,8 +342,7 @@ static func _definition_paths(directory: String) -> Array[String]:
 			if entry not in [".", ".."]:
 				paths.append_array(_definition_paths(path))
 		elif entry.ends_with(".tres"):
-			if ResourceLoader.load(path, "", ResourceLoader.CACHE_MODE_IGNORE) is StageDefinition:
-				paths.append(path)
+			paths.append(path)
 		entry = dir.get_next()
 	dir.list_dir_end()
 	paths.sort()
