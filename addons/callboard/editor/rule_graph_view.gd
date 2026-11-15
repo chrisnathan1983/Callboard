@@ -89,7 +89,7 @@ func _init() -> void:
 	theme_changed.connect(_refresh_wire_focus, CONNECT_DEFERRED)
 	node_selected.connect(_on_node_selected)
 	node_deselected.connect(_on_node_deselected)
-	end_node_move.connect(func() -> void: layout_changed.emit())
+	end_node_move.connect(_on_end_node_move)
 	connection_request.connect(_on_connection_request)
 	disconnection_request.connect(_on_disconnection_request)
 	delete_nodes_request.connect(_on_delete_request)
@@ -177,15 +177,11 @@ func _setup_focus_picker() -> void:
 	_focus_search.accessibility_name = "Search Calls and relays"
 	_focus_search.clear_button_enabled = true
 	_focus_search.text_changed.connect(_fill_focus_results)
-	_focus_search.text_submitted.connect(func(_query: String) -> void:
-		if _focus_results.item_count > 0:
-			_choose_focus_result(0))
+	_focus_search.text_submitted.connect(_on_focus_search_submitted)
 	fields.add_child(_focus_search)
 	_focus_results.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_focus_results.accessibility_name = "Calls and relays"
-	_focus_results.item_clicked.connect(func(index: int, _at: Vector2, mouse_button: int) -> void:
-		if mouse_button == MOUSE_BUTTON_LEFT:
-			_choose_focus_result(index))
+	_focus_results.item_clicked.connect(_on_focus_result_clicked)
 	_focus_results.item_activated.connect(_choose_focus_result)
 	fields.add_child(_focus_results)
 	_focus_mode.accessibility_name = "Connection focus mode"
@@ -193,17 +189,30 @@ func _setup_focus_picker() -> void:
 	_focus_mode.add_item("Isolate")
 	_focus_mode.get_popup().set_item_tooltip(0, "Dim unrelated cards and wires")
 	_focus_mode.get_popup().set_item_tooltip(1, "Hide unrelated cards and wires")
-	_focus_mode.item_selected.connect(func(index: int) -> void:
-		_hide_unrelated = index == 1
-		if not _focused_connection.is_empty():
-			_refresh_connection_focus()
-			request_fit())
+	_focus_mode.item_selected.connect(_on_focus_mode_selected)
 	fields.add_child(_focus_mode)
+
+func _on_end_node_move() -> void:
+	layout_changed.emit()
+
+func _on_focus_search_submitted(_query: String) -> void:
+	if _focus_results.item_count > 0:
+		_choose_focus_result(0)
+
+func _on_focus_result_clicked(index: int, _at: Vector2, mouse_button: int) -> void:
+	if mouse_button == MOUSE_BUTTON_LEFT:
+		_choose_focus_result(index)
+
+func _on_focus_mode_selected(index: int) -> void:
+	_hide_unrelated = index == 1
+	if not _focused_connection.is_empty():
+		_refresh_connection_focus()
+		request_fit()
 
 func _open_focus_picker() -> void:
 	_focus_search.clear()
 	_fill_focus_results("")
-	var popup_size := Vector2i(Vector2(360, 290) * get_theme_default_base_scale())
+	var popup_size := Vector2i(Vector2(360, 290) * _editor_scale())
 	var anchor := Vector2i(_focus_button.get_screen_transform().origin)
 	_focus_popup.popup(Rect2i(anchor - Vector2i(0, popup_size.y + 6), popup_size))
 	_focus_search.grab_focus()
@@ -228,7 +237,8 @@ func _choose_focus_result(index: int) -> void:
 	if _focus_results.is_item_disabled(index):
 		return
 	set_connection_focus(_focus_results.get_item_metadata(index))
-	_focus_popup.hide()
+	if _focus_popup.visible:
+		_focus_popup.hide()
 
 func set_connection_focus(id: String, fit := true) -> void:
 	if _focused_connection == id or (not id.is_empty() and not _connection_ids.has(id)):
@@ -279,7 +289,7 @@ func _refresh_connection_focus() -> void:
 	_focus_button.disabled = _connection_ids.is_empty()
 	_focus_button.text = "Focus: " + _focused_connection if has_focus else "Focus"
 	_focus_button.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	_focus_button.custom_minimum_size.x = 174 * get_theme_default_base_scale() if has_focus else 80
+	_focus_button.custom_minimum_size.x = 174 * _editor_scale() if has_focus else 80
 	_focus_button.tooltip_text = _focused_connection if has_focus else "Find a Call or relay and focus its direct connections"
 	_clear_focus_button.visible = has_focus
 	_fit_button.text = "Fit focus" if has_focus else "Fit all"
@@ -361,14 +371,9 @@ func show_data(data: GraphDraft) -> void:
 		f.resizable = _editable
 		_style_title(f.get_titlebar_hbox(), Style.TEXT, &"Folder", 17)
 		_scale_card_padding(f, &"GraphFrame")
-		f.resize_request.connect(func(new_size: Vector2) -> void:
-			f.size = new_size
-			_resizing_frame = Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
-			if not _resizing_frame:
-				layout_changed.emit())
+		f.resize_request.connect(_on_graph_frame_resize.bind(weakref(f)))
 		add_child(f)
 		_frames[g.name] = f
-
 	for rd in rules:
 		var n := _make_rule_node(rd, data)
 		add_child(n)
@@ -379,6 +384,15 @@ func show_data(data: GraphDraft) -> void:
 	_make_event_nodes(_event_ids(data.external_calls, rules), rules, data.call_positions)
 	_refresh_connection_focus()
 	_cache_rule_signatures(rules, data)
+
+func _on_graph_frame_resize(new_size: Vector2, frame_ref: WeakRef) -> void:
+	var frame := frame_ref.get_ref() as GraphFrame
+	if not is_instance_valid(frame):
+		return
+	frame.size = new_size
+	_resizing_frame = Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
+	if not _resizing_frame:
+		layout_changed.emit()
 
 ## Updates stable graph structures in place. A structural change falls back to a full build;
 ## otherwise only rule cards whose rendered content changed are recreated.
@@ -558,12 +572,12 @@ func _refresh_wire_focus() -> void:
 	if _editable and not has_focus and is_instance_valid(_inspected_node) and _inspected_node.selected and _inspected_node.has_meta("rule_id"):
 		focused = _inspected_node.name
 	if has_focus or focused != &"":
-		var canvas := get_theme_stylebox("panel") as StyleBoxFlat
+		var canvas := get_theme_stylebox("panel") as StyleBoxFlat if is_inside_tree() else null
 		var dim_color := canvas.bg_color if canvas != null else Style.SURFACE
 		dim_color.a = 0.25 if has_focus else 0.55
-		if get_theme_color("activity") != dim_color:
+		if not is_inside_tree() or get_theme_color("activity") != dim_color:
 			add_theme_color_override("activity", dim_color)
-	elif has_theme_color_override("activity"):
+	elif is_inside_tree() and has_theme_color_override("activity"):
 		remove_theme_color_override("activity")
 	for wire in get_connection_list():
 		var activity := 0.0
@@ -572,6 +586,9 @@ func _refresh_wire_focus() -> void:
 		elif focused != &"" and wire["from_node"] != focused and wire["to_node"] != focused:
 			activity = 0.65
 		set_connection_activity(wire["from_node"], wire["from_port"], wire["to_node"], wire["to_port"], activity)
+
+func _editor_scale() -> float:
+	return get_theme_default_base_scale() if is_inside_tree() else 1.0
 
 ## Port layout of a rule card: relays fired by its steps, then the rule's own `emits`.
 static func output_relays(rd: RuleData, data: GraphDraft) -> Array:
@@ -818,15 +835,20 @@ void fragment() {
 	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	var refresh := func() -> void:
-		icon.visible = icon.has_theme_icon(icon_name, &"EditorIcons")
-		if icon.visible:
-			icon.texture = icon.get_theme_icon(icon_name, &"EditorIcons")
-			icon.self_modulate = Style.resolve_color(icon, color)
-			icon.custom_minimum_size = Vector2(16, 16) * minf(1.0, icon.get_theme_default_base_scale())
+	var icon_ref := weakref(icon)
+	var refresh := Callable(self, "_refresh_editor_icon").bind(icon_ref, icon_name, color)
 	icon.ready.connect(refresh)
-	icon.theme_changed.connect(refresh, CONNECT_DEFERRED)
 	return icon
+
+func _refresh_editor_icon(icon_ref: WeakRef, icon_name: StringName, color: Color) -> void:
+	var icon := icon_ref.get_ref() as TextureRect
+	if not is_instance_valid(icon) or not icon.is_inside_tree():
+		return
+	icon.visible = icon.has_theme_icon(icon_name, &"EditorIcons")
+	if icon.visible:
+		icon.texture = icon.get_theme_icon(icon_name, &"EditorIcons")
+		icon.self_modulate = Style.resolve_color(icon, color)
+		icon.custom_minimum_size = Vector2(16, 16) * minf(1.0, icon.get_theme_default_base_scale())
 
 func _style_title(titlebar: HBoxContainer, color: Color, icon_name: StringName, size_in_graph := 14) -> void:
 	for child in titlebar.get_children():
@@ -850,37 +872,44 @@ func _style_card(node: GraphNode, width: float, title_color: Color, icon_name: S
 func _scale_card_label(label: Label, size_in_graph: int) -> void:
 	if Engine.is_editor_hint():
 		# The graph uses authored coordinates and has its own zoom.
-		label.ready.connect(func() -> void:
-			if label.get_theme_default_base_scale() > 1.0:
-				label.add_theme_font_size_override("font_size", size_in_graph))
+		label.ready.connect(_scale_label_for_editor.bind(weakref(label), size_in_graph))
+
+func _scale_label_for_editor(label_ref: WeakRef, size_in_graph: int) -> void:
+	var label := label_ref.get_ref() as Label
+	if is_instance_valid(label) and label.is_inside_tree() \
+			and label.get_theme_default_base_scale() > 1.0:
+		label.add_theme_font_size_override("font_size", size_in_graph)
 
 func _scale_card_padding(card: GraphElement, type: StringName) -> void:
 	if not Engine.is_editor_hint():
 		return
-	var refresh := func() -> void:
-		if not is_instance_valid(card):
-			return
-		var editor_scale := get_theme_default_base_scale()
-		if editor_scale <= 1.0:
-			return
-		var items: Array[StringName] = [&"panel", &"panel_selected", &"titlebar", &"titlebar_selected"]
-		if card is GraphNode:
-			items.append_array([&"slot", &"slot_selected"])
-			if card.get_theme_constant("separation") != 2:
-				card.add_theme_constant_override("separation", 2)
-		for item in items:
-			var source := get_theme_stylebox(item, type)
-			if card.has_meta(item) and card.get_meta(item) == source:
-				continue
-			var scaled := source.duplicate() as StyleBox
-			for side in [SIDE_LEFT, SIDE_TOP, SIDE_RIGHT, SIDE_BOTTOM]:
-				scaled.set_content_margin(side, source.get_margin(side) / editor_scale)
-			card.set_meta(item, source)
-			card.add_theme_stylebox_override(item, scaled)
-		if card is GraphNode:
-			card.reset_size()
+	var refresh := _refresh_card_scale.bind(weakref(card), type)
 	card.ready.connect(refresh)
 	card.theme_changed.connect(refresh, CONNECT_DEFERRED)
+
+func _refresh_card_scale(card_ref: WeakRef, type: StringName) -> void:
+	var card := card_ref.get_ref() as GraphElement
+	if not is_instance_valid(card) or not card.is_inside_tree():
+		return
+	var editor_scale := get_theme_default_base_scale()
+	if editor_scale <= 1.0:
+		return
+	var items: Array[StringName] = [&"panel", &"panel_selected", &"titlebar", &"titlebar_selected"]
+	if card is GraphNode:
+		items.append_array([&"slot", &"slot_selected"])
+		if card.get_theme_constant("separation") != 2:
+			card.add_theme_constant_override("separation", 2)
+	for item in items:
+		var source := get_theme_stylebox(item, type)
+		if card.has_meta(item) and card.get_meta(item) == source:
+			continue
+		var scaled := source.duplicate() as StyleBox
+		for side in [SIDE_LEFT, SIDE_TOP, SIDE_RIGHT, SIDE_BOTTOM]:
+			scaled.set_content_margin(side, source.get_margin(side) / editor_scale)
+		card.set_meta(item, source)
+		card.add_theme_stylebox_override(item, scaled)
+	if card is GraphNode:
+		card.reset_size()
 
 func _make_rule_node(rd: RuleData, data: GraphDraft) -> GraphNode:
 	var n := GraphNode.new()
@@ -1052,15 +1081,22 @@ func _add_card_rows(node: GraphNode, rows: Array) -> void:
 		var right_color: Color = row[4] if row.size() > 4 else row[3]
 		node.set_slot(i, row[1], 0, left_color, row[2], 0, right_color)
 	if Engine.is_editor_hint():
-		node.theme_changed.connect(func() -> void:
-			for i in rows.size():
-				var row: Array = rows[i]
-				var left_color: Color = row[3]
-				var right_color: Color = row[4] if row.size() > 4 else row[3]
-				if row[1]:
-					node.set_slot_color_left(i, Style.resolve_color(node, left_color))
-				if row[2]:
-					node.set_slot_color_right(i, Style.resolve_color(node, right_color)))
+		var slots: Array[Dictionary] = []
+		for row: Array in rows:
+			slots.append({"left": bool(row[1]), "right": bool(row[2]),
+				"left_color": row[3], "right_color": row[4] if row.size() > 4 else row[3]})
+		node.theme_changed.connect(_refresh_card_slots.bind(weakref(node), slots), CONNECT_DEFERRED)
+
+func _refresh_card_slots(node_ref: WeakRef, slots: Array[Dictionary]) -> void:
+	var node := node_ref.get_ref() as GraphNode
+	if not is_instance_valid(node) or not node.is_inside_tree():
+		return
+	for index in slots.size():
+		var slot: Dictionary = slots[index]
+		if slot["left"]:
+			node.set_slot_color_left(index, Style.resolve_color(node, slot["left_color"]))
+		if slot["right"]:
+			node.set_slot_color_right(index, Style.resolve_color(node, slot["right_color"]))
 
 func _make_event_nodes(events: Array, rules: Array[RuleData], saved_positions: Dictionary) -> void:
 	var positions := _event_positions(events, rules, saved_positions)

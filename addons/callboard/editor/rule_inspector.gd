@@ -31,7 +31,7 @@ func _init() -> void:
 	horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_box.add_theme_constant_override("separation", 8)
-	_box.minimum_size_changed.connect(func() -> void: content_size_changed.emit())
+	_box.minimum_size_changed.connect(_on_content_minimum_size_changed)
 	add_child(_box)
 
 func _ready() -> void:
@@ -40,6 +40,9 @@ func _ready() -> void:
 
 func content_height() -> float:
 	return _box.get_combined_minimum_size().y
+
+func _on_content_minimum_size_changed() -> void:
+	content_size_changed.emit()
 
 func clear() -> void:
 	_clear()
@@ -307,7 +310,7 @@ func _title(text: String) -> void:
 
 func _name_label(text: String) -> Label:
 	var l := Style.label(text, Style.MUTED, 13)
-	l.custom_minimum_size.x = 92 * get_theme_default_base_scale()
+	l.custom_minimum_size.x = 92 * (get_theme_default_base_scale() if is_inside_tree() else 1.0)
 	l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	l.tooltip_text = text
 	return l

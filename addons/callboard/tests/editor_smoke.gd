@@ -11,6 +11,8 @@ const CrossStageValidatorScript := preload("res://addons/callboard/model/cross_s
 
 func _initialize() -> void:
 	await process_frame
+	var initial_root_children := root.get_children()
+	var initial_orphan_ids: Array[int] = Node.get_orphan_node_ids()
 	var ok := _test_scene_assigned_props()
 	ok = _test_add_var_editor() and ok
 	ok = _test_shared_key_authoring() and ok
@@ -34,10 +36,24 @@ func _initialize() -> void:
 	ok = _test_emit_relay_authoring() and ok
 	ok = _test_project_settings() and ok
 	print("ADDON EDITOR: ", "PASS" if ok else "FAIL")
-	# Let controls removed with queue_free() during the synchronous smoke tests
-	# finish teardown before the SceneTree reports leaked CanvasItems.
-	await process_frame
-	await process_frame
+	# Dispose any fixture roots still owned by this test, then let deferred
+	# GraphEdit and popup cleanup finish before the engine reports leaked RIDs.
+	for child in root.get_children():
+		if not initial_root_children.has(child) and is_instance_valid(child):
+			child.free()
+	for _frame in 4:
+		await process_frame
+	# Some fixtures intentionally construct controls and scene roots without adding
+	# them to SceneTree.root. Free those orphan roots too, or headless editor mode
+	# leaves their whole UI subtrees alive and reports their Canvas RIDs on exit.
+	for instance_id in Node.get_orphan_node_ids():
+		if initial_orphan_ids.has(instance_id):
+			continue
+		var orphan := instance_from_id(instance_id) as Node
+		if is_instance_valid(orphan) and orphan.get_parent() == null:
+			orphan.free()
+	for _frame in 2:
+		await process_frame
 	quit(0 if ok else 1)
 
 func _test_objective_reachability() -> bool:
@@ -957,9 +973,11 @@ func _test_debug_panel() -> bool:
 	var first := Stage.new()
 	first.definition = StageDefinition.new()
 	root.add_child(first)
+	first.build()
 	var second := Stage.new()
 	second.definition = StageDefinition.new()
 	root.add_child(second)
+	second.build()
 	panel.bind_stage(first)
 	var board := panel.get_child(0) as Callboard
 	var ok := _check("debug panel binds the live board to the stage", board._live == first)
@@ -1033,7 +1051,11 @@ func _test_connection_focus() -> bool:
 		not graph._rule_nodes["other_listener"].visible
 		and graph._rule_nodes["producer"].self_modulate != Color.WHITE
 		and graph.get_connection_list().size() == 2) and ok
+	if graph._focus_popup.visible:
+		graph._focus_popup.hide()
 	board.free()
+	await process_frame
+	await process_frame
 	return ok
 
 func _test_on_change_authoring() -> bool:

@@ -24,7 +24,8 @@ const EDITOR_COLORS := {
 
 static func resolve_color(control: Control, fallback: Color) -> Color:
 	var role: StringName = EDITOR_COLORS.get(fallback, &"")
-	if Engine.is_editor_hint() and role != &"" and control.has_theme_color(role, &"Editor"):
+	if Engine.is_editor_hint() and control.is_inside_tree() and role != &"" \
+			and control.has_theme_color(role, &"Editor"):
 		return control.get_theme_color(role, &"Editor")
 	return fallback
 
@@ -50,7 +51,7 @@ static func button_icon(button: Button, icon_name: StringName, fallback: String,
 
 static func _refresh_button_icon(button_ref: WeakRef, icon_name: StringName, fallback: String, keep_text: bool) -> void:
 	var button := button_ref.get_ref() as Button
-	if button == null:
+	if button == null or not button.is_inside_tree():
 		return
 	button.icon = button.get_theme_icon(icon_name, &"EditorIcons") if button.has_theme_icon(icon_name, &"EditorIcons") else null
 	if not keep_text:
@@ -58,7 +59,7 @@ static func _refresh_button_icon(button_ref: WeakRef, icon_name: StringName, fal
 
 static func _refresh_tint(control: Control) -> void:
 	var color := resolve_color(control, control.get_meta(&"_board_tint"))
-	if control.get_theme_color(&"font_color") != color:
+	if not control.is_inside_tree() or control.get_theme_color(&"font_color") != color:
 		control.add_theme_color_override(&"font_color", color)
 
 static func fallback_font_size(control: Control, font_size: int) -> void:
@@ -113,6 +114,8 @@ static func _refresh_panel_from_ref(control_ref: WeakRef, opaque: bool, padding:
 		_refresh_panel(control, opaque, padding)
 
 static func _refresh_entry(control: PanelContainer) -> void:
+	if not control.is_inside_tree():
+		return
 	var fill := SURFACE
 	var toolbar := control.get_theme_stylebox(&"menu_panel", &"GraphEdit") as StyleBoxFlat
 	if toolbar != null:
@@ -128,6 +131,8 @@ static func _refresh_entry(control: PanelContainer) -> void:
 	control.add_theme_stylebox_override(&"panel", surface(fill, border, Vector2(9, 8) * scale, roundi(6 * scale)))
 
 static func _refresh_panel(control: PanelContainer, opaque: bool, padding: Vector2) -> void:
+	if not control.is_inside_tree():
+		return
 	# Use the same native surface family as Godot's floating graph toolbar in both
 	# the editor and the live game view.
 	var panel_style := control.get_theme_stylebox(&"menu_panel", &"GraphEdit")
