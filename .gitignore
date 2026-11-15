@@ -10,6 +10,7 @@
 # Private copies kept outside the editor cache
 /builds/
 /design/
+/prototype/
 /export_credentials.cfg
 /export_presets.local.cfg
 export_presets.cfg

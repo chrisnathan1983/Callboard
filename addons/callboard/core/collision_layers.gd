@@ -6,3 +6,4 @@ const WORLD := 1 << 0
 const PLAYER := 1 << 1
 const TRIGGER := 1 << 2
 const COMPANION := 1 << 3
+const PROP := 1 << 4
