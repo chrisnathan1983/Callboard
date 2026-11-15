@@ -5,6 +5,8 @@ const TMP_PATH := "res://.godot/addon_stage_tmp.tres"
 const TMP_TYPED_DEFAULTS_PATH := "res://.godot/addon_typed_defaults_tmp.tres"
 const TMP_RESTORATION_SCENE_PATH := "res://.godot/addon_restoration_picker_tmp.tscn"
 const ExportFilter := preload("res://addons/callboard/editor/export_plugin.gd")
+const RuleTemplateLibraryScript := preload("res://addons/callboard/model/rule_template_library.gd")
+const RuleTemplateDataScript := preload("res://addons/callboard/core/rule_template_data.gd")
 
 func _initialize() -> void:
 	await process_frame
@@ -13,6 +15,7 @@ func _initialize() -> void:
 	ok = _test_shared_key_authoring() and ok
 	ok = _test_stage_authoring_controls() and ok
 	ok = _test_restoration_picker_options() and ok
+	ok = _test_rule_templates() and ok
 	ok = _test_parallel_group_authoring() and ok
 	ok = _test_conditional_group_authoring() and ok
 	ok = _test_guard_expression_authoring() and ok
@@ -330,6 +333,117 @@ func _test_restoration_picker_options() -> bool:
 	animation_fields.free()
 	panel.free()
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(TMP_RESTORATION_SCENE_PATH))
+	return ok
+
+func _test_rule_templates() -> bool:
+	var data := GraphDraft.new()
+	data.external_calls = ["interact", "ambient_start", "check_objective"]
+	data.props = [{"name": "player", "class": "Node3D"}]
+	var key := VariableData.new()
+	key.key = &"gate_open"
+	key.default_value = false
+	data.variables.append(key)
+	var accepted_field := PayloadFieldData.new()
+	accepted_field.event_id = &"interact"
+	accepted_field.key = &"accepted"
+	accepted_field.type_name = "bool"
+	data.payload_fields.append(accepted_field)
+	var done_field := PayloadFieldData.new()
+	done_field.event_id = &"check_objective"
+	done_field.key = &"done"
+	done_field.type_name = "bool"
+	data.payload_fields.append(done_field)
+	var templates := RuleTemplateLibraryScript.all()
+	var interaction := RuleTemplateLibraryScript.instantiate(templates[0], {
+		&"call": "interact", &"field": "accepted", &"prop": "player",
+		&"accepted": "interaction_ok", &"rejected": "interaction_rejected"}, data)
+	var objective := RuleTemplateLibraryScript.find(&"objective_completion")
+	var first_objective := RuleTemplateLibraryScript.instantiate(objective, {
+		&"call": "check_objective", &"field": "done", &"completed": "objective_done"}, data)
+	var missing := RuleTemplateLibraryScript.instantiate(objective, {}, data)
+	var ok := _check("template library includes interaction, ambient, conditional, and objective patterns",
+		templates.size() == 4 and interaction.ok and interaction.rules.size() == 1
+		and templates[1].id == &"repeating_ambient" and templates[2].id == &"conditional_sequence")
+	ok = _check("template binding validates required values against Calls, keys, props, and payload schemas",
+		first_objective.ok and not missing.ok and missing.errors.size() >= 3) and ok
+	var objective_rules: Array = first_objective.rules
+	var internal_relay := String(objective_rules[0].steps[1].args[0]).trim_prefix('&"').trim_suffix('"')
+	var has_internal_link: bool = objective_rules[0].steps[1].args[0] == '&"%s"' % internal_relay \
+		and objective_rules[1].trigger == "relay:%s" % internal_relay
+	var first_variable: VariableData = first_objective.variables[0]
+	data.rules.append_array(objective_rules)
+	data.variables.append_array(first_objective.variables)
+	var second_objective := RuleTemplateLibraryScript.instantiate(objective, {
+		&"call": "check_objective", &"field": "done", &"completed": "objective_done"}, data)
+	var second_variable: VariableData = second_objective.variables[0]
+	ok = _check("template instances get fresh rule, relay, latch, and storage identities while internal links remain connected",
+		has_internal_link and second_objective.ok
+		and objective_rules[0].id != second_objective.rules[0].id
+		and objective_rules[0].state_key != second_objective.rules[0].state_key
+		and first_variable.key != second_variable.key
+		and first_variable.state_key != second_variable.state_key
+		and second_objective.rules[1].trigger != objective_rules[1].trigger) and ok
+	var shared_template := objective.duplicate(true) as RuleTemplateDataScript
+	shared_template.deliberately_shared_storage = [&"objective_done"]
+	var shared_first := RuleTemplateLibraryScript.instantiate(shared_template, {
+		&"call": "check_objective", &"field": "done", &"completed": "shared_complete"}, data)
+	var shared_second := RuleTemplateLibraryScript.instantiate(shared_template, {
+		&"call": "check_objective", &"field": "done", &"completed": "shared_complete"}, data)
+	ok = _check("template storage stays fresh unless the template explicitly marks it shared",
+		shared_first.ok and shared_second.ok
+		and shared_first.variables[0].state_key == shared_second.variables[0].state_key) and ok
+	var shared_latch_template := objective.duplicate(true) as RuleTemplateDataScript
+	shared_latch_template.deliberately_shared_latches = [&"objective_start"]
+	var shared_latch_first := RuleTemplateLibraryScript.instantiate(shared_latch_template, {
+		&"call": "check_objective", &"field": "done", &"completed": "shared_complete"}, data)
+	var shared_latch_second := RuleTemplateLibraryScript.instantiate(shared_latch_template, {
+		&"call": "check_objective", &"field": "done", &"completed": "shared_complete"}, data)
+	ok = _check("template latch identities are fresh unless explicitly shared",
+		shared_latch_first.ok and shared_latch_second.ok
+		and shared_latch_first.rules[0].state_key == shared_latch_second.rules[0].state_key
+		and shared_latch_first.rules[1].state_key != shared_latch_second.rules[1].state_key) and ok
+	var repeat_result := RuleTemplateLibraryScript.instantiate(templates[1], {
+		&"call": "ambient_start", &"interval": "2.5", &"tick": ""}, data)
+	var conditional_result := RuleTemplateLibraryScript.instantiate(templates[2], {
+		&"call": "interact", &"key": "gate_open", &"prop": "player"}, data)
+	ok = _check("ambient and conditional templates bind their optional relay and typed keys",
+		repeat_result.ok and conditional_result.ok
+		and repeat_result.rules[0].steps[0].args[1] == '&""'
+		and conditional_result.rules[0].steps[0].branch_conditions[0] == "gate_open == true") and ok
+	var ui_data := GraphDraft.new()
+	ui_data.external_calls = ["check_objective"]
+	var board := Callboard.new()
+	root.add_child(board)
+	board._data = ui_data
+	board._open_template_dialog()
+	var objective_index := -1
+	for index in board._template_picker.item_count:
+		if board._template_picker.get_item_metadata(index) == &"objective_completion":
+			objective_index = index
+	if objective_index >= 0:
+		board._template_picker.select(objective_index)
+		board._template_picker.item_selected.emit(objective_index)
+	board._template_controls[&"call"].text = "check_objective"
+	board._apply_selected_template()
+	var ui_missing_rejected := not board._template_error.text.is_empty() and ui_data.rules.is_empty()
+	board._template_controls[&"field"].text = "done"
+	board._template_controls[&"completed"].text = "objective_complete"
+	board._apply_selected_template()
+	ok = _check("template dialog rejects missing bindings and adds a fully bound multi-rule template",
+		ui_missing_rejected and ui_data.rules.size() == 2 and ui_data.variables.size() == 1
+		and ui_data.variables[0].key == &"objective_done") and ok
+	var outer := StepData.new()
+	outer.group_id = &"source_group"
+	var inner := StepData.new()
+	inner.group_id = &"source_group"
+	outer.parallel_branches = [[inner]]
+	var copied_outer := outer.duplicate_deep(Resource.DEEP_DUPLICATE_ALL) as StepData
+	var copied_group_ids := {}
+	board._freshen_duplicated_group_ids(copied_outer, copied_group_ids)
+	ok = _check("duplicating a grouped rule refreshes shared internal group identities consistently",
+		copied_outer.group_id != &"source_group"
+		and copied_outer.group_id == copied_outer.parallel_branches[0][0].group_id) and ok
+	board.free()
 	return ok
 
 func _test_parallel_group_authoring() -> bool:

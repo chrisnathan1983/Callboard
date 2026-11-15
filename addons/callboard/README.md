@@ -154,6 +154,12 @@ The built-in staging verbs include timed `light`, audio playback, rotation, `Ani
 
 To add a Blackboard numeric guard, enter a comparison such as `score >= 10` below Requires, Forbids, or Cancel If and press **Add**. Supported operators are `>`, `>=`, `<`, `<=`, `==`, and `!=`.
 
+## Rule templates
+
+Use **+ Template** to add one of the reusable graph patterns: **Interaction outcome**, **Repeating ambient behavior**, **Conditional sequence**, or **Objective completion**. The dialog asks for the Calls, props, Blackboard keys, relays, and payload fields the selected pattern needs. It validates required bindings, declared Calls and keys, prop types, numeric intervals, and known payload schemas before adding any graph data. For props, run **Analyze Scene** so the editor can offer and validate scene-assigned props.
+
+Each template instance receives new rule IDs and one-shot latch identities. Template-created Blackboard keys and internal relays also receive unique names; a template can explicitly preserve a shared storage or latch identity when that is intentional. The objective pattern demonstrates an internal relay between two generated rules, so each instance keeps its own connection. Duplicating a rule likewise refreshes nested group IDs while keeping shared IDs within the duplicate consistent.
+
 ## Live debugging
 
 Use `CallboardDebugPanel.create()` to add a live board to your HUD, then bind the active Stage. The **DEBUG** panel shows active rules, queued or restarting runs, pending waits, and recent event and step activity. Open **Blackboard** to inspect current values and writer labels, or **Calls & relays** to fire a declared Call. See [Embedding the live debugger](docs/api.md#embedding-the-live-debugger).

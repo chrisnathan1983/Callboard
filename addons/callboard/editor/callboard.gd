@@ -10,6 +10,9 @@ signal layout_saved(path: String)
 const Style := preload("res://addons/callboard/editor/board_style.gd")
 const Settings := preload("res://addons/callboard/core/callboard_settings.gd")
 const TriggerRoutingData = preload("res://addons/callboard/core/trigger_routing_data.gd")
+const RuleTemplateLibrary := preload("res://addons/callboard/model/rule_template_library.gd")
+const RuleTemplateData := preload("res://addons/callboard/core/rule_template_data.gd")
+const RuleTemplateParameter := preload("res://addons/callboard/core/rule_template_parameter.gd")
 enum CreateAction { EVENT, RULE, GROUP }
 enum ContextAction { EDIT = 10, DUPLICATE, DELETE }
 
@@ -46,6 +49,12 @@ var _create_call_button: Button
 var _call_dialog := ConfirmationDialog.new()
 var _call_name := LineEdit.new()
 var _call_error := Label.new()
+var _template_dialog := ConfirmationDialog.new()
+var _template_picker := OptionButton.new()
+var _template_description := Label.new()
+var _template_fields := VBoxContainer.new()
+var _template_error := Label.new()
+var _template_controls: Dictionary = {}
 var _blackboard_button: Button
 var _connections_button: Button
 var _debug_button: Button
@@ -136,10 +145,12 @@ func _init() -> void:
 	_create_call_button = _button("+ Call", _open_call_dialog)
 	create_tools.add_child(_create_call_button)
 	create_tools.add_child(_button("+ Rule", add_rule))
+	create_tools.add_child(_button("+ Template", _open_template_dialog))
 	create_tools.add_child(_button("+ Group", add_group))
 	_create_tools = _floating_toolbar(create_tools)
 
 	_setup_call_dialog()
+	_setup_template_dialog()
 	_setup_create_menu()
 
 	view.rule_selected.connect(_on_rule_selected)
@@ -711,6 +722,152 @@ func _confirm_call() -> void:
 	if _call_error.text.is_empty() and add_call_name(call_id):
 		_call_dialog.hide()
 
+func _setup_template_dialog() -> void:
+	_template_dialog.title = "Instantiate Rule Template"
+	_template_dialog.ok_button_text = "Add to Board"
+	_template_dialog.dialog_hide_on_ok = false
+	var content := VBoxContainer.new()
+	content.custom_minimum_size.x = 460
+	content.add_theme_constant_override("separation", 8)
+	content.add_child(Style.label("Template", Style.TEXT, 13))
+	_template_picker.item_selected.connect(func(_index: int) -> void: _refresh_template_form())
+	content.add_child(_template_picker)
+	_template_description.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	content.add_child(_template_description)
+	content.add_child(_template_fields)
+	_template_error.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	Style.tint(_template_error, Style.ERROR)
+	content.add_child(_template_error)
+	_template_dialog.add_child(content)
+	add_child(_template_dialog)
+	_template_dialog.confirmed.connect(_apply_selected_template)
+
+func _open_template_dialog() -> void:
+	if not _editable:
+		return
+	_template_picker.clear()
+	for template: RuleTemplateData in RuleTemplateLibrary.all():
+		_template_picker.add_item(template.title)
+		_template_picker.set_item_metadata(_template_picker.item_count - 1, template.id)
+	if _template_picker.item_count == 0:
+		return
+	_template_picker.select(0)
+	_refresh_template_form()
+	_template_dialog.popup_centered(Vector2i(520, 540))
+
+func _refresh_template_form() -> void:
+	for child in _template_fields.get_children():
+		_template_fields.remove_child(child)
+		child.queue_free()
+	_template_controls.clear()
+	_template_error.text = ""
+	if _template_picker.selected < 0:
+		return
+	var template_id := StringName(_template_picker.get_item_metadata(_template_picker.selected))
+	var template := RuleTemplateLibrary.find(template_id)
+	if template == null:
+		return
+	_template_description.text = template.description
+	for parameter: RuleTemplateParameter in template.parameters:
+		var row := HBoxContainer.new()
+		var label := Style.label(parameter.label + (" *" if parameter.required else ""), Style.TEXT, 12)
+		label.custom_minimum_size.x = 160
+		label.tooltip_text = parameter.description
+		row.add_child(label)
+		var edit := LineEdit.new()
+		edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		edit.placeholder_text = parameter.label
+		edit.text = parameter.default_value
+		edit.accessibility_name = parameter.label
+		edit.tooltip_text = parameter.description
+		var choices := _template_parameter_choices(parameter.kind)
+		if not choices.is_empty():
+			var picker := OptionButton.new()
+			picker.custom_minimum_size.x = 130
+			picker.add_item("Choose…")
+			for choice: String in choices:
+				picker.add_item(choice)
+			picker.item_selected.connect(func(index: int) -> void:
+				if index > 0 and index <= choices.size():
+					edit.text = choices[index - 1])
+			row.add_child(picker)
+		row.add_child(edit)
+		_template_fields.add_child(row)
+		_template_controls[parameter.name] = edit
+
+func _template_parameter_choices(kind: int) -> Array[String]:
+	var values: Array[String] = []
+	match kind:
+		RuleTemplateParameter.Kind.PROP:
+			for prop: Dictionary in _data.props:
+				values.append(String(prop.get("name", "")))
+		RuleTemplateParameter.Kind.KEY:
+			for variable: VariableData in _data.variables:
+				values.append(String(variable.key))
+		RuleTemplateParameter.Kind.CALL:
+			values.assign(_data.external_calls)
+		RuleTemplateParameter.Kind.RELAY:
+			values = _existing_relay_names()
+		RuleTemplateParameter.Kind.PAYLOAD_FIELD:
+			for field: PayloadFieldData in _data.payload_fields:
+				var name := String(field.key)
+				if not values.has(name):
+					values.append(name)
+	values = values.filter(func(value: String) -> bool: return not value.is_empty())
+	values.sort()
+	return values
+
+func _existing_relay_names() -> Array[String]:
+	var values: Array[String] = []
+	for rule: RuleData in _data.rules:
+		if not rule.emit.is_empty() and not values.has(String(rule.emit)):
+			values.append(String(rule.emit))
+		for step: StepData in _flatten_template_steps(rule.steps):
+			if step.verb not in [&"emit_relay", &"repeat_emit"] or step.args.size() <= (0 if step.verb == &"emit_relay" else 1):
+				continue
+			var index := 0 if step.verb == &"emit_relay" else 1
+			var parsed := ExprText.parse_literal(step.args[index])
+			if parsed.ok and parsed.value is StringName and not parsed.value.is_empty() \
+					and not values.has(String(parsed.value)):
+				values.append(String(parsed.value))
+	return values
+
+func _flatten_template_steps(steps: Array[StepData]) -> Array[StepData]:
+	var result: Array[StepData] = []
+	for step: StepData in steps:
+		result.append(step)
+		for branch: Array in step.parallel_branches:
+			result.append_array(_flatten_template_steps(branch))
+	return result
+
+func _apply_selected_template() -> void:
+	if not _editable or _template_picker.selected < 0:
+		return
+	var template_id := StringName(_template_picker.get_item_metadata(_template_picker.selected))
+	var bindings := {}
+	for name in _template_controls:
+		var edit: LineEdit = _template_controls[name]
+		bindings[name] = edit.text.strip_edges()
+	var result := RuleTemplateLibrary.instantiate(RuleTemplateLibrary.find(template_id), bindings, _data)
+	if not result.ok:
+		_template_error.text = "\n".join(result.errors)
+		return
+	_sync_layout()
+	for variable: VariableData in result.variables:
+		_data.variables.append(variable)
+	var first_id := ""
+	var origin := view.view_center() - Vector2(175, 85)
+	if not result.rules.is_empty():
+		first_id = String(result.rules[0].id)
+	for index in result.rules.size():
+		var rule: RuleData = result.rules[index]
+		rule.pos = (origin + Vector2(index * 360, index * 150)).round()
+		rule.has_pos = true
+		_data.rules.append(rule)
+	blackboard.show_data(_data, true, false)
+	_changed(first_id)
+	_template_dialog.hide()
+
 func add_call_name(call_id: String) -> bool:
 	call_id = call_id.strip_edges()
 	if not _editable or not RuleConnections.new_call_error(_data, call_id).is_empty():
@@ -856,11 +1013,24 @@ func duplicate_rule(id: String) -> void:
 	var rd: RuleData = src.duplicate(true)
 	rd.id = AuthoredData.unique_name(AuthoredData.rule_ids(_data), id + "_copy")
 	rd.state_key = AuthoredData.new_state_key()
+	var group_id_map := {}
+	for step: StepData in rd.steps:
+		_freshen_duplicated_group_ids(step, group_id_map)
 	rd.pos = src.pos + Vector2(30, 30)
 	rd.has_pos = true
 	_data.rules.append(rd)
 	_changed(rd.id)
 	_on_rule_selected(rd.id)
+
+func _freshen_duplicated_group_ids(step: StepData, group_id_map: Dictionary) -> void:
+	if not step.group_id.is_empty():
+		var previous := String(step.group_id)
+		if not group_id_map.has(previous):
+			group_id_map[previous] = AuthoredData.new_state_key()
+		step.group_id = StringName(group_id_map[previous])
+	for branch: Array in step.parallel_branches:
+		for child: StepData in branch:
+			_freshen_duplicated_group_ids(child, group_id_map)
 
 func _move_rule_order(id: String, direction: int) -> void:
 	if not _editable or direction == 0:

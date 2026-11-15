@@ -211,9 +211,9 @@ The first five items retain the high priority assigned in `TODO.md`.
   - [x] Add board controls for the lifecycle flag, typed writer declarations, and restoration bindings with key, target, marker, property, and animation pickers as applicable. Include standalone poses and the binding types from §3.
   - [x] Add type-preserving defaults for `Transform3D` and other supported types. The Blackboard panel parses serialized Variant values only when they retain the default original type; checks cover edits, undo snapshots, resource reload, and migration.
 
-- [ ] **Add parameterized rule templates.**
-  - [ ] Cover reusable interaction outcomes, repeating ambient behavior, conditional sequences, and objective completion. Define bindings for props, keys, Calls, relays, and payload fields.
-  - [ ] Give instantiated rules fresh latch/storage identities by default, except for deliberately shared keys. Validate missing parameters and preserve internal references on duplication.
+- [x] **Add parameterized rule templates.**
+  - [x] Cover reusable interaction outcomes, repeating ambient behavior, conditional sequences, and objective completion. Define bindings for props, keys, Calls, relays, and payload fields.
+  - [x] Give instantiated rules fresh rule IDs, latch identities, storage keys, and internal relay names by default; allow explicitly shared storage or latch identities. Validate missing and incompatible bindings, and preserve internal relay, variable, and nested group references when instantiating or duplicating.
 
 - [ ] **Validate across Stages.** See [StageStateStore](addons/callboard/core/stage_state_store.gd) and [RuleValidator](addons/callboard/core/rule_validator.gd).
   - [x] The store checks Shared type conflicts among loaded boards. Per-Stage validation checks declared producers, listeners, cycles, and overlapping rules.
