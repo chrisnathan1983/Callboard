@@ -671,7 +671,7 @@ func _test_on_change_authoring() -> bool:
 
 func _test_live_payload_form() -> bool:
 	var data := GraphDraft.new()
-	data.external_calls = PackedStringArray(["test_payload"])
+	data.external_calls.assign(["test_payload"])
 	data.payload_fields = [
 		PayloadFieldData.from_dictionary({"event_id": "test_payload", "key": "name", "type": "String"}),
 		PayloadFieldData.from_dictionary({"event_id": "test_payload", "key": "count", "type": "int"}),

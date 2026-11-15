@@ -3091,15 +3091,16 @@ func _test_queue() -> bool:
 	var ignored_rule := Rule.new(&"ignored_reentry", &"ignore_start")
 	ignored_rule.steps.append(Step.new(func(_context: Dictionary) -> void: pass).after(1.0))
 	ignore_engine.rules.append(ignored_rule)
-	var ignore_decision: Dictionary = {}
+	var ignore_decisions: Array[Dictionary] = []
 	ignore_engine.trace_event.connect(func(entry: Dictionary) -> void:
 		if entry.get("kind") == "reentry_decision":
-			ignore_decision = entry.duplicate(true))
+			ignore_decisions.append(entry.duplicate(true)))
 	ignore_engine.fire(&"ignore_start")
 	await process_frame
 	ignore_engine.fire(&"ignore_start")
-	var ignored_and_traced: bool = ignore_decision.get("decision") == "ignore" \
-		and ignore_decision.get("reentry_policy") == "Ignore"
+	var ignored_and_traced: bool = ignore_decisions.size() == 1 \
+		and ignore_decisions[0].get("decision") == "ignore" \
+		and ignore_decisions[0].get("reentry_policy") == "Ignore"
 	ignore_engine.cancel_all()
 	ok = _check("ignored re-entry is visible in the live trace", ignored_and_traced) and ok
 	return ok
