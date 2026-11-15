@@ -8,9 +8,8 @@
 *~
 
 # Private copies kept outside the editor cache
+/builds/
+/design/
 /export_credentials.cfg
 /export_presets.local.cfg
-HOUSE_DESIGN_4.md
-DESIGN_V4.md
-/builds/
 export_presets.cfg
