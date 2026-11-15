@@ -9,6 +9,7 @@ signal layout_saved(path: String)
 
 const Style := preload("res://addons/callboard/editor/board_style.gd")
 const Settings := preload("res://addons/callboard/core/callboard_settings.gd")
+const TriggerRoutingData = preload("res://addons/callboard/core/trigger_routing_data.gd")
 enum CreateAction { EVENT, RULE, GROUP }
 enum ContextAction { EDIT = 10, DUPLICATE, DELETE }
 
@@ -160,6 +161,8 @@ func _init() -> void:
 	inspector.numeric_changed.connect(_changed)
 	inspector.delete_requested.connect(delete_rule)
 	inspector.duplicate_requested.connect(duplicate_rule)
+	inspector.rule_move_requested.connect(_move_rule_order)
+	inspector.trigger_routing_edited.connect(_set_trigger_routing)
 	inspector.group_edited.connect(func(group_name: String) -> void:
 		_selected_group = group_name
 		_changed(""))
@@ -859,6 +862,52 @@ func duplicate_rule(id: String) -> void:
 	_changed(rd.id)
 	_on_rule_selected(rd.id)
 
+func _move_rule_order(id: String, direction: int) -> void:
+	if not _editable or direction == 0:
+		return
+	_sync_layout()
+	var current_index := -1
+	for index in _data.rules.size():
+		if _data.rules[index].id == id:
+			current_index = index
+			break
+	if current_index < 0:
+		return
+	var current := _data.rules[current_index] as RuleData
+	var peer_indices: Array[int] = []
+	for index in _data.rules.size():
+		if _data.rules[index].trigger == current.trigger:
+			peer_indices.append(index)
+	var peer_position := peer_indices.find(current_index)
+	var target_position := peer_position + (1 if direction > 0 else -1)
+	if peer_position < 0 or target_position < 0 or target_position >= peer_indices.size():
+		return
+	var target_index := peer_indices[target_position]
+	var adjacent := _data.rules[target_index] as RuleData
+	_data.rules[current_index] = adjacent
+	_data.rules[target_index] = current
+	_changed(id)
+	_on_rule_selected(id)
+
+func _set_trigger_routing(trigger: StringName, mode: int, fallback_rule_id: StringName) -> void:
+	if not _editable:
+		return
+	var route: TriggerRoutingData
+	for existing: TriggerRoutingData in _data.trigger_routing:
+		if existing.trigger == trigger:
+			route = existing
+			break
+	if route == null:
+		route = TriggerRoutingData.new()
+		route.trigger = trigger
+		_data.trigger_routing.append(route)
+	route.mode = mode
+	route.fallback_rule_id = fallback_rule_id
+	if mode == TriggerRoutingData.Mode.MULTI_MATCH:
+		_data.trigger_routing.erase(route)
+	_changed(_selected)
+	_on_rule_selected(_selected)
+
 func delete_rule(id: String) -> void:
 	_delete_rules([id])
 
@@ -870,6 +919,9 @@ func _delete_rules(ids: Array) -> void:
 	_data.rules = _data.rules.filter(func(rd: RuleData) -> bool: return not ids.has(rd.id))
 	if _data.rules.size() == previous_count:
 		return
+	for route: TriggerRoutingData in _data.trigger_routing:
+		if ids.has(route.fallback_rule_id):
+			route.fallback_rule_id = &""
 	_changed("")
 
 func add_group(at := Vector2.INF) -> void:

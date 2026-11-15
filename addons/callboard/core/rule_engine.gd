@@ -1,6 +1,8 @@
 @tool
 class_name RuleEngine extends RefCounted
 
+const TriggerRoutingData = preload("res://addons/callboard/core/trigger_routing_data.gd")
+
 signal rule_fired(rule_id: StringName, event: StringName)
 signal trace_event(entry: Dictionary)
 signal pending_changed(entries: Array)
@@ -27,6 +29,8 @@ var rules: Array[Rule] = []
 var fired: Dictionary                 # injected, latches one-shot rules
 var bb: Blackboard
 var payload_schema: Dictionary = {}
+## Only configured triggers appear here; absent triggers keep multi-match dispatch.
+var trigger_routing: Dictionary = {}
 ## Managed Stages inject a stable per-instance dictionary from StageStateStore.
 var random_group_states: Dictionary = {}
 var wait: Callable                    # func(seconds: float) -> Signal; tests swap this
@@ -115,23 +119,39 @@ func _fire(event: StringName, payload: Dictionary, parent_context: Dictionary) -
 	_event_received.emit(event, payload)
 	_emit_trace("event_fired", &"", event)
 	_event_context_stack.pop_back()
-	var matching_rule_count := 0
+	var candidates: Array[Rule] = []
 	for candidate: Rule in rules:
 		if candidate.trigger == event:
-			matching_rule_count += 1
+			candidates.append(candidate)
+	var matching_rule_count := candidates.size()
 	var rule_order := 0
-	for r in rules:
+	var routing: Dictionary = trigger_routing.get(event, {})
+	var first_match := int(routing.get("mode", TriggerRoutingData.Mode.MULTI_MATCH)) == TriggerRoutingData.Mode.FIRST_MATCH
+	var fallback_id := StringName(routing.get("fallback_rule_id", &"")) if first_match else &""
+	var fallback_rule: Rule
+	var matched := false
+	for r in candidates:
 		if gen != _gen:
 			return
-		if r.trigger != event:
-			continue
 		rule_order += 1
+		if first_match and r.id == fallback_id:
+			fallback_rule = r
+			continue
 		if not _evaluate_rule(r, payload, event, rule_order, matching_rule_count):
 			continue
 		if not _consume_dispatch_budget(context):
 			return
 		_dispatch(r, event, payload.duplicate(true), gen, depth, context,
 			rule_order, matching_rule_count)
+		if first_match:
+			matched = true
+			break
+	if first_match and not matched and fallback_rule != null and gen == _gen:
+		var fallback_order := candidates.find(fallback_rule) + 1
+		if _evaluate_rule(fallback_rule, payload, event, fallback_order, matching_rule_count):
+			if _consume_dispatch_budget(context):
+				_dispatch(fallback_rule, event, payload.duplicate(true), gen, depth, context,
+					fallback_order, matching_rule_count)
 
 func _dispatch(r: Rule, event: StringName, payload: Dictionary, gen: int, depth: int,
 		context: Dictionary, rule_order: int, matching_rule_count: int) -> void:

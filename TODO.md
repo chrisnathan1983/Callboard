@@ -202,9 +202,9 @@ The first five items retain the high priority assigned in `TODO.md`.
   - [x] Build a typed payload form from each Call's declared trigger schema for live testing. Permit individual fields to be omitted; preserve empty-payload testing for Calls without a declared schema.
   - [x] Run the unit and editor smoke suites with these additions and confirm the emitted trace metadata and payload-form interaction.
 
-- [ ] **Expose and edit same-trigger rule order.** See [RuleEngine](addons/callboard/core/rule_engine.gd) and [RuleInspector](addons/callboard/editor/rule_inspector.gd).
+- [x] **Expose and edit same-trigger rule order.** See [RuleEngine](addons/callboard/core/rule_engine.gd) and [RuleInspector](addons/callboard/editor/rule_inspector.gd).
   - [x] Rules are evaluated in authored array order. A synchronous write from an earlier rule can affect a later guard. The inspector can already reorder steps within a rule.
-  - [ ] Show rule order by trigger, allow undoable reordering, and persist it independently of board layout. Add opt-in first-match and fallback routing for mutually exclusive outcomes while preserving existing multi-match dispatch by default.
+  - [x] Show rule order by trigger, allow undoable reordering, and persist it independently of board layout. Add opt-in first-match and fallback routing for mutually exclusive outcomes while preserving existing multi-match dispatch by default.
 
 - [ ] **Edit restoration, external writers, and managed lifecycle on the board.** See [StageDefinition](addons/callboard/core/stage_definition.gd), [GraphDraft](addons/callboard/model/graph_draft.gd), [RuleGraphReader](addons/callboard/model/rule_graph_reader.gd), and [BlackboardPanel](addons/callboard/editor/blackboard_panel.gd).
   - [x] `managed_lifecycle` is reachable through the `StageDefinition` resource in Godot's Inspector. It already round-trips through the draft, as do restoration bindings and external writers. Scene-based `BlackboardWriter` declarations also feed validation.
@@ -237,5 +237,6 @@ The first five items retain the high priority assigned in `TODO.md`.
 - [ ] **Exercise the packaged addon in CI and diagnose teardown leaks.** See [CI workflow](.github/workflows/test.yml), [package script](.github/scripts/package_addon.py), [export filter](addons/callboard/editor/export_plugin.gd), and [editor smoke suite](addons/callboard/tests/editor_smoke.gd).
   - [x] CI targets Godot `4.7.2`, runs four suites before packaging, and checks runtime with authoring layers removed. Editor assertions cover the export filter, which removes tests from exports and strips authoring layers from release exports.
   - [ ] Build and install the actual ZIP in a blank addon-only fixture, enable the plugin, run a minimal Stage, and perform real debug and release exports. Check that expected assets are retained, developer tooling is available only with its suites, and the exported runtime starts.
-  - [ ] Exercise repeated editor/plugin setup and teardown, Stage unload, and pending-wait cancellation. Diagnose the smoke suite's rendering RID and ObjectDB leaks, distinguish fixture cleanup from addon ownership, and gate regressions with teardown log checks.
+  - [x] Diagnose and fix the editor smoke suite's rendering RID and ObjectDB leaks: attach temporary controls to the test SceneTree, explicitly free temporary widgets and invalid-step Node fixtures, and allow queued cleanup to finish before exit.
+  - [ ] Exercise repeated editor/plugin setup and teardown, Stage unload, and pending-wait cancellation, and gate regressions with teardown log checks.
   - [ ] Re-enable package and release jobs after most TODO implementation work is complete by setting the GitHub Actions repository variable `CALLBOARD_PUBLISH_PACKAGES` to `true`. Until then, CI runs tests without building packages or publishing releases.

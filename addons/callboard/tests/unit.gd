@@ -4,6 +4,8 @@ extends SceneTree
 const CrossStageValidator := preload("res://addons/callboard/model/cross_stage_event_validator.gd")
 const DeliveryTargetScript := preload("res://addons/callboard/core/delivery_target.gd")
 const CallboardLocalizationScript := preload("res://addons/callboard/core/callboard_localization.gd")
+const TriggerRoutingData = preload("res://addons/callboard/core/trigger_routing_data.gd")
+const CallboardHistoryScript = preload("res://addons/callboard/editor/callboard_history.gd")
 
 signal clock_tick
 signal two_argument_tick(value: int, label: String)
@@ -60,6 +62,126 @@ func _initialize() -> void:
 			return "observed 3" in item.get("detail", ""))
 		and latched_trace.get("order") == 2 and latched_trace.get("latch_set", false)
 		and latched_trace.get("reason") == "one-shot latch is already set") and ok
+	var routing_bb := Blackboard.new()
+	routing_bb.define(&"branch", &"local", 0)
+	var routing_engine := RuleEngine.new(routing_bb, {},
+		func(_seconds: float) -> Signal: return clock_tick)
+	var routing_runs: Array[StringName] = []
+	var route_a := Rule.new(&"route_a", &"route")
+	var route_b := Rule.new(&"route_b", &"route")
+	routing_engine.trace_event.connect(func(entry: Dictionary) -> void:
+		if entry.get("kind") == "rule_started":
+			routing_runs.append(StringName(entry.get("rule", ""))))
+	routing_engine.rules = [route_a, route_b]
+	routing_engine.fire(&"route")
+	await process_frame
+	await process_frame
+	var default_multi_match := routing_runs == [&"route_a", &"route_b"]
+	routing_runs.clear()
+	routing_engine.trigger_routing[&"route"] = {"mode": TriggerRoutingData.Mode.FIRST_MATCH}
+	routing_engine.fire(&"route")
+	await process_frame
+	await process_frame
+	var first_match_only := routing_runs == [&"route_a"]
+	routing_runs.clear()
+	route_a.requires = [&"branch == 1"]
+	route_b.requires = [&"branch == 0"]
+	routing_engine.fire(&"route")
+	await process_frame
+	await process_frame
+	var next_eligible_only := routing_runs == [&"route_b"]
+	routing_runs.clear()
+	route_b.requires.clear()
+	routing_engine.trigger_routing[&"route"]["fallback_rule_id"] = &"route_b"
+	routing_engine.fire(&"route")
+	await process_frame
+	await process_frame
+	var fallback_only := routing_runs == [&"route_b"]
+	ok = _check("routing defaults to multi-match and opt-in first-match evaluates fallback last",
+		default_multi_match and first_match_only and next_eligible_only and fallback_only) and ok
+	var route_data := TriggerRoutingData.new()
+	route_data.trigger = &"route"
+	route_data.mode = TriggerRoutingData.Mode.FIRST_MATCH
+	route_data.fallback_rule_id = &"route_b"
+	var order_definition := StageDefinition.new()
+	var legacy_route_definition := StageDefinition.new()
+	legacy_route_definition.trigger_routing = [{"trigger": "route",
+		"mode": TriggerRoutingData.Mode.FIRST_MATCH, "fallback_rule_id": "route_b"}]
+	legacy_route_definition._migrate()
+	var order_first := RuleData.new()
+	order_first.id = &"route_a"
+	order_first.trigger = &"route"
+	order_first.pos = Vector2(12, 34)
+	order_first.has_pos = true
+	var order_second := RuleData.new()
+	order_second.id = &"route_b"
+	order_second.trigger = &"route"
+	order_second.pos = Vector2(56, 78)
+	order_second.has_pos = true
+	order_definition.rules = [order_first, order_second]
+	order_definition.trigger_routing = [route_data]
+	var invalid_route_draft := GraphDraft.new()
+	invalid_route_draft.rules = [order_first.duplicate(true), order_second.duplicate(true)]
+	var invalid_route := route_data.duplicate(true) as TriggerRoutingData
+	invalid_route.fallback_rule_id = &"missing_rule"
+	invalid_route_draft.trigger_routing = [invalid_route]
+	RuleGraphReader.validate_resources(invalid_route_draft)
+	var invalid_fallback_rejected := invalid_route_draft.errors.any(func(message: String) -> bool:
+		return "fallback must be a rule listening to that trigger" in message)
+	var routed_stage := Stage.new()
+	routed_stage.definition = order_definition
+	routed_stage.build()
+	var compiled_routing: int = int(routed_stage.engine.trigger_routing.get(&"route", {}).get("mode", -1))
+	routed_stage.engine.cancel_all()
+	routed_stage.free()
+	var order_draft := GraphDraft.new()
+	order_draft.definition = order_definition
+	order_draft.rules = [order_second.duplicate(true), order_first.duplicate(true)]
+	order_draft.trigger_routing = [route_data.duplicate(true)]
+	var before_layout := order_draft.rules.map(func(rule: RuleData) -> Vector2: return rule.pos)
+	var order_snapshot := order_draft.snapshot()
+	var restored_draft := GraphDraft.new()
+	restored_draft.definition = order_definition
+	restored_draft.restore(order_snapshot)
+	var saved_order_definition := RuleGraphReader.make_definition(restored_draft)
+	var order_history := CallboardHistoryScript.new()
+	order_history.reset(order_snapshot)
+	var history_draft := GraphDraft.new()
+	history_draft.restore(order_snapshot)
+	var swapped_rules := history_draft.rules.duplicate()
+	swapped_rules.reverse()
+	history_draft.rules = swapped_rules
+	order_history.record(history_draft.snapshot())
+	var undo_state := order_history.undo(history_draft.snapshot())
+	var undo_draft := GraphDraft.new()
+	undo_draft.restore(undo_state)
+	var redo_state := order_history.redo(undo_draft.snapshot())
+	var redo_draft := GraphDraft.new()
+	redo_draft.restore(redo_state)
+	var route_save_path := "user://routing_order_test.tres"
+	var route_save_error := ResourceSaver.save(saved_order_definition, route_save_path)
+	var loaded_order_definition := ResourceLoader.load(route_save_path, "", ResourceLoader.CACHE_MODE_IGNORE) as StageDefinition
+	var route_round_trip: bool = route_save_error == OK and loaded_order_definition != null \
+		and loaded_order_definition.rules[0].id == &"route_b" \
+		and loaded_order_definition.trigger_routing[0].fallback_rule_id == &"route_b"
+	if FileAccess.file_exists(route_save_path):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(route_save_path))
+	ok = _check("same-trigger order and routing persist independently of graph positions and undo snapshots",
+		restored_draft.rules[0].id == &"route_b"
+		and restored_draft.trigger_routing.size() == 1
+		and restored_draft.trigger_routing[0].fallback_rule_id == &"route_b"
+		and saved_order_definition.rules[0].id == &"route_b"
+		and saved_order_definition.trigger_routing[0].mode == TriggerRoutingData.Mode.FIRST_MATCH
+		and legacy_route_definition.trigger_routing[0] is TriggerRoutingData
+		and legacy_route_definition.trigger_routing[0].fallback_rule_id == &"route_b"
+		and invalid_fallback_rejected
+		and compiled_routing == TriggerRoutingData.Mode.FIRST_MATCH
+		and saved_order_definition.rules.map(func(rule: RuleData) -> Vector2: return rule.pos) == before_layout
+		and undo_draft.rules[0].id == &"route_b" and redo_draft.rules[0].id == &"route_a"
+		and route_round_trip) and ok
+	routing_engine.cancel_all()
+	routing_engine = null
+	routing_bb = null
 	var attach_store := StageStateStore.new()
 	var attach_stage := Stage.new()
 	var attached_before_build := attach_store.attach(attach_stage, &"attach_before_build")

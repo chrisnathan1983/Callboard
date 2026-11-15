@@ -2,12 +2,15 @@
 class_name GraphDraft extends RefCounted
 ## A working copy of a StageDefinition, with editor analysis stored separately.
 
+const TriggerRoutingData = preload("res://addons/callboard/core/trigger_routing_data.gd")
+
 class StepAnalysis extends RefCounted:
 	var relay: String
 	var relay_argument: int
 
 var definition: StageDefinition
 var rules: Array[RuleData] = []
+var trigger_routing: Array[TriggerRoutingData] = []
 var variables: Array[VariableData] = []
 var groups: Array[GroupData] = []
 var external_calls: Array[String] = []
@@ -51,6 +54,7 @@ func _messages_for(rule: RuleData, messages: Array[String]) -> Array[String]:
 func snapshot() -> Dictionary:
 	return {
 		"rules": rules.map(func(rule: RuleData) -> Dictionary: return rule.to_dictionary()),
+		"trigger_routing": trigger_routing.map(func(route: TriggerRoutingData) -> Dictionary: return route.to_dictionary()),
 		"variables": variables.map(func(variable: VariableData) -> Dictionary: return variable.to_dictionary()),
 		"groups": groups.map(func(group: GroupData) -> Dictionary: return group.to_dictionary()),
 		"external_calls": external_calls.duplicate(),
@@ -64,6 +68,9 @@ func snapshot() -> Dictionary:
 
 func restore(snapshot_data: Dictionary) -> void:
 	rules.assign(snapshot_data["rules"].map(RuleData.from_dictionary))
+	trigger_routing.clear()
+	for route in snapshot_data.get("trigger_routing", []):
+		trigger_routing.append(route if route is TriggerRoutingData else TriggerRoutingData.from_dictionary(route))
 	variables.assign(snapshot_data["variables"].duplicate(true).map(VariableData.from_dictionary))
 	groups.assign(snapshot_data["groups"].map(GroupData.from_dictionary))
 	external_calls.assign(snapshot_data["external_calls"])

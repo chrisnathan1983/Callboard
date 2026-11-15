@@ -3,6 +3,7 @@ class_name RuleGraphReader extends RefCounted
 ## Loads and analyzes typed graph drafts for the editor and live board.
 
 const CrossStageValidator := preload("res://addons/callboard/model/cross_stage_event_validator.gd")
+const TriggerRoutingData = preload("res://addons/callboard/core/trigger_routing_data.gd")
 
 static func read(stage: Stage) -> GraphDraft:
 	var definition := stage.definition
@@ -11,6 +12,8 @@ static func read(stage: Stage) -> GraphDraft:
 	var data := GraphDraft.new()
 	data.definition = definition
 	data.managed_lifecycle = definition.managed_lifecycle
+	for route: TriggerRoutingData in definition.trigger_routing:
+		data.trigger_routing.append(route.duplicate(true))
 	for binding: StageRestorationBinding in definition.restoration_bindings:
 		data.restoration_bindings.append(binding.duplicate())
 	for rule: RuleData in definition.rules:
@@ -42,6 +45,8 @@ static func inspect_definition_resources(path: String) -> GraphDraft:
 	var data := GraphDraft.new()
 	data.definition = definition
 	data.managed_lifecycle = definition.managed_lifecycle
+	for route: TriggerRoutingData in definition.trigger_routing:
+		data.trigger_routing.append(route.duplicate(true))
 	for binding: StageRestorationBinding in definition.restoration_bindings:
 		data.restoration_bindings.append(binding.duplicate())
 	for rule: RuleData in definition.rules:
@@ -167,6 +172,20 @@ static func validate_resources(data: GraphDraft) -> void:
 					data.errors.append("rule '%s' step delay must be numeric" % rule.id)
 				elif delay.ok and float(delay.value) < 0.0:
 					data.errors.append("rule '%s' step delay must be zero or greater" % rule.id)
+	var rules_by_id := {}
+	for rule: RuleData in data.rules:
+		rules_by_id[rule.id] = rule
+	var routes_by_trigger := {}
+	for route: TriggerRoutingData in data.trigger_routing:
+		if route.trigger.is_empty() or route.mode not in TriggerRoutingData.Mode.values():
+			data.errors.append("trigger routing policy has an invalid trigger or mode")
+		if routes_by_trigger.has(route.trigger):
+			data.errors.append("trigger '%s' has more than one routing policy" % route.trigger)
+		routes_by_trigger[route.trigger] = true
+		if route.mode == TriggerRoutingData.Mode.FIRST_MATCH and not route.fallback_rule_id.is_empty():
+			var fallback: RuleData = rules_by_id.get(route.fallback_rule_id)
+			if fallback == null or fallback.trigger != route.trigger:
+				data.errors.append("trigger '%s' fallback must be a rule listening to that trigger" % route.trigger)
 	for event_id in emitted:
 		if not listening.has(event_id):
 			data.warnings.append("'%s' is emitted but no rule listens to it" % event_id)
@@ -377,6 +396,7 @@ static func make_definition(data: GraphDraft) -> StageDefinition:
 	for writer: BlackboardWriterData in data.external_writers:
 		draft.external_writers.append(writer.duplicate_data())
 	draft.payload_fields = data.payload_fields.duplicate_deep(Resource.DEEP_DUPLICATE_ALL)
+	draft.trigger_routing = data.trigger_routing.duplicate_deep(Resource.DEEP_DUPLICATE_ALL)
 	draft.call_positions = data.call_positions.duplicate(true)
 	# The analysis scene and resource saver each get an independent copy.
 	draft.variables = data.variables.duplicate_deep(Resource.DEEP_DUPLICATE_ALL)

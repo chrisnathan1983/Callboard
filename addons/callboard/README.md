@@ -75,6 +75,8 @@ The host's eligibility hook decides whether an option is offered. Its interactio
 | **While running** | Sets the rule's re-entry policy. **Ignore** drops another trigger during a run. **Restart** keeps the newest eligible payload and replaces the run at a cancellation check. **Queue** retains eligible payloads in arrival order and rechecks guards before each run. One-shot rules use **Ignore**. |
 | **Expect shared-trigger overlap** | Suppresses the validation warning when this rule and another rule listening to the same event may both run. |
 
+Rules listening to the same trigger are evaluated in the order shown under **Order for [trigger]** in Rule Settings. Use **Up** and **Down** to change that order; these edits support undo/redo and save with the rule data independently of graph positions. Each trigger defaults to **All matching rules**, which preserves multi-match dispatch. Choose **First eligible rule** when the outcomes are mutually exclusive; optionally choose a fallback rule, which is considered last and runs only when no other rule passes its guards.
+
 ### Edit and rename authored data
 
 Use **Calls & relays** to manage connections. Renaming updates authored references. Update event IDs in gameplay code and scene triggers separately. Blackboard renames preserve aliases for existing gameplay references.

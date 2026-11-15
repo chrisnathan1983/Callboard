@@ -10,12 +10,15 @@ signal numeric_changed(rule_id: String, spin: SpinBox)
 signal structure_changed(rule_id: String)   # inspector rebuilt itself; board should refresh the graph
 signal delete_requested(rule_id: String)
 signal duplicate_requested(rule_id: String)
+signal rule_move_requested(rule_id: String, direction: int)
+signal trigger_routing_edited(trigger: StringName, mode: int, fallback_rule_id: StringName)
 signal group_edited(group_name: String)
 signal group_delete_requested(group_name: String)
 signal content_size_changed
 
 const Style := preload("res://addons/callboard/editor/board_style.gd")
 const GuardExpression := preload("res://addons/callboard/core/guard_expression.gd")
+const TriggerRoutingData = preload("res://addons/callboard/core/trigger_routing_data.gd")
 
 var _data: GraphDraft
 var _rule: RuleData
@@ -172,6 +175,7 @@ func _build_rule() -> void:
 		r.allow_overlap = on
 		changed.emit(r.id))
 	_box.add_child(overlap)
+	_box.add_child(_trigger_order_panel(r))
 
 	_line("Emits relay", r.emit, func(t: String) -> void:
 		r.emit = t
@@ -236,6 +240,68 @@ func _add_diagnostics(messages: Array[String], heading: String, color: Color) ->
 		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		_box.add_child(label)
 
+func _trigger_order_panel(rule: RuleData) -> Control:
+	var panel := VBoxContainer.new()
+	_title("Order for “%s”" % rule.trigger)
+	var peers: Array[RuleData] = _data.rules.filter(func(item: RuleData) -> bool:
+		return item.trigger == rule.trigger)
+	for index in peers.size():
+		var peer_id := peers[index].id
+		var row := HBoxContainer.new()
+		var label := Label.new()
+		label.text = "%d. %s" % [index + 1, peers[index].id]
+		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(label)
+		var up := Button.new()
+		up.text = "Up"
+		up.tooltip_text = "Move this rule earlier for its trigger"
+		up.disabled = index == 0 or _read_only
+		up.pressed.connect(func() -> void: rule_move_requested.emit(peer_id, -1))
+		row.add_child(up)
+		var down := Button.new()
+		down.text = "Down"
+		down.tooltip_text = "Move this rule later for its trigger"
+		down.disabled = index == peers.size() - 1 or _read_only
+		down.pressed.connect(func() -> void: rule_move_requested.emit(peer_id, 1))
+		row.add_child(down)
+		panel.add_child(row)
+	var route := _routing_for(rule.trigger)
+	var mode := OptionButton.new()
+	mode.add_item("All matching rules", TriggerRoutingData.Mode.MULTI_MATCH)
+	mode.add_item("First eligible rule", TriggerRoutingData.Mode.FIRST_MATCH)
+	mode.select(mode.get_item_index(route.mode))
+	mode.disabled = _read_only
+	panel.add_child(mode)
+	var fallback := OptionButton.new()
+	fallback.tooltip_text = "Try this rule only if no other rule for the trigger passes its guards."
+	fallback.add_item("No fallback", 0)
+	for peer: RuleData in peers:
+		fallback.add_item("Fallback: %s" % peer.id, peers.find(peer) + 1)
+	fallback.select(0)
+	for i in range(1, fallback.item_count):
+		if peers[fallback.get_item_id(i) - 1].id == route.fallback_rule_id:
+			fallback.select(i)
+	fallback.disabled = _read_only or route.mode != TriggerRoutingData.Mode.FIRST_MATCH
+	panel.add_child(fallback)
+	mode.item_selected.connect(func(_index: int) -> void:
+		fallback.disabled = _read_only or mode.get_selected_id() != TriggerRoutingData.Mode.FIRST_MATCH
+		trigger_routing_edited.emit(rule.trigger, mode.get_selected_id(), _fallback_id(peers, fallback)))
+	fallback.item_selected.connect(func(_index: int) -> void:
+		trigger_routing_edited.emit(rule.trigger, mode.get_selected_id(), _fallback_id(peers, fallback)))
+	return panel
+
+func _routing_for(trigger: StringName) -> TriggerRoutingData:
+	for route: TriggerRoutingData in _data.trigger_routing:
+		if route.trigger == trigger:
+			return route
+	var route := TriggerRoutingData.new()
+	route.trigger = trigger
+	return route
+
+func _fallback_id(peers: Array[RuleData], option: OptionButton) -> StringName:
+	var item_id := option.get_selected_id()
+	return peers[item_id - 1].id if item_id > 0 and item_id <= peers.size() else &""
+
 func _title(text: String) -> void:
 	_box.add_child(Style.label(text, Style.EVENT, 13))
 
@@ -276,8 +342,12 @@ func _set_id(t: String) -> void:
 func _set_trigger(t: String) -> void:
 	if t == _rule.trigger:
 		return
+	for route: TriggerRoutingData in _data.trigger_routing:
+		if route.fallback_rule_id == _rule.id:
+			route.fallback_rule_id = &""
 	_rule.trigger = t
 	changed.emit(_rule.id)
+	_rebuild_later()
 
 ## Declared external events plus every relay some rule emits.
 func _trigger_options() -> Array:

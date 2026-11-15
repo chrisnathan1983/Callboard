@@ -2,9 +2,10 @@
 class_name StageDefinition extends Resource
 ## Authored data shared by the runtime and the Callboard.
 
-const CURRENT_FORMAT_VERSION := 6
+const CURRENT_FORMAT_VERSION := 7
 const ANALYSIS_SCENE_SOURCE_META := &"_analysis_scene_source"
 const RuntimeInputRefScript := preload("res://addons/callboard/core/runtime_input_ref.gd")
+const TriggerRoutingData = preload("res://addons/callboard/core/trigger_routing_data.gd")
 static var _string_token_pattern: RegEx
 
 @export var stage_script: GDScript
@@ -28,6 +29,8 @@ static var _string_token_pattern: RegEx
 @export var restoration_bindings: Array[StageRestorationBinding] = []
 @export var variables: Array = []
 @export var rules: Array = []
+## Optional dispatch policies keyed by trigger. Rule array order is authored routing order.
+@export var trigger_routing: Array = []
 @export var groups: Array = []
 @export var format_version := 0
 
@@ -55,6 +58,7 @@ func _migrate() -> void:
 			unique_instance_ids.append(instance_id)
 	cross_stage_instance_ids = unique_instance_ids
 	rules = _normalize_rules(rules)
+	trigger_routing = _normalize_trigger_routing(trigger_routing)
 	variables = _normalize_variables(variables)
 	groups = _normalize_groups(groups)
 	payload_fields = _normalize_payload_fields(payload_fields)
@@ -67,6 +71,15 @@ static func _normalize_rules(source: Array) -> Array:
 			normalized.append(entry)
 		elif entry is Dictionary:
 			normalized.append(RuleData.from_dictionary(entry))
+	return normalized
+
+static func _normalize_trigger_routing(source: Array) -> Array[TriggerRoutingData]:
+	var normalized: Array[TriggerRoutingData] = []
+	for entry in source:
+		if entry is TriggerRoutingData:
+			normalized.append(entry)
+		elif entry is Dictionary:
+			normalized.append(TriggerRoutingData.from_dictionary(entry))
 	return normalized
 
 static func _normalize_variables(source: Array) -> Array:
@@ -224,6 +237,11 @@ func apply_graph(stage: Stage) -> Array[String]:
 		built.append(rule)
 	stage.verbs.runtime_input_event = &""
 	stage.engine.rules.append_array(built)
+	stage.engine.trigger_routing.clear()
+	for route: TriggerRoutingData in trigger_routing:
+		if route != null and route.mode == TriggerRoutingData.Mode.FIRST_MATCH:
+			stage.engine.trigger_routing[route.trigger] = {
+				"mode": route.mode, "fallback_rule_id": route.fallback_rule_id}
 	return problems
 
 func _build_step(stage: Stage, event: StringName, factory: CoreVerbs, spec: StepData,

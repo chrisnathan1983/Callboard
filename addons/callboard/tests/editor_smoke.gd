@@ -24,6 +24,10 @@ func _initialize() -> void:
 	ok = _test_emit_relay_authoring() and ok
 	ok = _test_project_settings() and ok
 	print("ADDON EDITOR: ", "PASS" if ok else "FAIL")
+	# Let controls removed with queue_free() during the synchronous smoke tests
+	# finish teardown before the SceneTree reports leaked CanvasItems.
+	await process_frame
+	await process_frame
 	quit(0 if ok else 1)
 
 func _test_scene_assigned_props() -> bool:
@@ -93,6 +97,7 @@ func _test_add_var_editor() -> bool:
 	draft.variables[2].default_value = false
 	draft.catalog = VerbCatalog.from_factory(factory)
 	var inspector := RuleInspector.new()
+	root.add_child(inspector)
 	inspector._data = draft
 	var entry := VerbCatalog.find(draft.catalog, "add_var")
 	var step := StepData.new()
@@ -121,6 +126,11 @@ func _test_add_var_editor() -> bool:
 			toggle_picker != null and toggle_picker.item_count == 1
 			and toggle_picker.get_item_text(0) == "enabled"
 			and reset_picker != null and reset_picker.item_count == 3)
+	key_picker.free()
+	integer_delta.free()
+	float_delta.free()
+	toggle_picker.free()
+	reset_picker.free()
 	inspector.free()
 	return ok
 
@@ -135,6 +145,7 @@ func _test_shared_key_authoring() -> bool:
 	var draft := GraphDraft.new()
 	draft.variables = [preserved, linked]
 	var panel := BlackboardPanel.new()
+	root.add_child(panel)
 	panel.show_data(draft)
 	var find_card := func(display_key: String) -> VBoxContainer:
 		for control: Node in panel.find_children("*", "LineEdit", true, false):
@@ -204,6 +215,7 @@ func _test_parallel_group_authoring() -> bool:
 	rule.steps = [group]
 	draft.rules = [rule]
 	var inspector := RuleInspector.new()
+	root.add_child(inspector)
 	inspector.show_rule(rule, draft)
 	var add_branch: Button
 	for control: Node in inspector.find_children("*", "Button", true, false):
@@ -277,6 +289,7 @@ func _test_conditional_group_authoring() -> bool:
 	rule.steps = [group]
 	draft.rules = [rule]
 	var inspector := RuleInspector.new()
+	root.add_child(inspector)
 	inspector._data = draft
 	inspector._rule = rule
 	var panel := inspector._conditional_panel(group, 1)
@@ -316,6 +329,7 @@ func _test_random_group_authoring() -> bool:
 	rule.steps = [group]
 	draft.rules = [rule]
 	var inspector := RuleInspector.new()
+	root.add_child(inspector)
 	inspector._data = draft
 	inspector._rule = rule
 	var panel := inspector._random_panel(group, 1)
@@ -360,6 +374,7 @@ func _test_guard_expression_authoring() -> bool:
 	draft.rules = [rule]
 	RuleGraphReader.validate_resources(draft)
 	var inspector := RuleInspector.new()
+	root.add_child(inspector)
 	inspector._data = draft
 	inspector._rule = rule
 	var valid_key_pair := inspector._guard_expression_issue("completed_count >= required_count").is_empty()
@@ -410,9 +425,11 @@ func _test_staging_verb_catalog_and_validation() -> bool:
 	invalid_light.args[3] = &"wrong_type"
 	var wrong_key_type_is_reported := factory.validate_step(&"invalid_light", invalid_light, bb).any(
 		func(problem: String) -> bool: return "must be Boolean" in problem)
-	var bad_audio := factory.play_audio(Node.new())
+	var bad_audio_target := Node.new()
+	var bad_audio_argument := Node.new()
+	var bad_audio := factory.play_audio(bad_audio_target)
 	bad_audio.verb = &"play_audio"
-	bad_audio.args = [Node.new(), false]
+	bad_audio.args = [bad_audio_argument, false]
 	var bad_target_is_reported := factory.validate_step(&"invalid_audio", bad_audio, bb).any(
 		func(problem: String) -> bool: return "play_audio target must" in problem)
 	var validation_stage := Stage.new()
@@ -423,6 +440,8 @@ func _test_staging_verb_catalog_and_validation() -> bool:
 	var stage_reports_bad_audio := validation_stage.check().any(
 		func(problem: String) -> bool: return "play_audio target must" in problem)
 	validation_stage.free()
+	bad_audio_target.free()
+	bad_audio_argument.free()
 	target.free()
 	return _check("staging verbs appear in the picker and validate required targets and the optional Boolean light key",
 		listed and valid_light and empty_key_is_allowed and missing_key_is_reported
@@ -751,6 +770,7 @@ func _test_emit_relay_authoring() -> bool:
 	RuleGraphReader.validate_resources(data)
 	var metadata := data.step_metadata.get(emit_step) as GraphDraft.StepAnalysis
 	var inspector := RuleInspector.new()
+	root.add_child(inspector)
 	inspector._data = data
 	inspector._rule = producer
 	inspector.show_rule(producer, data)
