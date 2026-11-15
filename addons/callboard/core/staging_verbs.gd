@@ -242,6 +242,32 @@ func rotate_to(n: Node3D, target_rotation: Vector3, duration := 0.25,
 		return _animation_completion(payload, tween.finished) if wait_for_completion else null
 	return Step.new(f)
 
+## Instantly copy a Marker3D's world transform onto a Node3D. Optionally leave
+## an AnimationPlayer paused at a resolved pose after moving the target.
+func snap_to_marker(n: Node3D, marker: Marker3D,
+		animation_player: AnimationPlayer = null, animation_name: StringName = &"",
+		animation_time := 0.0) -> Step:
+	return Step.new(func(_payload: Dictionary) -> void:
+		if not is_instance_valid(n) or not is_instance_valid(marker):
+			push_warning("Callboard snap_to_marker requires a live Node3D target and Marker3D marker.")
+			return
+		if not is_finite(animation_time) or animation_time < 0.0:
+			push_warning("Callboard snap_to_marker animation time must be finite and nonnegative.")
+			return
+		if animation_player == null:
+			if not animation_name.is_empty():
+				push_warning("Callboard snap_to_marker animation name requires an AnimationPlayer.")
+				return
+		elif not is_instance_valid(animation_player) or animation_name.is_empty() \
+				or not animation_player.has_animation(animation_name):
+			push_warning("Callboard snap_to_marker animation must name a clip on its AnimationPlayer.")
+			return
+		n.global_transform = marker.global_transform
+		if animation_player != null:
+			animation_player.play(animation_name)
+			animation_player.seek(animation_time, true)
+			animation_player.pause())
+
 ## Play an AnimationPlayer clip. A positive timeout cancels a wait that runs too long.
 func play_animation(player: AnimationPlayer, animation: StringName,
 		wait_for_completion := true, timeout := 0.0) -> Step:
@@ -581,12 +607,26 @@ func validate_step(rule_id: StringName, step: Step, bb: Blackboard) -> Array[Str
 	if step.args.is_empty():
 		return problems
 	var target: Variant = step.args[0]
-	if step.verb in [&"light", &"show_node", &"pop", &"bounce", &"say", &"move_to"]:
+	if step.verb in [&"light", &"show_node", &"pop", &"bounce", &"say", &"move_to", &"snap_to_marker"]:
 		if not target is Node3D or not is_instance_valid(target):
 			problems.append("rule '%s' '%s' step requires a valid Node3D target" % [rule_id, step.verb])
 	if step.verb == &"move_to" and step.args.size() > 1:
 		if not step.args[1] is Node3D or not is_instance_valid(step.args[1]):
 			problems.append("rule '%s' move_to destination must be a valid Node3D" % rule_id)
+	if step.verb == &"snap_to_marker":
+		if step.args.size() < 2 or not step.args[1] is Marker3D or not is_instance_valid(step.args[1]):
+			problems.append("rule '%s' snap_to_marker marker must be a valid Marker3D" % rule_id)
+		var player: Variant = step.args[2] if step.args.size() > 2 else null
+		var animation: Variant = step.args[3] if step.args.size() > 3 else &""
+		var animation_time: Variant = step.args[4] if step.args.size() > 4 else 0.0
+		if player != null and (not player is AnimationPlayer or not is_instance_valid(player)):
+			problems.append("rule '%s' snap_to_marker pose target must be an AnimationPlayer" % rule_id)
+		if (player == null) != (animation is StringName and animation.is_empty()):
+			problems.append("rule '%s' snap_to_marker pose must specify both AnimationPlayer and animation name, or neither" % rule_id)
+		elif player != null and animation is StringName and not (player as AnimationPlayer).has_animation(animation):
+			problems.append("rule '%s' snap_to_marker animation was not found on its AnimationPlayer" % rule_id)
+		if not (animation_time is int or animation_time is float) or not is_finite(float(animation_time)) or float(animation_time) < 0.0:
+			problems.append("rule '%s' snap_to_marker animation time must be finite and nonnegative" % rule_id)
 	if step.verb == &"light":
 		if step.args.size() > 2 and float(step.args[2]) < 0.0:
 			problems.append("rule '%s' light duration must be zero or greater" % rule_id)

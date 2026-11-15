@@ -598,6 +598,7 @@ func _initialize() -> void:
 	ok = await _test_random_groups() and ok
 	ok = await _test_core_verb_branch_factories() and ok
 	ok = _test_signal_callbacks_accept_arguments() and ok
+	ok = _test_snap_to_marker() and ok
 	ok = await _test_playback_wait_exits() and ok
 	ok = await _test_cancel_if_interrupts_a_wait() and ok
 	ok = _test_shared_write_order() and ok
@@ -624,6 +625,55 @@ func _initialize() -> void:
 	ok = _test_delivery_target() and ok
 	print("UNIT: ", "PASS" if ok else "FAIL")
 	quit(0 if ok else 1)
+
+func _test_snap_to_marker() -> bool:
+	var stage := Stage.new()
+	root.add_child(stage)
+	var actor := Node3D.new()
+	actor.name = "Actor"
+	actor.position = Vector3(-3, 1, 2)
+	stage.add_child(actor)
+	var marker := Marker3D.new()
+	marker.name = "ResolvedPose"
+	marker.position = Vector3(4, 2, -1)
+	marker.rotation = Vector3(0.1, 0.8, 0.0)
+	stage.add_child(marker)
+	var animation_player := AnimationPlayer.new()
+	actor.add_child(animation_player)
+	var library := AnimationLibrary.new()
+	var resolve_animation := Animation.new()
+	resolve_animation.length = 1.0
+	library.add_animation(&"resolve", resolve_animation)
+	animation_player.add_animation_library(&"", library)
+	var factory := StagingVerbs.new(StepContext.new(Blackboard.new(), null, stage, Callable()))
+	var step := factory.snap_to_marker(actor, marker, animation_player, &"resolve", 0.4)
+	step.verb = &"snap_to_marker"
+	step.args = [actor, marker, animation_player, &"resolve", 0.4]
+	var validation := factory.validate_step(&"snap_actor", step, factory.context.bb)
+	step.fn.call({})
+	var snapped_pose: bool = actor.global_transform.is_equal_approx(marker.global_transform)
+	var animation_selected: bool = animation_player.assigned_animation == &"resolve"
+	var animation_paused: bool = not animation_player.is_playing()
+	var animation_seek: bool = is_equal_approx(animation_player.current_animation_position, 0.4)
+	var invalid := Step.new()
+	invalid.verb = &"snap_to_marker"
+	var wrong_marker := Node3D.new()
+	invalid.args = [actor, wrong_marker, animation_player, &"missing", -1.0]
+	var invalid_validation := factory.validate_step(&"bad_snap", invalid, factory.context.bb)
+	var reports_target := invalid_validation.any(func(problem: String) -> bool: return "Marker3D" in problem)
+	var reports_animation := invalid_validation.any(func(problem: String) -> bool: return "animation" in problem)
+	var reports_time := invalid_validation.any(func(problem: String) -> bool: return "time must be finite and nonnegative" in problem)
+	wrong_marker.free()
+	root.remove_child(stage)
+	stage.free()
+	var ok := _check("snap_to_marker validates its authored target and optional pose",
+		validation.is_empty())
+	ok = _check("snap_to_marker copies the Marker3D world transform", snapped_pose) and ok
+	ok = _check("snap_to_marker selects the resolved animation", animation_selected) and ok
+	ok = _check("snap_to_marker pauses the resolved animation", animation_paused) and ok
+	ok = _check("snap_to_marker seeks to the resolved animation time", animation_seek) and ok
+	return _check("snap_to_marker validation rejects invalid markers, animation clips, and pose times",
+		reports_target and reports_animation and reports_time) and ok
 
 func _test_signal_callbacks_accept_arguments() -> bool:
 	var engine := RuleEngine.new(Blackboard.new(), {}, Callable())

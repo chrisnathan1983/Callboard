@@ -358,6 +358,7 @@ The default factory is [`StagingVerbs`](../core/staging_verbs.gd), which inherit
 | Staging | `pop(n)`, `bounce(n)` | Play a scale animation. |
 | Staging | `say(n, text, seconds = 1.0)` | Show temporary text at a node. |
 | Staging | `move_to(n, dest, offset = Vector3.ZERO, duration = 0.7)` | Tween a node to a target with an offset. |
+| Staging | `snap_to_marker(n, marker, animation_player = null, animation_name = &"", animation_time = 0.0)` | Immediately copy a Marker3D world transform; optionally seek and pause an animation at a resolved pose. |
 | Staging | `play_audio(player, wait_for_completion = false, timeout = 0.0)` | Play an `AudioStreamPlayer`, `AudioStreamPlayer2D`, or `AudioStreamPlayer3D`. Waiting holds the rule for this playback instance. A positive timeout releases the wait and cancels the run. |
 | Staging | `rotate_to(n, target_rotation, duration = 0.25, wait_for_completion = true)` | Rotate a `Node3D` to Euler angles in radians. Set duration to zero for an immediate change or disable waiting to let the tween continue in the background. |
 | Staging | `play_animation(player, animation, wait_for_completion = true, timeout = 0.0)` | Play a named `AnimationPlayer` clip. Waiting checks the completed clip name and the Callboard playback token. A positive timeout releases the wait and cancels the run. |

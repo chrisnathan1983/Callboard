@@ -177,7 +177,8 @@ The first five items retain the high priority assigned in `TODO.md`.
 
 - [ ] **Expand staging verbs.** See [StagingVerbs](addons/callboard/core/staging_verbs.gd).
   - [x] Built-ins cover visibility, timed light on/off, audio playback, translation, rotation, animation playback, and animation posing, alongside existing speech and mesh/prop effects.
-  - [ ] Add `snap_to_marker` for live rules, reusing transform behavior from declarative restoration. Add configurable easing and path following for movement/rotation, and a typed generic property tween.
+  - [x] Add `snap_to_marker` for live rules, reusing transform behavior from declarative restoration. It copies the Marker3D's world transform and can optionally seek and pause an AnimationPlayer at a resolved pose; target, marker, clip, and time are validated.
+  - [ ] Add configurable easing and path following for movement/rotation, and a typed generic property tween.
   - [ ] Add light color, energy, and flicker; `restart_particles`; audio stop, pitch, and bus; shader parameter changes; and animation speed and blend.
   - [ ] Add spawn, despawn, and reparent with explicit ownership and transform preservation options. Validate targets and parameters and use §1 cancellation and wait semantics for verbs that can block.
 
