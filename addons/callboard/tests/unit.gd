@@ -601,6 +601,7 @@ func _initialize() -> void:
 	ok = _test_snap_to_marker() and ok
 	ok = await _test_staging_tweens() and ok
 	ok = await _test_staging_controls() and ok
+	ok = _test_scene_lifecycle_verbs() and ok
 	ok = await _test_playback_wait_exits() and ok
 	ok = await _test_cancel_if_interrupts_a_wait() and ok
 	ok = _test_shared_write_order() and ok
@@ -826,6 +827,75 @@ func _test_staging_controls() -> bool:
 		pitch_rejected and flicker_rejected) and ok
 	return _check("AnimationPlayer speed, custom playback speed, and blend settings apply",
 		animation_controls) and ok
+
+func _test_scene_lifecycle_verbs() -> bool:
+	var stage := Stage.new()
+	root.add_child(stage)
+	var parent := Node3D.new()
+	parent.name = "OriginalParent"
+	stage.add_child(parent)
+	var destination := Node3D.new()
+	destination.position = Vector3(12, 1, -4)
+	stage.add_child(destination)
+	var template := Node3D.new()
+	template.name = "SpawnedProp"
+	template.position = Vector3(1, 0, 0)
+	var packed_scene := PackedScene.new()
+	var packed := packed_scene.pack(template) == OK
+	template.free()
+	var factory := StagingVerbs.new(StepContext.new(Blackboard.new(), null, stage, Callable()))
+	var spawn := factory.spawn(packed_scene, parent, stage,
+		Transform3D(Basis.IDENTITY, Vector3(3, 2, 1)))
+	spawn.verb = &"spawn"
+	spawn.args = [packed_scene, parent, stage, Transform3D(Basis.IDENTITY, Vector3(3, 2, 1))]
+	var spawn_valid := factory.validate_step(&"spawn_prop", spawn, factory.context.bb).is_empty()
+	spawn.fn.call({})
+	var spawned := parent.get_node_or_null("SpawnedProp") as Node3D
+	var spawned_with_owner := spawned != null and spawned.owner == stage \
+		and spawned.position.is_equal_approx(Vector3(3, 2, 1))
+	var original_world := spawned.global_transform if spawned != null else Transform3D.IDENTITY
+	var reparent := factory.reparent(spawned, destination, stage, stage, true)
+	reparent.verb = &"reparent"
+	reparent.args = [spawned, destination, stage, stage, true]
+	var reparent_valid := factory.validate_step(&"move_prop", reparent, factory.context.bb).is_empty()
+	reparent.fn.call({})
+	var world_preserved := spawned.get_parent() == destination \
+		and spawned.owner == stage and spawned.global_transform.is_equal_approx(original_world)
+	var detached_transform := spawned.global_transform
+	var detach := factory.despawn(spawned, stage, false, true)
+	detach.verb = &"despawn"
+	detach.args = [spawned, stage, false, true]
+	var detach_valid := factory.validate_step(&"detach_prop", detach, factory.context.bb).is_empty()
+	detach.fn.call({})
+	var detached := spawned.get_parent() == null and spawned.owner == null \
+		and spawned.transform.is_equal_approx(detached_transform)
+	var second_spawn := factory.spawn(packed_scene, parent, stage)
+	second_spawn.fn.call({})
+	var queued_node := parent.get_node_or_null("SpawnedProp2") as Node3D
+	if queued_node == null:
+		for child in parent.get_children():
+			if child != spawned:
+				queued_node = child as Node3D
+	var destroy := factory.despawn(queued_node, stage)
+	destroy.fn.call({})
+	var queued_for_deletion := queued_node != null and queued_node.is_queued_for_deletion()
+	var mismatch := factory.reparent(spawned, destination, stage, stage, true)
+	mismatch.verb = &"reparent"
+	mismatch.args = [spawned, destination, stage, stage, true]
+	var mismatch_reported := factory.validate_step(&"wrong_owner", mismatch,
+		factory.context.bb).any(func(problem: String) -> bool: return "expected owner" in problem)
+	if is_instance_valid(spawned):
+		spawned.free()
+	root.remove_child(stage)
+	stage.free()
+	var ok := _check("spawn validates a PackedScene and assigns explicit ownership/local transform",
+		packed and spawn_valid and spawned_with_owner)
+	ok = _check("reparent preserves the global transform and assigns the requested owner",
+		reparent_valid and world_preserved) and ok
+	ok = _check("despawn can detach while preserving global transform and clearing invalid ownership",
+		detach_valid and detached) and ok
+	ok = _check("despawn can queue an owned node for deletion", queued_for_deletion) and ok
+	return _check("reparent validation rejects an unexpected current owner", mismatch_reported) and ok
 
 func _test_signal_callbacks_accept_arguments() -> bool:
 	var engine := RuleEngine.new(Blackboard.new(), {}, Callable())

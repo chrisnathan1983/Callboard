@@ -175,7 +175,7 @@ The first five items retain the high priority assigned in `TODO.md`.
   - [x] Add `lock_input` and `release_input` with run-scoped ownership, overlapping locks, and automatic release. A shared host adapter coordinates Stages that control the same player or rig.
   - [x] Add typed camera focus, framing, and shake requests. Release restores the previous live request or returns control to the host. Cover explicit release, completion, timeout, Restart, Cancel If, and Stage teardown.
 
-- [ ] **Expand staging verbs.** See [StagingVerbs](addons/callboard/core/staging_verbs.gd).
+- [x] **Expand staging verbs.** See [StagingVerbs](addons/callboard/core/staging_verbs.gd).
   - [x] Built-ins cover visibility, timed light on/off, audio playback, translation, rotation, animation playback, and animation posing, alongside existing speech and mesh/prop effects.
   - [x] Add `snap_to_marker` for live rules, reusing transform behavior from declarative restoration. It copies the Marker3D's world transform and can optionally seek and pause an AnimationPlayer at a resolved pose; target, marker, clip, and time are validated.
   - [x] Add configurable Tween transition/ease settings to movement and rotation, with finite duration and enum validation.
@@ -187,7 +187,7 @@ The first five items retain the high priority assigned in `TODO.md`.
   - [x] Add `stop_audio`, `set_audio_pitch`, and `set_audio_bus`, including release of playback waits when stopped.
   - [x] Add typed `ShaderMaterial` uniform changes with name/type validation.
   - [x] Add custom blend/speed to `play_animation` and a `set_animation_speed` control.
-  - [ ] Add spawn, despawn, and reparent with explicit ownership and transform preservation options. Validate targets and parameters and use §1 cancellation and wait semantics for verbs that can block.
+  - [x] Add spawn, despawn, and reparent with explicit ownership and transform preservation options. Validate targets and parameters; these verbs do not block and need no wait cancellation handling.
 
 - [ ] **Support localization.** See [`StagingVerbs.say()`](addons/callboard/core/staging_verbs.gd) and [TriggerArea](addons/callboard/core/trigger_area.gd).
   - [ ] Add explicit translation-key support for authored speech, prompts, and host-supplied messages, with substitutions and fallback behavior. Preserve authored literal strings.

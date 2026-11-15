@@ -283,6 +283,83 @@ func set_shader_parameter(material: ShaderMaterial, parameter: StringName, value
 			return
 		material.set_shader_parameter(parameter, value))
 
+## Instantiate a PackedScene under parent. A non-null owner marks the instance
+## as part of that ancestor's edited scene; an optional transform is local.
+func spawn(scene: PackedScene, parent: Node, owner: Node = null,
+		initial_transform: Variant = null) -> Step:
+	return Step.new(func(_payload: Dictionary) -> void:
+		if not is_instance_valid(scene) or not is_instance_valid(parent):
+			push_warning("Callboard spawn requires a live PackedScene and parent Node.")
+			return
+		if owner != null and (not is_instance_valid(owner) or not _is_valid_scene_owner(owner, parent)):
+			push_warning("Callboard spawn owner must be the parent or one of its ancestors.")
+			return
+		if initial_transform != null and not initial_transform is Transform2D and not initial_transform is Transform3D:
+			push_warning("Callboard spawn transform must be Transform2D, Transform3D, or null.")
+			return
+		var instance := scene.instantiate()
+		if instance == null:
+			push_warning("Callboard spawn could not instantiate its PackedScene.")
+			return
+		if initial_transform is Transform3D and not instance is Node3D \
+				or initial_transform is Transform2D and not instance is Node2D:
+			instance.free()
+			push_warning("Callboard spawn transform type does not match the PackedScene root.")
+			return
+		parent.add_child(instance)
+		if initial_transform is Transform3D:
+			(instance as Node3D).transform = initial_transform
+		elif initial_transform is Transform2D:
+			(instance as Node2D).transform = initial_transform
+		instance.owner = owner)
+
+## Remove an owned node. Pass expected_owner explicitly (null for an unowned
+## runtime node); detach it instead of freeing it when destroy is false.
+func despawn(n: Node, expected_owner: Node, destroy := true,
+		keep_global_transform := true) -> Step:
+	return Step.new(func(_payload: Dictionary) -> void:
+		if not is_instance_valid(n) or n.owner != expected_owner:
+			push_warning("Callboard despawn requires a live node with the expected owner.")
+			return
+		var parent := n.get_parent()
+		if parent == null:
+			push_warning("Callboard despawn requires a node attached to a parent.")
+			return
+		if destroy:
+			n.queue_free()
+			return
+		var transform_3d: Transform3D
+		var transform_2d: Transform2D
+		if keep_global_transform and n is Node3D:
+			transform_3d = (n as Node3D).global_transform
+		elif keep_global_transform and n is Node2D:
+			transform_2d = (n as Node2D).global_transform
+		parent.remove_child(n)
+		if keep_global_transform and n is Node3D:
+			(n as Node3D).transform = transform_3d
+		elif keep_global_transform and n is Node2D:
+			(n as Node2D).transform = transform_2d
+		_clear_invalid_scene_owners(n))
+
+## Reparent a node only when its current owner matches expected_owner. Set
+## new_owner explicitly (null clears scene ownership) and optionally preserve
+## its world transform for Node2D/Node3D nodes.
+func reparent(n: Node, new_parent: Node, expected_owner: Node, new_owner: Node,
+		keep_global_transform := true) -> Step:
+	return Step.new(func(_payload: Dictionary) -> void:
+		if not is_instance_valid(n) or not is_instance_valid(new_parent) or n.owner != expected_owner:
+			push_warning("Callboard reparent requires a live node, parent, and matching expected owner.")
+			return
+		if n == new_parent or n.is_ancestor_of(new_parent):
+			push_warning("Callboard reparent cannot create a node cycle.")
+			return
+		if new_owner != null and (not is_instance_valid(new_owner) or not _is_valid_scene_owner(new_owner, new_parent)):
+			push_warning("Callboard reparent new owner must be the parent or one of its ancestors.")
+			return
+		n.reparent(new_parent, keep_global_transform)
+		n.owner = new_owner
+		_clear_invalid_scene_owners(n))
+
 func _watch_audio_playback(player_id: int, ticket: PlaybackTicket,
 		completion: RuleEngine.AwaitedSignal, tree: SceneTree, finished: Signal,
 		timeout: float) -> void:
@@ -862,6 +939,16 @@ func _color_setter(mesh: MeshInstance3D, material: BaseMaterial3D, tween: Tween)
 func _is_audio_player(node: Node) -> bool:
 	return node is AudioStreamPlayer or node is AudioStreamPlayer2D or node is AudioStreamPlayer3D
 
+func _is_valid_scene_owner(owner: Node, parent: Node) -> bool:
+	return is_instance_valid(owner) and is_instance_valid(parent) \
+		and (owner == parent or owner.is_ancestor_of(parent))
+
+func _clear_invalid_scene_owners(node: Node) -> void:
+	if node.owner != null and (not is_instance_valid(node.owner) or not node.owner.is_ancestor_of(node)):
+		node.owner = null
+	for child in node.get_children():
+		_clear_invalid_scene_owners(child)
+
 func _is_particle_node(node: Variant) -> bool:
 	return node is CPUParticles2D or node is GPUParticles2D \
 		or node is CPUParticles3D or node is GPUParticles3D
@@ -993,6 +1080,51 @@ func validate_step(rule_id: StringName, step: Step, bb: Blackboard) -> Array[Str
 			var shader_problem := _shader_parameter_problem(target, step.args[1], step.args[2])
 			if not shader_problem.is_empty():
 				problems.append("rule '%s' set_shader_parameter: %s" % [rule_id, shader_problem])
+	if step.verb == &"spawn":
+		if not target is PackedScene or not is_instance_valid(target):
+			problems.append("rule '%s' spawn requires a live PackedScene" % rule_id)
+		if step.args.size() < 2 or not step.args[1] is Node or not is_instance_valid(step.args[1]):
+			problems.append("rule '%s' spawn requires a live parent Node" % rule_id)
+		else:
+			var owner: Variant = step.args[2] if step.args.size() > 2 else null
+			if owner != null and (not owner is Node or not is_instance_valid(owner)
+					or not _is_valid_scene_owner(owner, step.args[1])):
+				problems.append("rule '%s' spawn owner must be the parent or one of its ancestors" % rule_id)
+			if step.args.size() > 3 and step.args[3] != null \
+					and not step.args[3] is Transform2D and not step.args[3] is Transform3D:
+				problems.append("rule '%s' spawn transform must be Transform2D, Transform3D, or null" % rule_id)
+	if step.verb == &"despawn":
+		if not target is Node or not is_instance_valid(target):
+			problems.append("rule '%s' despawn target must be a live Node" % rule_id)
+		if step.args.size() < 2:
+			problems.append("rule '%s' despawn requires an expected owner (null for an unowned node)" % rule_id)
+		elif step.args[1] != null and (not step.args[1] is Node or not is_instance_valid(step.args[1])):
+			problems.append("rule '%s' despawn expected owner must be a live Node or null" % rule_id)
+		elif is_instance_valid(target) and target.owner != step.args[1]:
+			problems.append("rule '%s' despawn expected owner does not match the target" % rule_id)
+		if step.args.size() > 2 and not step.args[2] is bool:
+			problems.append("rule '%s' despawn destroy flag must be Boolean" % rule_id)
+		if step.args.size() > 3 and not step.args[3] is bool:
+			problems.append("rule '%s' despawn transform preservation flag must be Boolean" % rule_id)
+	if step.verb == &"reparent":
+		if not target is Node or not is_instance_valid(target):
+			problems.append("rule '%s' reparent target must be a live Node" % rule_id)
+		if step.args.size() < 4 or not step.args[1] is Node or not is_instance_valid(step.args[1]):
+			problems.append("rule '%s' reparent requires a live new parent and explicit old/new owners" % rule_id)
+		else:
+			var expected_owner: Variant = step.args[2]
+			var new_owner: Variant = step.args[3]
+			if expected_owner != null and (not expected_owner is Node or not is_instance_valid(expected_owner)):
+				problems.append("rule '%s' reparent expected owner must be a live Node or null" % rule_id)
+			elif is_instance_valid(target) and target.owner != expected_owner:
+				problems.append("rule '%s' reparent expected owner does not match the target" % rule_id)
+			if new_owner != null and (not new_owner is Node or not is_instance_valid(new_owner)
+					or not _is_valid_scene_owner(new_owner, step.args[1])):
+				problems.append("rule '%s' reparent new owner must be the parent or one of its ancestors" % rule_id)
+			if is_instance_valid(target) and (target == step.args[1] or target.is_ancestor_of(step.args[1])):
+				problems.append("rule '%s' reparent would create a node cycle" % rule_id)
+		if step.args.size() > 4 and not step.args[4] is bool:
+			problems.append("rule '%s' reparent transform preservation flag must be Boolean" % rule_id)
 	if step.verb == &"rotate_to":
 		if not target is Node3D or not is_instance_valid(target):
 			problems.append("rule '%s' rotate_to target must be a valid Node3D" % rule_id)

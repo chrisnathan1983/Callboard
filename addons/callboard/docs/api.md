@@ -360,6 +360,9 @@ The default factory is [`StagingVerbs`](../core/staging_verbs.gd), which inherit
 | Staging | `restart_particles(particles)` | Restart CPU or GPU particle emitters in 2D or 3D. |
 | Staging | `stop_audio(player)`, `set_audio_pitch(player, pitch_scale)`, `set_audio_bus(player, bus)` | Stop playback (releasing any wait for that playback), set positive pitch, or route to an existing AudioServer bus. |
 | Staging | `set_shader_parameter(material, parameter, value)` | Set a declared `ShaderMaterial` uniform after checking its name and value type. |
+| Staging | `spawn(scene, parent, owner = null, initial_transform = null)` | Instantiate a `PackedScene` under a parent. A non-null owner must be the parent or one of its ancestors; `initial_transform` is an optional local `Transform2D` or `Transform3D` matching the scene root. Null owner leaves the runtime instance unowned. |
+| Staging | `despawn(n, expected_owner, destroy = true, keep_global_transform = true)` | Require the node's current owner to match `expected_owner` (pass null for an unowned runtime node), then queue it for deletion or detach it. Detaching can preserve its world transform and clears scene owners that are no longer ancestors. |
+| Staging | `reparent(n, new_parent, expected_owner, new_owner, keep_global_transform = true)` | Require an expected current owner and an explicit new owner (null clears ownership), reject cycles, and optionally preserve Node2D/Node3D world transforms. |
 | Staging | `pop(n)`, `bounce(n)` | Play a scale animation. |
 | Staging | `say(n, text, seconds = 1.0)` | Show temporary text at a node. |
 | Staging | `move_to(n, dest, offset = Vector3.ZERO, duration = 0.7, transition = Tween.TRANS_LINEAR, ease = Tween.EASE_IN_OUT)` | Tween a node to a target with an offset. Duration zero snaps immediately; otherwise the rule waits for completion. |
