@@ -216,7 +216,7 @@ The repository-only scenario harness in `addons/callboard/tests/scenario_runner.
 
 ### Releases and PR builds
 
-Set the GitHub Actions repository variable `CALLBOARD_PUBLISH_PACKAGES` to `true` to enable downloadable PR builds and default-branch releases. Both wait for the four test suites and the package integration check to pass. Download a pull request build from **Package Callboard** in its **Checks** tab, or download a default-branch build from [GitHub Releases](https://github.com/chrisnathan1983/Callboard/releases).
+Downloadable PR builds and default-branch releases are enabled by default. Both wait for the four test suites and the package integration check to pass. Set the GitHub Actions repository variable `CALLBOARD_PUBLISH_PACKAGES` to `false` to pause publishing. Download a pull request build from **Package Callboard** in its **Checks** tab, or download a default-branch build from [GitHub Releases](https://github.com/chrisnathan1983/Callboard/releases).
 
 Packages and releases use `0.YYMM.DD.increment`, with the date taken from the workflow creation time in UTC and `increment` taken from the GitHub Actions workflow run number. For example, run 42 created on November 14, 2026 produces `callboard-0.2611.14.42.zip` and, on the default branch, the tag `v0.2611.14.42`. Pull request packages use the same numeric format. Rerunning a workflow keeps its run number and version; a new run gets a higher increment. The packaged `plugin.cfg` carries the same version as the ZIP.
 

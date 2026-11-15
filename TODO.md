@@ -244,4 +244,4 @@ The first five items retain the high priority assigned in `TODO.md`.
   - [x] Exercise three editor/plugin setup and teardown cycles, Stage unload, and pending-wait cancellation in the packaged fixture. The integration runner fails on teardown RID/ObjectDB/resource leaks and path errors.
   - [x] Make the publishing jobs depend on the package integration check so a failed install, export, or runtime check blocks publishing.
 
-- [ ] **Re-enable downloadable PR packages and releases.** Set the GitHub Actions repository variable `CALLBOARD_PUBLISH_PACKAGES` to `true`. The package integration job builds and tests its ZIP on all CI runs.
+- [x] **Re-enable downloadable PR packages and releases.** The workflow enables publishing by default. Set `CALLBOARD_PUBLISH_PACKAGES` to `false` to pause publishing. The package integration job builds and tests its ZIP on all CI runs.
